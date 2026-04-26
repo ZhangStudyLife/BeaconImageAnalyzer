@@ -49,6 +49,7 @@ private slots:
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
     void openAlgorithmLocation();
     void jumpToRecordFrame(int frame);
+    void updateHoverPixelInfo(int x, int y, int gray, bool valid);
 
 private:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -77,6 +78,7 @@ private:
     VideoWidget* m_videoWidget = nullptr;
     QLabel* m_videoInfoLabel = nullptr;
     QLabel* m_frameInfoLabel = nullptr;
+    QLabel* m_pixelInfoLabel = nullptr;
     QLabel* m_currentAnnotationsLabel = nullptr;
     QLabel* m_algorithmInfoLabel = nullptr;
     QTextEdit* m_resultText = nullptr;

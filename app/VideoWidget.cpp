@@ -1,6 +1,7 @@
 #include "VideoWidget.h"
 
 #include <QImage>
+#include <QEvent>
 #include <QLineF>
 #include <QMouseEvent>
 #include <QPainter>
@@ -25,6 +26,21 @@ void VideoWidget::setImage(const QImage& image)
     m_image = image;
     clear();
     update();
+}
+
+void VideoWidget::setPixelSourceImage(const QImage& image)
+{
+    m_pixelSourceImage = image.isNull()
+        ? QImage()
+        : image.convertToFormat(QImage::Format_Grayscale8);
+    if (m_hasHoverPoint)
+    {
+        updateHoverPixel(m_lastHoverWidgetPoint);
+    }
+    else
+    {
+        emit hoverPixelChanged(0, 0, 0, false);
+    }
 }
 
 void VideoWidget::setFrameGeometry(const QSize& originalSize, int displayScale)
@@ -53,6 +69,8 @@ QSize VideoWidget::sizeHint() const
 
 void VideoWidget::mousePressEvent(QMouseEvent* event)
 {
+    updateHoverPixel(event->pos());
+
     if (event->button() != Qt::LeftButton || m_correctionTool == QStringLiteral("select"))
     {
         QLabel::mousePressEvent(event);
@@ -86,6 +104,8 @@ void VideoWidget::mousePressEvent(QMouseEvent* event)
 
 void VideoWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    updateHoverPixel(event->pos());
+
     if (!m_drawing)
     {
         QLabel::mouseMoveEvent(event);
@@ -115,6 +135,8 @@ void VideoWidget::mouseMoveEvent(QMouseEvent* event)
 
 void VideoWidget::mouseReleaseEvent(QMouseEvent* event)
 {
+    updateHoverPixel(event->pos());
+
     if (event->button() != Qt::LeftButton || !m_drawing)
     {
         QLabel::mouseReleaseEvent(event);
@@ -143,6 +165,13 @@ void VideoWidget::mouseReleaseEvent(QMouseEvent* event)
     m_drawing = false;
     m_previewPoints.clear();
     update();
+}
+
+void VideoWidget::leaveEvent(QEvent* event)
+{
+    m_hasHoverPoint = false;
+    emit hoverPixelChanged(0, 0, 0, false);
+    QLabel::leaveEvent(event);
 }
 
 void VideoWidget::paintEvent(QPaintEvent* event)
@@ -229,6 +258,46 @@ bool VideoWidget::widgetToImagePoint(const QPoint& widgetPoint, QPointF* imagePo
                             (double)m_originalSize.height() - 1.0);
     *imagePoint = QPointF(x, y);
     return true;
+}
+
+bool VideoWidget::widgetToImagePixel(const QPoint& widgetPoint, QPoint* imagePixel) const
+{
+    QPointF imagePoint;
+    if (imagePixel == nullptr || !widgetToImagePoint(widgetPoint, &imagePoint))
+    {
+        return false;
+    }
+
+    const int x = qBound(0, (int)imagePoint.x(), m_originalSize.width() - 1);
+    const int y = qBound(0, (int)imagePoint.y(), m_originalSize.height() - 1);
+    *imagePixel = QPoint(x, y);
+    return true;
+}
+
+void VideoWidget::updateHoverPixel(const QPoint& widgetPoint)
+{
+    if (m_pixelSourceImage.isNull())
+    {
+        m_hasHoverPoint = false;
+        emit hoverPixelChanged(0, 0, 0, false);
+        return;
+    }
+
+    QPoint imagePixel;
+    if (!widgetToImagePixel(widgetPoint, &imagePixel) ||
+        imagePixel.x() >= m_pixelSourceImage.width() ||
+        imagePixel.y() >= m_pixelSourceImage.height())
+    {
+        m_hasHoverPoint = false;
+        emit hoverPixelChanged(0, 0, 0, false);
+        return;
+    }
+
+    m_hasHoverPoint = true;
+    m_lastHoverWidgetPoint = widgetPoint;
+    const uchar* row = m_pixelSourceImage.constScanLine(imagePixel.y());
+    const int gray = row[imagePixel.x()];
+    emit hoverPixelChanged(imagePixel.x(), imagePixel.y(), gray, true);
 }
 
 QVector<QPointF> VideoWidget::previewDisplayPoints() const

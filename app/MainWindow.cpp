@@ -420,6 +420,10 @@ void MainWindow::buildUi()
     m_frameInfoLabel = new QLabel(QStringLiteral("Frame: -"), rightPanel);
     m_frameInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_frameInfoLabel->setWordWrap(true);
+    m_pixelInfoLabel = new QLabel(QStringLiteral("Pixel: -"), rightPanel);
+    m_pixelInfoLabel->setObjectName(QStringLiteral("Pill"));
+    m_pixelInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_pixelInfoLabel->setWordWrap(true);
     m_currentAnnotationsLabel = new QLabel(QStringLiteral("当前帧标注: -"), rightPanel);
     m_currentAnnotationsLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_currentAnnotationsLabel->setWordWrap(true);
@@ -434,6 +438,7 @@ void MainWindow::buildUi()
     infoLayout->setContentsMargins(12, 8, 12, 12);
     infoLayout->setSpacing(8);
     infoLayout->addWidget(m_frameInfoLabel);
+    infoLayout->addWidget(m_pixelInfoLabel);
     infoLayout->addWidget(m_currentAnnotationsLabel);
 
     auto* resultGroup = new QGroupBox(QStringLiteral("检测结果"), rightPanel);
@@ -577,6 +582,8 @@ void MainWindow::buildUi()
             this, &MainWindow::jumpToRecordFrame);
     connect(m_videoWidget, &VideoWidget::correctionShapeFinished,
             this, &MainWindow::addCorrectionShape);
+    connect(m_videoWidget, &VideoWidget::hoverPixelChanged,
+            this, &MainWindow::updateHoverPixelInfo);
 }
 
 void MainWindow::buildMenus()
@@ -906,6 +913,7 @@ void MainWindow::showFrame(int frameIndex)
     }
     const QVector<CorrectionShape> corrections = m_annotations.correctionsForFrame(m_currentFrame);
     m_videoWidget->setFrameGeometry(QSize(BEACON_IMAGE_W, BEACON_IMAGE_H), 1);
+    m_videoWidget->setPixelSourceImage(gray);
     m_videoWidget->setImage(FrameRenderer::render(displayImage, result, corrections, 1, m_showOverlay));
 
     m_updatingControls = true;
@@ -948,6 +956,25 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
     m_resultText->setPlainText(text);
     m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
     updateCurrentAnnotationInfo();
+}
+
+void MainWindow::updateHoverPixelInfo(int x, int y, int gray, bool valid)
+{
+    if (m_pixelInfoLabel == nullptr)
+    {
+        return;
+    }
+
+    if (!valid)
+    {
+        m_pixelInfoLabel->setText(QStringLiteral("Pixel: -"));
+        statusBar()->clearMessage();
+        return;
+    }
+
+    const QString text = QStringLiteral("Pixel X=%1 Y=%2 Gray=%3").arg(x).arg(y).arg(gray);
+    m_pixelInfoLabel->setText(text);
+    statusBar()->showMessage(text);
 }
 
 void MainWindow::updateCurrentAnnotationInfo()
