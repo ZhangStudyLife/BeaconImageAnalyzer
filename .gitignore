@@ -3,6 +3,7 @@ build/
 cmake-build-*/
 out/
 temp/
+.superpowers/
 
 # CMake/Ninja generated files
 CMakeCache.txt

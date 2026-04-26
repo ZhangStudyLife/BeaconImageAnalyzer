@@ -13,9 +13,9 @@ VideoWidget::VideoWidget(QWidget* parent)
     : QLabel(parent)
 {
     setAlignment(Qt::AlignCenter);
-    setMinimumSize(360, 240);
+    setMinimumSize(560, 360);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    setStyleSheet(QStringLiteral("background: #111; color: #ddd;"));
+    setStyleSheet(QStringLiteral("background: #090a0b; color: #aeb6be; border: 1px solid #2a3035; border-radius: 8px;"));
     setText(QStringLiteral("打开 AVI 后显示画面"));
     setMouseTracking(true);
 }
@@ -147,18 +147,39 @@ void VideoWidget::mouseReleaseEvent(QMouseEvent* event)
 
 void VideoWidget::paintEvent(QPaintEvent* event)
 {
-    if (m_image.isNull())
-    {
-        QLabel::paintEvent(event);
-        return;
-    }
+    Q_UNUSED(event);
 
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(17, 17, 17));
+    painter.fillRect(rect(), QColor(9, 10, 11));
+
+    QPen gridPen(QColor(255, 255, 255, 24));
+    gridPen.setWidth(1);
+    painter.setPen(gridPen);
+    const int columns = 8;
+    const int rows = 6;
+    for (int i = 1; i < columns; ++i)
+    {
+        const int x = width() * i / columns;
+        painter.drawLine(x, 0, x, height());
+    }
+    for (int i = 1; i < rows; ++i)
+    {
+        const int y = height() * i / rows;
+        painter.drawLine(0, y, width(), y);
+    }
+
+    if (m_image.isNull())
+    {
+        painter.setPen(QColor(174, 182, 190));
+        painter.drawText(rect(), Qt::AlignCenter, text());
+        return;
+    }
 
     const QRectF displayRect = imageDisplayRect();
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     painter.drawImage(displayRect, m_image);
+    painter.setPen(QPen(QColor(246, 212, 74, 190), 1));
+    painter.drawRect(displayRect.adjusted(0.5, 0.5, -0.5, -0.5));
 
     if (m_previewPoints.isEmpty())
     {

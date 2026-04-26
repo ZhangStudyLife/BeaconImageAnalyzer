@@ -20,6 +20,7 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     : QWidget(parent)
 {
     m_contextLabel = new QLabel(QStringLiteral("Frame: -"), this);
+    m_contextLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem(QStringLiteral("漏检"), QStringLiteral("missed_detection"));
     m_typeCombo->addItem(QStringLiteral("误检"), QStringLiteral("false_positive"));
@@ -45,22 +46,25 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
 
     m_noteEdit = new QTextEdit(this);
     m_noteEdit->setPlaceholderText(QStringLiteral("备注"));
-    m_noteEdit->setFixedHeight(48);
+    m_noteEdit->setFixedHeight(64);
 
     auto* markCurrentButton = new QPushButton(QStringLiteral("标记当前帧"), this);
+    markCurrentButton->setProperty("role", QStringLiteral("primary"));
     auto* setStartButton = new QPushButton(QStringLiteral("片段开始=当前"), this);
     auto* setEndButton = new QPushButton(QStringLiteral("片段结束=当前"), this);
     auto* saveSegmentButton = new QPushButton(QStringLiteral("保存片段标注"), this);
     auto* deleteButton = new QPushButton(QStringLiteral("删除选中标注"), this);
 
     m_segmentLabel = new QLabel(QStringLiteral("片段: - 到 -"), this);
+    m_segmentLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_listWidget = new QListWidget(this);
-    m_listWidget->setMinimumHeight(140);
+    m_listWidget->setMinimumHeight(180);
     m_listWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     auto* form = new QFormLayout;
     form->setContentsMargins(0, 0, 0, 0);
-    form->setVerticalSpacing(4);
+    form->setVerticalSpacing(8);
+    form->setHorizontalSpacing(10);
     form->addRow(QStringLiteral("当前"), m_contextLabel);
     form->addRow(QStringLiteral("错误类型"), m_typeCombo);
     form->addRow(QStringLiteral("关联圆"), m_circleSpin);
@@ -69,13 +73,17 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     form->addRow(QStringLiteral("备注"), m_noteEdit);
 
     auto* row1 = new QHBoxLayout;
+    row1->setContentsMargins(0, 0, 0, 0);
     row1->addWidget(markCurrentButton);
 
     auto* row2 = new QHBoxLayout;
+    row2->setContentsMargins(0, 0, 0, 0);
+    row2->setSpacing(8);
     row2->addWidget(setStartButton);
     row2->addWidget(setEndButton);
 
     auto* layout = new QVBoxLayout(this);
+    layout->setSpacing(9);
     layout->addLayout(form);
     layout->addLayout(row1);
     layout->addWidget(m_segmentLabel);

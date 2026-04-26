@@ -39,8 +39,9 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTextEdit>
-#include <QToolBar>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -76,6 +77,231 @@ QJsonArray pointsToJson(const QVector<QPointF>& points)
     return array;
 }
 
+QString djiStyleSheet()
+{
+    return QStringLiteral(R"(
+QMainWindow,
+QWidget#AppRoot {
+    background: #090a0b;
+    color: #eef1f4;
+}
+
+QWidget {
+    color: #eef1f4;
+    font-family: "Microsoft YaHei UI", "Segoe UI", Arial;
+    font-size: 12px;
+}
+
+QMenuBar {
+    background: #101214;
+    color: #d8dde2;
+    border-bottom: 1px solid #252a2f;
+    padding: 3px 8px;
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected {
+    background: #24282d;
+}
+
+QMenu {
+    background: #171a1d;
+    color: #eef1f4;
+    border: 1px solid #343a40;
+}
+
+QMenu::item {
+    padding: 7px 24px;
+}
+
+QMenu::item:selected {
+    background: #2b3036;
+}
+
+QFrame#Rail {
+    background: #151719;
+    border: 1px solid #262b30;
+    border-radius: 8px;
+}
+
+QLabel#Brand {
+    background: #f2f4f5;
+    color: #08090a;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 12px;
+}
+
+QToolButton#RailButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 7px;
+}
+
+QToolButton#RailButton:hover,
+QToolButton#RailButton:checked {
+    background: #292e33;
+    border-color: #3b4249;
+}
+
+QSplitter::handle {
+    background: #090a0b;
+}
+
+QFrame#VideoCard,
+QFrame#ControlConsole,
+QGroupBox {
+    background: #171a1d;
+    border: 1px solid #2a3035;
+    border-radius: 8px;
+}
+
+QFrame#VideoCard {
+    background: #0e1012;
+}
+
+QLabel#FeedTitle,
+QLabel#ConsoleTitle {
+    color: #f4f6f7;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+QLabel#FeedMeta,
+QLabel#SoftLabel {
+    color: #a7afb7;
+}
+
+QLabel#Pill {
+    background: #24292e;
+    color: #f6d44a;
+    border: 1px solid #3a4148;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-weight: 700;
+}
+
+QGroupBox {
+    margin-top: 18px;
+    padding-top: 18px;
+    font-weight: 700;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 6px;
+    color: #cfd5db;
+}
+
+QPushButton {
+    background: #24292e;
+    border: 1px solid #3a4148;
+    border-radius: 6px;
+    color: #eef1f4;
+    min-height: 28px;
+    padding: 5px 12px;
+}
+
+QPushButton:hover {
+    background: #30363d;
+    border-color: #515b64;
+}
+
+QPushButton:pressed {
+    background: #1d2226;
+}
+
+QPushButton[role="primary"] {
+    background: #f6d44a;
+    border-color: #f6d44a;
+    color: #111315;
+    font-weight: 800;
+}
+
+QComboBox,
+QSpinBox,
+QDoubleSpinBox,
+QTextEdit,
+QListWidget {
+    background: #101214;
+    border: 1px solid #343b42;
+    border-radius: 6px;
+    color: #eef1f4;
+    selection-background-color: #f6d44a;
+    selection-color: #111315;
+}
+
+QComboBox,
+QSpinBox,
+QDoubleSpinBox {
+    min-height: 28px;
+    padding: 2px 8px;
+}
+
+QTextEdit,
+QListWidget {
+    padding: 6px;
+}
+
+QComboBox::drop-down {
+    border-left: 1px solid #343b42;
+    width: 22px;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #30363d;
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    background: #d5d9dd;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: #f6d44a;
+    border: 2px solid #111315;
+    width: 16px;
+    height: 16px;
+    margin: -7px 0;
+    border-radius: 8px;
+}
+
+QScrollArea,
+QWidget#RightPanel,
+QWidget#Workspace {
+    background: transparent;
+}
+
+QScrollBar:vertical {
+    background: #111315;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #343b42;
+    border-radius: 5px;
+    min-height: 28px;
+}
+
+QStatusBar {
+    background: #101214;
+    color: #aeb6be;
+    border-top: 1px solid #252a2f;
+}
+)");
+}
+
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -84,8 +310,8 @@ MainWindow::MainWindow(QWidget* parent)
     buildUi();
     buildMenus();
     setWindowTitle(QStringLiteral("BeaconImageAnalyzer"));
-    setMinimumSize(900, 560);
-    resize(1180, 680);
+    setMinimumSize(1120, 680);
+    resize(1320, 780);
 
     m_playTimer.setInterval(20);
     connect(&m_playTimer, &QTimer::timeout, this, &MainWindow::nextFrame);
@@ -96,54 +322,131 @@ MainWindow::MainWindow(QWidget* parent)
 void MainWindow::buildUi()
 {
     auto* central = new QWidget(this);
-    auto* root = new QVBoxLayout(central);
-    root->setContentsMargins(6, 6, 6, 6);
-    root->setSpacing(4);
+    central->setObjectName(QStringLiteral("AppRoot"));
+    auto* root = new QHBoxLayout(central);
+    root->setContentsMargins(10, 10, 10, 10);
+    root->setSpacing(12);
+
+    auto* rail = new QFrame(central);
+    rail->setObjectName(QStringLiteral("Rail"));
+    rail->setFixedWidth(64);
+    auto* railLayout = new QVBoxLayout(rail);
+    railLayout->setContentsMargins(10, 12, 10, 12);
+    railLayout->setSpacing(12);
+
+    auto* brand = new QLabel(QStringLiteral("DJI"), rail);
+    brand->setObjectName(QStringLiteral("Brand"));
+    brand->setAlignment(Qt::AlignCenter);
+    brand->setFixedSize(40, 28);
+    railLayout->addWidget(brand, 0, Qt::AlignHCenter);
+    railLayout->addSpacing(10);
+
+    auto makeRailButton = [this](QWidget* parent, QStyle::StandardPixmap icon, const QString& tooltip) {
+        auto* button = new QToolButton(parent);
+        button->setObjectName(QStringLiteral("RailButton"));
+        button->setIcon(style()->standardIcon(icon));
+        button->setIconSize(QSize(20, 20));
+        button->setFixedSize(40, 40);
+        button->setToolTip(tooltip);
+        button->setAutoRaise(false);
+        return button;
+    };
+
+    auto* openRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("打开 AVI"));
+    auto* saveRailButton = makeRailButton(rail, QStyle::SP_DialogSaveButton, QStringLiteral("保存标注"));
+    auto* loadRailButton = makeRailButton(rail, QStyle::SP_FileDialogContentsView, QStringLiteral("读取标注"));
+    auto* exportAviRailButton = makeRailButton(rail, QStyle::SP_DialogApplyButton, QStringLiteral("导出标注 AVI"));
+    auto* exportCsvRailButton = makeRailButton(rail, QStyle::SP_FileIcon, QStringLiteral("导出 CSV"));
+    auto* exitRailButton = makeRailButton(rail, QStyle::SP_DialogCloseButton, QStringLiteral("退出"));
+    railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(saveRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(loadRailButton, 0, Qt::AlignHCenter);
+    railLayout->addSpacing(10);
+    railLayout->addWidget(exportAviRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(exportCsvRailButton, 0, Qt::AlignHCenter);
+    railLayout->addStretch(1);
+    railLayout->addWidget(exitRailButton, 0, Qt::AlignHCenter);
+    root->addWidget(rail);
 
     auto* splitter = new QSplitter(Qt::Horizontal, central);
-    m_videoWidget = new VideoWidget(splitter);
+    splitter->setHandleWidth(2);
+    root->addWidget(splitter, 1);
 
-    auto* rightScroll = new QScrollArea(splitter);
+    auto* workspace = new QWidget;
+    workspace->setObjectName(QStringLiteral("Workspace"));
+    auto* workspaceLayout = new QVBoxLayout(workspace);
+    workspaceLayout->setContentsMargins(0, 0, 0, 0);
+    workspaceLayout->setSpacing(12);
+
+    auto* videoCard = new QFrame(workspace);
+    videoCard->setObjectName(QStringLiteral("VideoCard"));
+    auto* videoLayout = new QVBoxLayout(videoCard);
+    videoLayout->setContentsMargins(14, 12, 14, 14);
+    videoLayout->setSpacing(10);
+
+    auto* feedHeader = new QHBoxLayout;
+    feedHeader->setSpacing(12);
+    auto* feedTitle = new QLabel(QStringLiteral("IR BEACON FEED"), videoCard);
+    feedTitle->setObjectName(QStringLiteral("FeedTitle"));
+    m_videoInfoLabel = new QLabel(QStringLiteral("未打开视频"), videoCard);
+    m_videoInfoLabel->setObjectName(QStringLiteral("FeedMeta"));
+    m_videoInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_videoInfoLabel->setWordWrap(true);
+    auto* feedPill = new QLabel(QStringLiteral("RAW · BINARY · OVERLAY"), videoCard);
+    feedPill->setObjectName(QStringLiteral("Pill"));
+    feedPill->setAlignment(Qt::AlignCenter);
+    feedHeader->addWidget(feedTitle);
+    feedHeader->addWidget(m_videoInfoLabel, 1);
+    feedHeader->addWidget(feedPill);
+
+    m_videoWidget = new VideoWidget(videoCard);
+    videoLayout->addLayout(feedHeader);
+    videoLayout->addWidget(m_videoWidget, 1);
+    workspaceLayout->addWidget(videoCard, 1);
+
+    auto* rightScroll = new QScrollArea;
+    rightScroll->setObjectName(QStringLiteral("RightScroll"));
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
     rightScroll->setMinimumWidth(340);
+    rightScroll->setMaximumWidth(430);
 
     auto* rightPanel = new QWidget(rightScroll);
+    rightPanel->setObjectName(QStringLiteral("RightPanel"));
     rightPanel->setMinimumWidth(320);
     auto* rightLayout = new QVBoxLayout(rightPanel);
-    rightLayout->setContentsMargins(6, 0, 0, 0);
-    rightLayout->setSpacing(6);
-    m_videoInfoLabel = new QLabel(QStringLiteral("未打开视频"), rightPanel);
-    m_videoInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_videoInfoLabel->setWordWrap(true);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->setSpacing(12);
     m_frameInfoLabel = new QLabel(QStringLiteral("Frame: -"), rightPanel);
+    m_frameInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_frameInfoLabel->setWordWrap(true);
     m_currentAnnotationsLabel = new QLabel(QStringLiteral("当前帧标注: -"), rightPanel);
+    m_currentAnnotationsLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_currentAnnotationsLabel->setWordWrap(true);
-    m_currentAnnotationsLabel->setMaximumHeight(64);
+    m_currentAnnotationsLabel->setMaximumHeight(84);
     m_resultText = new QTextEdit(rightPanel);
     m_resultText->setReadOnly(true);
-    m_resultText->setFixedHeight(96);
+    m_resultText->setFixedHeight(112);
     m_annotationPanel = new AnnotationPanel(rightPanel);
 
-    auto* infoGroup = new QGroupBox(QStringLiteral("当前帧信息"), rightPanel);
+    auto* infoGroup = new QGroupBox(QStringLiteral("飞控状态 / 当前帧"), rightPanel);
     auto* infoLayout = new QVBoxLayout(infoGroup);
-    infoLayout->setContentsMargins(8, 6, 8, 6);
-    infoLayout->setSpacing(3);
-    infoLayout->addWidget(m_videoInfoLabel);
+    infoLayout->setContentsMargins(12, 8, 12, 12);
+    infoLayout->setSpacing(8);
     infoLayout->addWidget(m_frameInfoLabel);
     infoLayout->addWidget(m_currentAnnotationsLabel);
 
     auto* resultGroup = new QGroupBox(QStringLiteral("检测结果"), rightPanel);
     auto* resultLayout = new QVBoxLayout(resultGroup);
-    resultLayout->setContentsMargins(8, 6, 8, 6);
+    resultLayout->setContentsMargins(12, 8, 12, 12);
     resultLayout->addWidget(m_resultText);
 
     auto* algorithmGroup = new QGroupBox(QStringLiteral("算法信息"), rightPanel);
     auto* algorithmLayout = new QVBoxLayout(algorithmGroup);
-    algorithmLayout->setContentsMargins(8, 6, 8, 6);
-    algorithmLayout->setSpacing(4);
+    algorithmLayout->setContentsMargins(12, 8, 12, 12);
+    algorithmLayout->setSpacing(8);
     m_algorithmInfoLabel = new QLabel(QStringLiteral("入口: beacon_image_process()\n文件: algorithm/beacon_image.c"), algorithmGroup);
+    m_algorithmInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_algorithmInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_algorithmInfoLabel->setWordWrap(true);
     auto* openAlgorithmButton = new QPushButton(QStringLiteral("打开算法文件位置"), algorithmGroup);
@@ -152,7 +455,7 @@ void MainWindow::buildUi()
 
     auto* annotationGroup = new QGroupBox(QStringLiteral("错误标注"), rightPanel);
     auto* annotationLayout = new QVBoxLayout(annotationGroup);
-    annotationLayout->setContentsMargins(8, 6, 8, 6);
+    annotationLayout->setContentsMargins(12, 8, 12, 12);
     annotationLayout->addWidget(m_annotationPanel);
 
     rightLayout->addWidget(infoGroup);
@@ -161,57 +464,85 @@ void MainWindow::buildUi()
     rightLayout->addWidget(annotationGroup, 1);
 
     rightScroll->setWidget(rightPanel);
-    splitter->addWidget(m_videoWidget);
+    splitter->addWidget(workspace);
     splitter->addWidget(rightScroll);
     splitter->setStretchFactor(0, 4);
     splitter->setStretchFactor(1, 1);
-    root->addWidget(splitter, 1);
 
-    auto* controlsFrame = new QFrame(central);
-    controlsFrame->setFrameShape(QFrame::StyledPanel);
-    controlsFrame->setMaximumHeight(46);
+    auto* controlsFrame = new QFrame(workspace);
+    controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
+    controlsFrame->setMinimumHeight(112);
+    controlsFrame->setMaximumHeight(138);
     controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    auto* controls = new QHBoxLayout(controlsFrame);
-    controls->setContentsMargins(6, 4, 6, 4);
-    controls->setSpacing(6);
-    auto* playButton = new QPushButton(QStringLiteral("播放"), central);
-    auto* pauseButton = new QPushButton(QStringLiteral("暂停"), central);
-    auto* previousButton = new QPushButton(QStringLiteral("上一帧"), central);
-    auto* nextButton = new QPushButton(QStringLiteral("下一帧"), central);
-    auto* jumpFrameButton = new QPushButton(QStringLiteral("跳转帧"), central);
-    auto* jumpTimeButton = new QPushButton(QStringLiteral("跳转时间"), central);
+    auto* controls = new QVBoxLayout(controlsFrame);
+    controls->setContentsMargins(14, 12, 14, 12);
+    controls->setSpacing(10);
+    auto* controlsTitle = new QLabel(QStringLiteral("PLAYBACK CONSOLE"), controlsFrame);
+    controlsTitle->setObjectName(QStringLiteral("ConsoleTitle"));
+    auto* playbackRow = new QHBoxLayout;
+    playbackRow->setSpacing(8);
+    auto* playButton = new QPushButton(QStringLiteral("播放"), controlsFrame);
+    playButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    playButton->setProperty("role", QStringLiteral("primary"));
+    auto* pauseButton = new QPushButton(QStringLiteral("暂停"), controlsFrame);
+    pauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPause));
+    auto* previousButton = new QPushButton(QStringLiteral("上一帧"), controlsFrame);
+    previousButton->setIcon(style()->standardIcon(QStyle::SP_MediaSeekBackward));
+    auto* nextButton = new QPushButton(QStringLiteral("下一帧"), controlsFrame);
+    nextButton->setIcon(style()->standardIcon(QStyle::SP_MediaSeekForward));
+    auto* jumpFrameButton = new QPushButton(QStringLiteral("跳转帧"), controlsFrame);
+    auto* jumpTimeButton = new QPushButton(QStringLiteral("跳转时间"), controlsFrame);
 
-    m_slider = new QSlider(Qt::Horizontal, central);
+    m_slider = new QSlider(Qt::Horizontal, controlsFrame);
     m_slider->setRange(0, 0);
     m_slider->setMinimumWidth(220);
-    m_frameSpin = new QSpinBox(central);
+    m_frameSpin = new QSpinBox(controlsFrame);
     m_frameSpin->setRange(0, 0);
-    m_frameSpin->setFixedWidth(76);
-    m_timeSpin = new QDoubleSpinBox(central);
+    m_frameSpin->setFixedWidth(84);
+    m_timeSpin = new QDoubleSpinBox(controlsFrame);
     m_timeSpin->setRange(0.0, 0.0);
     m_timeSpin->setDecimals(3);
     m_timeSpin->setSuffix(QStringLiteral(" s"));
-    m_timeSpin->setFixedWidth(96);
-    m_viewModeCombo = new QComboBox(central);
+    m_timeSpin->setFixedWidth(108);
+    m_viewModeCombo = new QComboBox(controlsFrame);
     m_viewModeCombo->addItem(QStringLiteral("原始图像"), QStringLiteral("original"));
     m_viewModeCombo->addItem(QStringLiteral("二值化图像"), QStringLiteral("binary"));
-    m_viewModeCombo->setFixedWidth(110);
+    m_viewModeCombo->setFixedWidth(128);
 
-    controls->addWidget(playButton);
-    controls->addWidget(pauseButton);
-    controls->addWidget(previousButton);
-    controls->addWidget(nextButton);
-    controls->addWidget(new QLabel(QStringLiteral("视图"), central));
-    controls->addWidget(m_viewModeCombo);
-    controls->addWidget(m_slider, 1);
-    controls->addWidget(m_frameSpin);
-    controls->addWidget(jumpFrameButton);
-    controls->addWidget(m_timeSpin);
-    controls->addWidget(jumpTimeButton);
-    root->addWidget(controlsFrame, 0);
+    auto* viewLabel = new QLabel(QStringLiteral("视图"), controlsFrame);
+    viewLabel->setObjectName(QStringLiteral("SoftLabel"));
+    auto* frameLabel = new QLabel(QStringLiteral("Frame"), controlsFrame);
+    frameLabel->setObjectName(QStringLiteral("SoftLabel"));
+    auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
+    timeLabel->setObjectName(QStringLiteral("SoftLabel"));
+
+    playbackRow->addWidget(playButton);
+    playbackRow->addWidget(pauseButton);
+    playbackRow->addWidget(previousButton);
+    playbackRow->addWidget(nextButton);
+    playbackRow->addSpacing(10);
+    playbackRow->addWidget(viewLabel);
+    playbackRow->addWidget(m_viewModeCombo);
+    playbackRow->addStretch(1);
+    playbackRow->addWidget(frameLabel);
+    playbackRow->addWidget(m_frameSpin);
+    playbackRow->addWidget(jumpFrameButton);
+    playbackRow->addWidget(timeLabel);
+    playbackRow->addWidget(m_timeSpin);
+    playbackRow->addWidget(jumpTimeButton);
+    controls->addWidget(controlsTitle);
+    controls->addLayout(playbackRow);
+    controls->addWidget(m_slider);
+    workspaceLayout->addWidget(controlsFrame, 0);
 
     setCentralWidget(central);
 
+    connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
+    connect(saveRailButton, &QToolButton::clicked, this, &MainWindow::saveAnnotation);
+    connect(loadRailButton, &QToolButton::clicked, this, &MainWindow::loadAnnotation);
+    connect(exportAviRailButton, &QToolButton::clicked, this, &MainWindow::exportMarkedAvi);
+    connect(exportCsvRailButton, &QToolButton::clicked, this, &MainWindow::exportCsv);
+    connect(exitRailButton, &QToolButton::clicked, this, &QWidget::close);
     connect(playButton, &QPushButton::clicked, this, &MainWindow::play);
     connect(pauseButton, &QPushButton::clicked, this, &MainWindow::pause);
     connect(previousButton, &QPushButton::clicked, this, &MainWindow::previousFrame);
@@ -280,19 +611,7 @@ void MainWindow::buildMenus()
                            QStringLiteral("离线红外信标图像分析、标注和导出工具。"));
     });
 
-    auto* toolBar = addToolBar(QStringLiteral("主工具栏"));
-    toolBar->setMovable(false);
-    toolBar->addAction(QStringLiteral("打开"), this, &MainWindow::openVideo);
-    toolBar->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
-    toolBar->addAction(QStringLiteral("读取标注"), this, &MainWindow::loadAnnotation);
-    toolBar->addSeparator();
-    toolBar->addAction(QStringLiteral("导出AVI"), this, &MainWindow::exportMarkedAvi);
-    toolBar->addAction(QStringLiteral("导出CSV"), this, &MainWindow::exportCsv);
-    toolBar->addSeparator();
-    toolBar->addAction(QStringLiteral("播放"), this, &MainWindow::play);
-    toolBar->addAction(QStringLiteral("暂停"), this, &MainWindow::pause);
-    toolBar->addAction(QStringLiteral("上一帧"), this, &MainWindow::previousFrame);
-    toolBar->addAction(QStringLiteral("下一帧"), this, &MainWindow::nextFrame);
+    setStyleSheet(djiStyleSheet());
 }
 
 void MainWindow::openVideo()
