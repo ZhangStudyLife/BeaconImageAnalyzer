@@ -3,6 +3,7 @@ build/
 cmake-build-*/
 out/
 temp/
+dist/
 .superpowers/
 
 # CMake/Ninja generated files

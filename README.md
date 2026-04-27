@@ -41,6 +41,26 @@
 ./tools/run.ps1
 ```
 
+## 生成便携版
+
+生成可直接复制给 Windows 用户使用的便携版 zip：
+
+```powershell
+./tools/package.ps1
+```
+
+输出文件：
+
+```text
+dist/BeaconImageAnalyzer-portable.zip
+```
+
+如果输出已存在，脚本默认拒绝覆盖；确认覆盖时执行：
+
+```powershell
+./tools/package.ps1 -Force
+```
+
 示例视频和 UI 参考图等临时素材放在 `temp/`，该目录不会进入 Git 跟踪。打开 `temp/test_video.avi` 后即可查看示例飞行视频。
 
 GUI 布局按 `plan.md` 的 V1 闭环实现，并采用 DJI 风格中控台结构：
