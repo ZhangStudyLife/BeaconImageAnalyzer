@@ -10,6 +10,7 @@
 #include <QAbstractItemView>
 #include <QAbstractSpinBox>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -35,6 +36,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -206,6 +208,25 @@ CorrectionShape batchCorrectionConfigOnly(const CorrectionShape& correction)
     }
 
     return sanitized;
+}
+
+int validCircleCount(const beacon_result_t& result)
+{
+    int count = 0;
+    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    {
+        if (result.circles[i].valid != 0)
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
+double circleImageDistance(const beacon_circle_t& previous, const beacon_circle_t& current)
+{
+    return QLineF(FrameRenderer::algorithmToImagePoint(previous.x, previous.y),
+                  FrameRenderer::algorithmToImagePoint(current.x, current.y)).length();
 }
 
 QVector<int> normalizedRows(QVector<int> rows)
@@ -1201,6 +1222,238 @@ void MainWindow::handleSlotMiddleDragReleased(int slot, const QPoint& globalPos)
     m_dragSourceSlot = -1;
 }
 
+void MainWindow::handleSlotContextCorrection(int slot, const QPointF& imagePoint, const QPoint& globalPos)
+{
+    if (slot < 0 || slot >= m_splitSlotInstanceIds.size() ||
+        m_splitSlotInstanceIds[slot] != m_currentInstanceId ||
+        !m_reader.isOpen())
+    {
+        return;
+    }
+
+    const QVector<int> targetIndices = targetIndicesNearPoint(imagePoint, 10.0);
+    if (targetIndices.isEmpty())
+    {
+        QMenu menu(this);
+        QAction* missedAction = menu.addAction(QStringLiteral("漏检"));
+        QAction* otherAction = menu.addAction(QStringLiteral("其他"));
+        QAction* selected = menu.exec(globalPos);
+        if (selected == missedAction)
+        {
+            CorrectionShape correction;
+            if (promptMissedCircle(imagePoint, &correction))
+            {
+                addQuickCorrection(correction);
+            }
+        }
+        else if (selected == otherAction)
+        {
+            QString description;
+            if (promptDescription(QStringLiteral("其他"), &description))
+            {
+                CorrectionShape correction;
+                correction.name = annotationTypeDisplayName(QStringLiteral("other"));
+                correction.frame = m_currentFrame;
+                correction.errorType = QStringLiteral("other");
+                correction.errorTypes = QStringList{ correction.errorType };
+                correction.description = description;
+                addQuickCorrection(correction);
+            }
+        }
+        return;
+    }
+
+    if (targetIndices.size() == 1)
+    {
+        runSingleTargetQuickCorrection(targetIndices.first(), globalPos);
+        return;
+    }
+
+    QMenu targetMenu(this);
+    for (int index : targetIndices)
+    {
+        QAction* action = targetMenu.addAction(QStringLiteral("目标 #%1").arg(index));
+        action->setData(index);
+    }
+    QAction* selectedTarget = targetMenu.exec(globalPos);
+    if (selectedTarget != nullptr)
+    {
+        runSingleTargetQuickCorrection(selectedTarget->data().toInt(), globalPos);
+    }
+}
+
+QVector<int> MainWindow::targetIndicesNearPoint(const QPointF& imagePoint, double radiusPixels) const
+{
+    QVector<int> indices;
+    const beacon_result_t& result = m_currentResult;
+    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    {
+        const beacon_circle_t& circle = result.circles[i];
+        if (circle.valid == 0)
+        {
+            continue;
+        }
+
+        const QPointF circlePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
+        if (QLineF(circlePoint, imagePoint).length() <= circle.radius + radiusPixels)
+        {
+            indices.push_back(i);
+        }
+    }
+    return indices;
+}
+
+bool MainWindow::promptExpectedIndex(const QString& title, int* expectedIndex)
+{
+    if (expectedIndex == nullptr)
+    {
+        return false;
+    }
+    bool ok = false;
+    const int value = QInputDialog::getInt(this,
+                                           title,
+                                           QStringLiteral("正确序号"),
+                                           0,
+                                           0,
+                                           BEACON_MAX_CIRCLE_COUNT - 1,
+                                           1,
+                                           &ok);
+    if (!ok)
+    {
+        return false;
+    }
+    *expectedIndex = value;
+    return true;
+}
+
+bool MainWindow::promptDescription(const QString& title, QString* description)
+{
+    if (description == nullptr)
+    {
+        return false;
+    }
+    bool ok = false;
+    const QString text = QInputDialog::getMultiLineText(this,
+                                                        title,
+                                                        QStringLiteral("描述"),
+                                                        QString(),
+                                                        &ok).trimmed();
+    if (!ok || text.isEmpty())
+    {
+        return false;
+    }
+    *description = text;
+    return true;
+}
+
+bool MainWindow::promptMissedCircle(const QPointF& center, CorrectionShape* correction)
+{
+    if (correction == nullptr)
+    {
+        return false;
+    }
+
+    int expectedIndex = -1;
+    if (!promptExpectedIndex(QStringLiteral("漏检"), &expectedIndex))
+    {
+        return false;
+    }
+
+    bool ok = false;
+    const double radius = QInputDialog::getDouble(this,
+                                                  QStringLiteral("漏检"),
+                                                  QStringLiteral("目标圆半径"),
+                                                  5.0,
+                                                  1.0,
+                                                  100.0,
+                                                  1,
+                                                  &ok);
+    if (!ok)
+    {
+        return false;
+    }
+
+    correction->name = annotationTypeDisplayName(QStringLiteral("missed_detection"));
+    correction->frame = m_currentFrame;
+    correction->errorType = QStringLiteral("missed_detection");
+    correction->errorTypes = QStringList{ correction->errorType };
+    correction->expectedIndex = expectedIndex;
+    correction->errorCircles = QVector<ErrorCircle>{ ErrorCircle{ -1, expectedIndex } };
+    correction->shapeType = QStringLiteral("circle");
+    correction->points = QVector<QPointF>{ center, center + QPointF(radius, 0.0) };
+    return true;
+}
+
+void MainWindow::addQuickCorrection(const CorrectionShape& correction)
+{
+    CorrectionShape saved = correction;
+    if (saved.name.trimmed().isEmpty())
+    {
+        saved.name = annotationTypeDisplayName(saved.errorType);
+    }
+    m_annotations.addCorrection(saved);
+    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
+    updateAnnotationList();
+    showFrame(m_currentFrame);
+}
+
+void MainWindow::runSingleTargetQuickCorrection(int circleIndex, const QPoint& globalPos)
+{
+    QMenu menu(this);
+    QAction* falsePositiveAction = menu.addAction(QStringLiteral("误检"));
+    QAction* wrongOrderAction = menu.addAction(QStringLiteral("排序错误"));
+    QAction* targetJumpAction = menu.addAction(QStringLiteral("目标跳变"));
+    QAction* otherAction = menu.addAction(QStringLiteral("其他"));
+    QAction* selected = menu.exec(globalPos);
+    if (selected == nullptr)
+    {
+        return;
+    }
+
+    CorrectionShape correction;
+    correction.frame = m_currentFrame;
+    correction.lineWidth = 1;
+
+    if (selected == falsePositiveAction)
+    {
+        correction.errorType = QStringLiteral("false_positive");
+        correction.errorTypes = QStringList{ correction.errorType };
+        correction.errorCircles = QVector<ErrorCircle>{ ErrorCircle{ circleIndex, -1 } };
+    }
+    else if (selected == wrongOrderAction || selected == targetJumpAction)
+    {
+        int expectedIndex = -1;
+        if (!promptExpectedIndex(selected == wrongOrderAction
+                                     ? QStringLiteral("排序错误")
+                                     : QStringLiteral("目标跳变"),
+                                 &expectedIndex))
+        {
+            return;
+        }
+        correction.errorType = selected == wrongOrderAction
+            ? QStringLiteral("wrong_order")
+            : QStringLiteral("target_jump");
+        correction.errorTypes = QStringList{ correction.errorType };
+        correction.expectedIndex = expectedIndex;
+        correction.errorCircles = QVector<ErrorCircle>{ ErrorCircle{ circleIndex, expectedIndex } };
+    }
+    else if (selected == otherAction)
+    {
+        QString description;
+        if (!promptDescription(QStringLiteral("其他"), &description))
+        {
+            return;
+        }
+        correction.errorType = QStringLiteral("other");
+        correction.errorTypes = QStringList{ correction.errorType };
+        correction.description = description;
+        correction.errorCircles = QVector<ErrorCircle>{ ErrorCircle{ circleIndex, -1 } };
+    }
+
+    correction.name = annotationTypeDisplayName(correction.errorType);
+    addQuickCorrection(correction);
+}
+
 void MainWindow::renderInstance(AnalyzerInstance* instance)
 {
     if (instance == nullptr || !m_reader.isOpen())
@@ -1412,6 +1665,9 @@ void MainWindow::buildUi()
         connect(widget, &VideoWidget::middleDragReleased, this, [this, slot](const QPoint& globalPos) {
             handleSlotMiddleDragReleased(slot, globalPos);
         });
+        connect(widget, &VideoWidget::contextCorrectionRequested, this, [this, slot](const QPointF& imagePoint, const QPoint& globalPos) {
+            handleSlotContextCorrection(slot, imagePoint, globalPos);
+        });
         connect(widget, &VideoWidget::correctionShapeFinished, this, &MainWindow::addCorrectionShape);
         connect(widget, &VideoWidget::hoverPixelChanged, this, [this, slot](int x, int y, int gray, bool valid) {
             if (slot >= 0 && slot < m_splitSlotInstanceIds.size() &&
@@ -1480,8 +1736,8 @@ void MainWindow::buildUi()
 
     auto* controlsFrame = new QFrame(workspace);
     controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
-    controlsFrame->setMinimumHeight(112);
-    controlsFrame->setMaximumHeight(138);
+    controlsFrame->setMinimumHeight(148);
+    controlsFrame->setMaximumHeight(178);
     controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto* controls = new QVBoxLayout(controlsFrame);
     controls->setContentsMargins(14, 12, 14, 12);
@@ -1525,6 +1781,15 @@ void MainWindow::buildUi()
     m_speedCombo->addItem(QStringLiteral("8倍速"), 8.0);
     m_speedCombo->setCurrentIndex(3);
     m_speedCombo->setFixedWidth(118);
+    m_autoPauseEnableCheck = new QCheckBox(QStringLiteral("自动暂停"), controlsFrame);
+    m_autoPauseJumpCheck = new QCheckBox(QStringLiteral("目标跳变"), controlsFrame);
+    m_autoPauseCountCheck = new QCheckBox(QStringLiteral("数量变化"), controlsFrame);
+    m_autoPauseJumpThresholdSpin = new QDoubleSpinBox(controlsFrame);
+    m_autoPauseJumpThresholdSpin->setRange(0.0, 1000.0);
+    m_autoPauseJumpThresholdSpin->setDecimals(1);
+    m_autoPauseJumpThresholdSpin->setValue(10.0);
+    m_autoPauseJumpThresholdSpin->setSuffix(QStringLiteral(" px"));
+    m_autoPauseJumpThresholdSpin->setFixedWidth(92);
 
     auto* viewLabel = new QLabel(QStringLiteral("视图"), controlsFrame);
     viewLabel->setObjectName(QStringLiteral("SoftLabel"));
@@ -1550,8 +1815,16 @@ void MainWindow::buildUi()
     playbackRow->addWidget(timeLabel);
     playbackRow->addWidget(m_timeSpin);
     playbackRow->addWidget(jumpTimeButton);
+    auto* autoPauseRow = new QHBoxLayout;
+    autoPauseRow->setSpacing(8);
+    autoPauseRow->addWidget(m_autoPauseEnableCheck);
+    autoPauseRow->addWidget(m_autoPauseJumpCheck);
+    autoPauseRow->addWidget(m_autoPauseJumpThresholdSpin);
+    autoPauseRow->addWidget(m_autoPauseCountCheck);
+    autoPauseRow->addStretch(1);
     controls->addWidget(controlsTitle);
     controls->addLayout(playbackRow);
+    controls->addLayout(autoPauseRow);
     controls->addWidget(m_slider);
     workspaceLayout->addWidget(controlsFrame, 0);
 
@@ -1583,6 +1856,15 @@ void MainWindow::buildUi()
     });
     connect(m_speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         setPlaybackSpeed(m_speedCombo->currentData().toDouble());
+    });
+    connect(m_autoPauseEnableCheck, &QCheckBox::toggled, this, [this]() {
+        for (AnalyzerInstance* instance : m_instances)
+        {
+            if (instance != nullptr)
+            {
+                instance->hasPreviousAutoPauseResult = false;
+            }
+        }
     });
     connect(m_annotationPanel, &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
             this, &MainWindow::saveCurrentFrameCorrections);
@@ -2107,9 +2389,21 @@ void MainWindow::showFrame(int frameIndex)
         return;
     }
 
+    const int previousFrame = m_currentFrame;
+    QVector<QPair<AnalyzerInstance*, beacon_result_t>> results;
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        if (instance == nullptr)
+        {
+            continue;
+        }
+        const beacon_result_t result = instance->runner.process(gray);
+        instance->currentResult = result;
+        results.push_back(qMakePair(instance, result));
+    }
+
     m_currentFrame = frameIndex;
-    const beacon_result_t result = m_runner.process(gray);
-    m_currentResult = result;
+    const beacon_result_t result = m_currentResult;
     const QVector<CorrectionShape> savedCorrections = m_annotations.correctionsForFrame(m_currentFrame);
     m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
     m_annotationPanel->setCurrentFrameCorrections(savedCorrections);
@@ -2122,6 +2416,97 @@ void MainWindow::showFrame(int frameIndex)
     m_updatingControls = false;
 
     updateFrameInfo(result);
+    QString autoPauseReason;
+    if (autoPauseTriggered(previousFrame, frameIndex, results, &autoPauseReason))
+    {
+        pause();
+        statusBar()->showMessage(autoPauseReason, 5000);
+    }
+}
+
+bool MainWindow::autoPauseTriggered(int previousFrame,
+                                    int currentFrame,
+                                    const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results,
+                                    QString* reason)
+{
+    const bool enabled = m_autoPauseEnableCheck != nullptr && m_autoPauseEnableCheck->isChecked();
+    const bool jumpEnabled = m_autoPauseJumpCheck != nullptr && m_autoPauseJumpCheck->isChecked();
+    const bool countEnabled = m_autoPauseCountCheck != nullptr && m_autoPauseCountCheck->isChecked();
+    const double jumpThreshold = m_autoPauseJumpThresholdSpin != nullptr
+        ? m_autoPauseJumpThresholdSpin->value()
+        : 0.0;
+
+    bool triggered = false;
+    QString triggerReason;
+    const bool adjacentForwardFrame = currentFrame == previousFrame + 1;
+
+    if (enabled && m_globalPlaying && adjacentForwardFrame && (jumpEnabled || countEnabled))
+    {
+        for (const auto& item : results)
+        {
+            AnalyzerInstance* instance = item.first;
+            const beacon_result_t& current = item.second;
+            if (instance == nullptr ||
+                !instance->hasPreviousAutoPauseResult ||
+                instance->previousAutoPauseFrame != previousFrame)
+            {
+                continue;
+            }
+
+            const beacon_result_t& previous = instance->previousAutoPauseResult;
+            if (countEnabled && validCircleCount(previous) != validCircleCount(current))
+            {
+                triggered = true;
+                triggerReason = QStringLiteral("自动暂停：%1 相邻帧识别圆数量变化").arg(instance->name);
+                break;
+            }
+
+            if (jumpEnabled)
+            {
+                const int count = qMin<int>(qMin(previous.count, current.count), BEACON_MAX_CIRCLE_COUNT);
+                for (int i = 0; i < count; ++i)
+                {
+                    if (previous.circles[i].valid == 0 || current.circles[i].valid == 0)
+                    {
+                        continue;
+                    }
+
+                    const double distance = circleImageDistance(previous.circles[i], current.circles[i]);
+                    if (distance > jumpThreshold)
+                    {
+                        triggered = true;
+                        triggerReason = QStringLiteral("自动暂停：%1 目标 #%2 跳变 %3 px")
+                                            .arg(instance->name)
+                                            .arg(i)
+                                            .arg(distance, 0, 'f', 1);
+                        break;
+                    }
+                }
+                if (triggered)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    for (const auto& item : results)
+    {
+        AnalyzerInstance* instance = item.first;
+        if (instance == nullptr)
+        {
+            continue;
+        }
+        instance->previousAutoPauseResult = item.second;
+        instance->previousAutoPauseFrame = currentFrame;
+        instance->hasPreviousAutoPauseResult = true;
+    }
+
+    if (triggered && reason != nullptr)
+    {
+        *reason = triggerReason;
+    }
+    return triggered;
 }
 
 void MainWindow::updateFrameInfo(const beacon_result_t& result)

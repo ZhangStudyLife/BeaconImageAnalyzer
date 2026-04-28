@@ -99,6 +99,16 @@ void VideoWidget::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if (event->button() == Qt::RightButton)
+    {
+        QPointF imagePoint;
+        if (widgetToImagePoint(event->pos(), &imagePoint))
+        {
+            emit contextCorrectionRequested(imagePoint, event->globalPosition().toPoint());
+        }
+        event->accept();
+        return;
+    }
 
     if (event->button() != Qt::LeftButton || m_correctionTool == QStringLiteral("select"))
     {

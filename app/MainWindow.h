@@ -7,9 +7,11 @@
 #include "beacon_image.h"
 
 #include <QMainWindow>
+#include <QPair>
 #include <QTimer>
 
 class AnnotationPanel;
+class QCheckBox;
 class QCloseEvent;
 class QComboBox;
 class QKeyEvent;
@@ -36,6 +38,9 @@ struct AnalyzerInstance
     int segmentStartFrame = -1;
     int segmentEndFrame = -1;
     beacon_result_t currentResult = {};
+    beacon_result_t previousAutoPauseResult = {};
+    int previousAutoPauseFrame = -1;
+    bool hasPreviousAutoPauseResult = false;
     QVector<int> pendingAutoBatchRows;
     QVector<CorrectionShape> pendingAutoMatchedCorrections;
 };
@@ -122,7 +127,18 @@ private:
     void handleSlotActivated(int slot);
     void handleSlotMiddleDragStarted(int slot);
     void handleSlotMiddleDragReleased(int slot, const QPoint& globalPos);
+    void handleSlotContextCorrection(int slot, const QPointF& imagePoint, const QPoint& globalPos);
     void refreshCurrentInstanceUi();
+    bool autoPauseTriggered(int previousFrame,
+                            int currentFrame,
+                            const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results,
+                            QString* reason);
+    QVector<int> targetIndicesNearPoint(const QPointF& imagePoint, double radiusPixels) const;
+    bool promptExpectedIndex(const QString& title, int* expectedIndex);
+    bool promptDescription(const QString& title, QString* description);
+    bool promptMissedCircle(const QPointF& center, CorrectionShape* correction);
+    void addQuickCorrection(const CorrectionShape& correction);
+    void runSingleTargetQuickCorrection(int circleIndex, const QPoint& globalPos);
     void updateFrameInfo(const beacon_result_t& result);
     void updateCurrentAnnotationInfo();
     void updateAnnotationList();
@@ -184,6 +200,10 @@ private:
     QDoubleSpinBox* m_timeSpin = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
     QComboBox* m_speedCombo = nullptr;
+    QCheckBox* m_autoPauseEnableCheck = nullptr;
+    QCheckBox* m_autoPauseJumpCheck = nullptr;
+    QCheckBox* m_autoPauseCountCheck = nullptr;
+    QDoubleSpinBox* m_autoPauseJumpThresholdSpin = nullptr;
 
     QString m_globalVideoPath;
     int m_globalCurrentFrame = 0;

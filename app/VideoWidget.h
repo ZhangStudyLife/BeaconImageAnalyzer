@@ -28,6 +28,7 @@ signals:
     void activated();
     void correctionShapeFinished(const QString& shapeType, const QVector<QPointF>& points);
     void hoverPixelChanged(int x, int y, int gray, bool valid);
+    void contextCorrectionRequested(const QPointF& imagePoint, const QPoint& globalPos);
     void middleDragStarted();
     void middleDragReleased(const QPoint& globalPos);
 
