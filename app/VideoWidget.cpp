@@ -14,7 +14,7 @@ VideoWidget::VideoWidget(QWidget* parent)
     : QLabel(parent)
 {
     setAlignment(Qt::AlignCenter);
-    setMinimumSize(560, 360);
+    setMinimumSize(188, 120);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setStyleSheet(QStringLiteral("background: #090a0b; color: #aeb6be; border: 1px solid #2a3035; border-radius: 8px;"));
     setText(QStringLiteral("打开 AVI 后显示画面"));

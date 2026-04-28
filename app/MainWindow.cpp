@@ -1158,6 +1158,17 @@ void MainWindow::updateSplitLayout()
         }
     }
 
+    for (int row = 0; row < 2; ++row)
+    {
+        m_videoGrid->setRowMinimumHeight(row, 0);
+        m_videoGrid->setRowStretch(row, 1);
+    }
+    for (int column = 0; column < 2; ++column)
+    {
+        m_videoGrid->setColumnMinimumWidth(column, 0);
+        m_videoGrid->setColumnStretch(column, 1);
+    }
+
     if (visibleSlots.size() <= 1)
     {
         const int slot = visibleSlots.isEmpty() ? 0 : visibleSlots.first();
@@ -1166,6 +1177,39 @@ void MainWindow::updateSplitLayout()
             m_videoWidgets[i]->setVisible(i == slot);
         }
         m_videoGrid->addWidget(m_videoWidgets[slot], 0, 0, 2, 2);
+    }
+    else if (visibleSlots.size() == 2)
+    {
+        for (int i = 0; i < m_videoWidgets.size(); ++i)
+        {
+            m_videoWidgets[i]->setVisible(false);
+        }
+        for (int column = 0; column < visibleSlots.size(); ++column)
+        {
+            const int slot = visibleSlots[column];
+            m_videoWidgets[slot]->setVisible(true);
+            m_videoGrid->addWidget(m_videoWidgets[slot], 0, column);
+        }
+    }
+    else if (visibleSlots.size() == 3)
+    {
+        for (int i = 0; i < m_videoWidgets.size(); ++i)
+        {
+            m_videoWidgets[i]->setVisible(false);
+        }
+        for (int index = 0; index < visibleSlots.size(); ++index)
+        {
+            const int slot = visibleSlots[index];
+            m_videoWidgets[slot]->setVisible(true);
+            if (index < 2)
+            {
+                m_videoGrid->addWidget(m_videoWidgets[slot], 0, index);
+            }
+            else
+            {
+                m_videoGrid->addWidget(m_videoWidgets[slot], 1, 0, 1, 2);
+            }
+        }
     }
     else
     {
