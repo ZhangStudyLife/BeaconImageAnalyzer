@@ -41,11 +41,15 @@ signals:
     void saveCurrentFrameCorrectionsRequested(const QVector<CorrectionShape>& corrections);
     void deleteAnnotationsRequested(const QVector<int>& rows);
     void deleteCorrectionsRequested(const QVector<int>& rows);
-    void batchAddCorrectionsRequested(const QVector<int>& correctionRows, int startFrame, int endFrame);
+    void batchAddCorrectionsRequested(const QVector<int>& correctionRows,
+                                      int startFrame,
+                                      int endFrame,
+                                      double overlapPixelThreshold);
     void autoMatchCorrectionFramesRequested(const QVector<int>& correctionRows,
                                             int backwardMaxFrames,
                                             int forwardMaxFrames,
-                                            double positionThreshold);
+                                            double positionThreshold,
+                                            double overlapPixelThreshold);
     void batchAddCorrectionsToFramesRequested(const QVector<int>& correctionRows, const QVector<int>& frames);
     void correctionToolChanged(const QString& tool);
     void correctionStyleChanged(const QColor& color, int lineWidth);
@@ -80,6 +84,11 @@ private:
     QString savedCorrectionSummary(const CorrectionShape& shape) const;
     QStringList checkedFilterTypes() const;
     QVector<int> selectedCurrentFrameCorrectionRows() const;
+    bool selectedBatchTypes(bool* hasMissed, bool* hasNonMissed, bool* latestIsMissed) const;
+    bool selectedBatchHasMixedTypes() const;
+    bool batchPanelPreviewUsesMissed() const;
+    void setBatchPanelMode(bool missedMode);
+    void warnMixedBatchTypes();
     bool frameRangeAccepted(int* startFrame, int* endFrame);
     bool batchFrameRangeAccepted(int startFrame, int endFrame) const;
     bool savedFrameMatches(int startFrame, int endFrame, int itemStartFrame, int itemEndFrame) const;
@@ -113,12 +122,20 @@ private:
     QListWidget* m_filterTypeList = nullptr;
     QListWidget* m_savedList = nullptr;
     QGroupBox* m_batchGroup = nullptr;
+    QGroupBox* m_batchManualGroup = nullptr;
+    QGroupBox* m_batchAutoGroup = nullptr;
     QLabel* m_batchSelectionLabel = nullptr;
     QSpinBox* m_batchStartSpin = nullptr;
     QSpinBox* m_batchEndSpin = nullptr;
     QSpinBox* m_batchBackwardSpin = nullptr;
     QSpinBox* m_batchForwardSpin = nullptr;
     QDoubleSpinBox* m_batchThresholdSpin = nullptr;
+    QDoubleSpinBox* m_batchManualOverlapSpin = nullptr;
+    QDoubleSpinBox* m_batchAutoOverlapSpin = nullptr;
+    QWidget* m_batchAutoFrameWidget = nullptr;
+    QWidget* m_batchPositionThresholdWidget = nullptr;
+    QWidget* m_batchManualOverlapWidget = nullptr;
+    QWidget* m_batchAutoOverlapWidget = nullptr;
     QListWidget* m_batchMatchedFrameList = nullptr;
     QPushButton* m_batchApplyAutoButton = nullptr;
 

@@ -54,11 +54,15 @@ private slots:
     void deleteAnnotations(const QVector<int>& rows);
     void deleteCorrections(const QVector<int>& rows);
     void saveCurrentFrameCorrections(const QVector<CorrectionShape>& corrections);
-    void batchAddCorrections(const QVector<int>& correctionRows, int startFrame, int endFrame);
+    void batchAddCorrections(const QVector<int>& correctionRows,
+                             int startFrame,
+                             int endFrame,
+                             double overlapPixelThreshold);
     void autoMatchCorrectionFrames(const QVector<int>& correctionRows,
                                    int backwardMaxFrames,
                                    int forwardMaxFrames,
-                                   double positionThreshold);
+                                   double positionThreshold,
+                                   double overlapPixelThreshold);
     void batchAddCorrectionsToFrames(const QVector<int>& correctionRows, const QVector<int>& frames);
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
     void autoIdentifyCorrectionTargets();
@@ -86,13 +90,25 @@ private:
     bool collectBatchCorrections(const QVector<int>& correctionRows,
                                  QVector<CorrectionShape>* corrections,
                                  QString* errorMessage) const;
+    bool correctionsHaveMixedBatchTypes(const QVector<CorrectionShape>& corrections) const;
+    bool correctionsAreAllMissed(const QVector<CorrectionShape>& corrections) const;
     bool processFrameForBatch(int frame, beacon_result_t* result, QString* errorMessage) const;
     bool batchCorrectionsMatchAdjacent(const QVector<CorrectionShape>& corrections,
                                        const beacon_result_t& previous,
                                        const beacon_result_t& next,
                                        double positionThreshold) const;
+    bool buildMissedBatchCorrections(const QVector<CorrectionShape>& baseCorrections,
+                                     int startFrame,
+                                     int endFrame,
+                                     double overlapPixelThreshold,
+                                     QVector<CorrectionShape>* matchedCorrections,
+                                     QVector<int>* matchedFrames,
+                                     QVector<int>* failedFrames,
+                                     QString* errorMessage) const;
     void appendCorrectionsToFrames(const QVector<CorrectionShape>& corrections,
                                    const QVector<int>& frames,
+                                   const QString& actionName);
+    void appendResolvedCorrections(const QVector<CorrectionShape>& corrections,
                                    const QString& actionName);
     void restoreLastSession();
     void saveProject();
@@ -131,6 +147,8 @@ private:
     int m_segmentStartFrame = -1;
     int m_segmentEndFrame = -1;
     beacon_result_t m_currentResult = {};
+    QVector<int> m_pendingAutoBatchRows;
+    QVector<CorrectionShape> m_pendingAutoMatchedCorrections;
 };
 
 #endif

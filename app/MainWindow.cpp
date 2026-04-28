@@ -48,9 +48,14 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <functional>
+#include <limits>
 
 namespace
 {
@@ -148,6 +153,344 @@ bool shapeContainsPoint(const CorrectionShape& shape, const QPointF& point)
         return QPolygonF(shape.points).containsPoint(point, Qt::OddEvenFill);
     }
     return false;
+}
+
+constexpr double Pi = 3.14159265358979323846;
+
+struct MissedTargetCandidate
+{
+    QPointF center;
+    double area = 0.0;
+    double circularityScore = 0.0;
+};
+
+struct MissedBatchTarget
+{
+    CorrectionShape baseCorrection;
+    QPointF previousCenter;
+    QPointF radiusVector;
+    double radius = 0.0;
+    double baseArea = 0.0;
+    double previousArea = 0.0;
+};
+
+bool isMissedCorrectionType(const QString& type)
+{
+    return type == QStringLiteral("missed_detection");
+}
+
+QVector<int> normalizedRows(QVector<int> rows)
+{
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    return rows;
+}
+
+QString framesText(const QVector<int>& frames)
+{
+    QStringList parts;
+    for (int frame : frames)
+    {
+        parts.push_back(QString::number(frame));
+    }
+    return parts.join(QStringLiteral(", "));
+}
+
+double correctionCircleRadius(const CorrectionShape& correction)
+{
+    if (correction.shapeType != QStringLiteral("circle") || correction.points.size() < 2)
+    {
+        return 0.0;
+    }
+    return QLineF(correction.points[0], correction.points[1]).length();
+}
+
+CorrectionShape correctionWithCenter(const CorrectionShape& correction,
+                                     const QPointF& center,
+                                     const QPointF& radiusVector)
+{
+    CorrectionShape updated = correction;
+    if (updated.points.size() < 2)
+    {
+        return updated;
+    }
+
+    QPointF safeRadiusVector = radiusVector;
+    if (QLineF(QPointF(0.0, 0.0), safeRadiusVector).length() <= 0.0)
+    {
+        safeRadiusVector = QPointF(correctionCircleRadius(correction), 0.0);
+    }
+    updated.points[0] = center;
+    updated.points[1] = center + safeRadiusVector;
+    return updated;
+}
+
+cv::Mat qImageToGrayMat(const QImage& image)
+{
+    const QImage gray = image.format() == QImage::Format_Grayscale8
+        ? image
+        : image.convertToFormat(QImage::Format_Grayscale8);
+    cv::Mat mat(gray.height(), gray.width(), CV_8UC1);
+    for (int y = 0; y < gray.height(); ++y)
+    {
+        memcpy(mat.ptr(y), gray.constScanLine(y), gray.width());
+    }
+    return mat;
+}
+
+void addCandidateUnique(QVector<MissedTargetCandidate>* candidates, const MissedTargetCandidate& candidate)
+{
+    if (candidates == nullptr)
+    {
+        return;
+    }
+
+    for (MissedTargetCandidate& existing : *candidates)
+    {
+        if (QLineF(existing.center, candidate.center).length() <= 1.25)
+        {
+            if (candidate.circularityScore > existing.circularityScore)
+            {
+                existing = candidate;
+            }
+            return;
+        }
+    }
+    candidates->push_back(candidate);
+}
+
+void appendConnectedComponentCandidates(const cv::Mat& binary, QVector<MissedTargetCandidate>* candidates)
+{
+    if (binary.empty() || candidates == nullptr)
+    {
+        return;
+    }
+
+    cv::Mat labels;
+    cv::Mat stats;
+    cv::Mat centroids;
+    const int componentCount = cv::connectedComponentsWithStats(binary, labels, stats, centroids, 8, CV_32S);
+    for (int label = 1; label < componentCount; ++label)
+    {
+        const int area = stats.at<int>(label, cv::CC_STAT_AREA);
+        const int width = stats.at<int>(label, cv::CC_STAT_WIDTH);
+        const int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
+        if (area < 2 || width <= 0 || height <= 0)
+        {
+            continue;
+        }
+
+        const double aspect = (double)qMax(width, height) / (double)qMax(1, qMin(width, height));
+        const double fillRatio = (double)area / (double)(width * height);
+        if (aspect > 2.6 || fillRatio < 0.22)
+        {
+            continue;
+        }
+
+        MissedTargetCandidate candidate;
+        candidate.center = QPointF(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
+        candidate.area = (double)area;
+        candidate.circularityScore = fillRatio / aspect;
+        addCandidateUnique(candidates, candidate);
+    }
+}
+
+QVector<MissedTargetCandidate> extractMissedTargetCandidates(const QImage& gray)
+{
+    QVector<MissedTargetCandidate> candidates;
+    const cv::Mat mat = qImageToGrayMat(gray);
+    if (mat.empty())
+    {
+        return candidates;
+    }
+
+    cv::Mat binary;
+    cv::threshold(mat, binary, 0.0, 255.0, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    appendConnectedComponentCandidates(binary, &candidates);
+
+    const int minDimension = qMin(mat.cols, mat.rows);
+    const int blockSizes[] = { 9, 15, 21, 31 };
+    const int constants[] = { -8, -4, 0, 4, 8 };
+    for (int blockSize : blockSizes)
+    {
+        if (blockSize >= minDimension || blockSize % 2 == 0)
+        {
+            continue;
+        }
+        for (int constant : constants)
+        {
+            cv::adaptiveThreshold(mat,
+                                  binary,
+                                  255.0,
+                                  cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+                                  cv::THRESH_BINARY,
+                                  blockSize,
+                                  (double)constant);
+            appendConnectedComponentCandidates(binary, &candidates);
+        }
+    }
+
+    return candidates;
+}
+
+double circleOverlapPixelCount(const QPointF& first, const QPointF& second, double radius)
+{
+    if (radius <= 0.0)
+    {
+        return 0.0;
+    }
+
+    const int minX = qMax(0, (int)std::floor(qMax(first.x() - radius, second.x() - radius)));
+    const int maxX = qMin(BEACON_IMAGE_W - 1, (int)std::ceil(qMin(first.x() + radius, second.x() + radius)));
+    const int minY = qMax(0, (int)std::floor(qMax(first.y() - radius, second.y() - radius)));
+    const int maxY = qMin(BEACON_IMAGE_H - 1, (int)std::ceil(qMin(first.y() + radius, second.y() + radius)));
+    if (minX > maxX || minY > maxY)
+    {
+        return 0.0;
+    }
+
+    const double radiusSquared = radius * radius;
+    int overlap = 0;
+    for (int y = minY; y <= maxY; ++y)
+    {
+        for (int x = minX; x <= maxX; ++x)
+        {
+            const double pixelX = (double)x + 0.5;
+            const double pixelY = (double)y + 0.5;
+            const double firstDx = pixelX - first.x();
+            const double firstDy = pixelY - first.y();
+            const double secondDx = pixelX - second.x();
+            const double secondDy = pixelY - second.y();
+            if (firstDx * firstDx + firstDy * firstDy <= radiusSquared &&
+                secondDx * secondDx + secondDy * secondDy <= radiusSquared)
+            {
+                ++overlap;
+            }
+        }
+    }
+    return (double)overlap;
+}
+
+bool prepareMissedBatchTargets(const QVector<CorrectionShape>& corrections,
+                               QVector<MissedBatchTarget>* targets,
+                               QString* errorMessage)
+{
+    if (targets == nullptr)
+    {
+        return false;
+    }
+    targets->clear();
+
+    for (const CorrectionShape& correction : corrections)
+    {
+        if (!isMissedCorrectionType(correction.errorType) ||
+            correction.shapeType != QStringLiteral("circle") ||
+            correction.points.size() < 2)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("漏检批量要求选中的每个条目都是已绘制圆形的漏检纠错。");
+            }
+            return false;
+        }
+
+        const double radius = correctionCircleRadius(correction);
+        if (radius <= 0.0)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("漏检批量要求基准漏检圆半径大于 0。");
+            }
+            return false;
+        }
+
+        MissedBatchTarget target;
+        target.baseCorrection = correction;
+        target.previousCenter = correction.points[0];
+        target.radiusVector = correction.points[1] - correction.points[0];
+        target.radius = radius;
+        target.baseArea = Pi * radius * radius;
+        target.previousArea = target.baseArea;
+        targets->push_back(target);
+    }
+
+    return !targets->isEmpty();
+}
+
+bool matchMissedTargetsInImage(const QImage& gray,
+                               const QVector<MissedBatchTarget>& previousTargets,
+                               double overlapPixelThreshold,
+                               QVector<MissedBatchTarget>* nextTargets,
+                               QVector<CorrectionShape>* corrections)
+{
+    if (nextTargets == nullptr || corrections == nullptr)
+    {
+        return false;
+    }
+    nextTargets->clear();
+    corrections->clear();
+
+    const QVector<MissedTargetCandidate> candidates = extractMissedTargetCandidates(gray);
+    if (candidates.isEmpty())
+    {
+        return false;
+    }
+
+    QVector<bool> used(candidates.size(), false);
+    for (const MissedBatchTarget& target : previousTargets)
+    {
+        int bestIndex = -1;
+        double bestScore = std::numeric_limits<double>::max();
+        for (int i = 0; i < candidates.size(); ++i)
+        {
+            if (used[i])
+            {
+                continue;
+            }
+
+            const MissedTargetCandidate& candidate = candidates[i];
+            if (candidate.area < target.baseArea * 0.12 || candidate.area > target.baseArea * 6.0)
+            {
+                continue;
+            }
+
+            const double overlapPixels = circleOverlapPixelCount(target.previousCenter,
+                                                                 candidate.center,
+                                                                 target.radius);
+            if (overlapPixels + 1.0e-6 < overlapPixelThreshold)
+            {
+                continue;
+            }
+
+            const double centerDistance = QLineF(target.previousCenter, candidate.center).length();
+            const double areaDelta = std::abs(candidate.area - target.previousArea) / qMax(1.0, target.previousArea);
+            const double score = centerDistance +
+                                 areaDelta * qMax(1.0, target.radius) -
+                                 candidate.circularityScore;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+
+        if (bestIndex < 0)
+        {
+            return false;
+        }
+
+        used[bestIndex] = true;
+        const MissedTargetCandidate& candidate = candidates[bestIndex];
+        MissedBatchTarget nextTarget = target;
+        nextTarget.previousCenter = candidate.center;
+        nextTarget.previousArea = candidate.area;
+        nextTargets->push_back(nextTarget);
+        corrections->push_back(correctionWithCenter(target.baseCorrection,
+                                                    candidate.center,
+                                                    target.radiusVector));
+    }
+
+    return true;
 }
 
 QString djiStyleSheet()
@@ -1364,6 +1707,40 @@ bool MainWindow::collectBatchCorrections(const QVector<int>& correctionRows,
     return true;
 }
 
+bool MainWindow::correctionsHaveMixedBatchTypes(const QVector<CorrectionShape>& corrections) const
+{
+    bool hasMissed = false;
+    bool hasNonMissed = false;
+    for (const CorrectionShape& correction : corrections)
+    {
+        if (isMissedCorrectionType(correction.errorType))
+        {
+            hasMissed = true;
+        }
+        else
+        {
+            hasNonMissed = true;
+        }
+    }
+    return hasMissed && hasNonMissed;
+}
+
+bool MainWindow::correctionsAreAllMissed(const QVector<CorrectionShape>& corrections) const
+{
+    if (corrections.isEmpty())
+    {
+        return false;
+    }
+    for (const CorrectionShape& correction : corrections)
+    {
+        if (!isMissedCorrectionType(correction.errorType))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool MainWindow::processFrameForBatch(int frame, beacon_result_t* result, QString* errorMessage) const
 {
     if (result == nullptr)
@@ -1441,6 +1818,102 @@ bool MainWindow::batchCorrectionsMatchAdjacent(const QVector<CorrectionShape>& c
     return true;
 }
 
+bool MainWindow::buildMissedBatchCorrections(const QVector<CorrectionShape>& baseCorrections,
+                                             int startFrame,
+                                             int endFrame,
+                                             double overlapPixelThreshold,
+                                             QVector<CorrectionShape>* matchedCorrections,
+                                             QVector<int>* matchedFrames,
+                                             QVector<int>* failedFrames,
+                                             QString* errorMessage) const
+{
+    if (matchedCorrections == nullptr || matchedFrames == nullptr || failedFrames == nullptr)
+    {
+        return false;
+    }
+
+    matchedCorrections->clear();
+    matchedFrames->clear();
+    failedFrames->clear();
+
+    QVector<MissedBatchTarget> baseTargets;
+    if (!prepareMissedBatchTargets(baseCorrections, &baseTargets, errorMessage))
+    {
+        return false;
+    }
+
+    auto scanDirection = [&](int direction) {
+        QVector<MissedBatchTarget> previousTargets = baseTargets;
+        int previousFrame = m_currentFrame;
+        while (true)
+        {
+            const int nextFrame = previousFrame + direction;
+            if (nextFrame < 0 || nextFrame >= m_reader.frameCount())
+            {
+                break;
+            }
+            if (direction < 0 && nextFrame < startFrame)
+            {
+                break;
+            }
+            if (direction > 0 && nextFrame > endFrame)
+            {
+                break;
+            }
+
+            QImage gray;
+            QString readError;
+            if (!m_reader.readFrame(nextFrame, &gray, &readError))
+            {
+                if (errorMessage != nullptr)
+                {
+                    *errorMessage = readError;
+                }
+                failedFrames->push_back(nextFrame);
+                break;
+            }
+
+            QVector<MissedBatchTarget> nextTargets;
+            QVector<CorrectionShape> frameCorrections;
+            if (!matchMissedTargetsInImage(gray,
+                                           previousTargets,
+                                           qMax(0.0, overlapPixelThreshold),
+                                           &nextTargets,
+                                           &frameCorrections))
+            {
+                failedFrames->push_back(nextFrame);
+                break;
+            }
+
+            if (nextFrame >= startFrame && nextFrame <= endFrame)
+            {
+                matchedFrames->push_back(nextFrame);
+                for (CorrectionShape correction : frameCorrections)
+                {
+                    correction.frame = nextFrame;
+                    matchedCorrections->push_back(correction);
+                }
+            }
+
+            previousTargets = nextTargets;
+            previousFrame = nextFrame;
+        }
+    };
+
+    if (startFrame < m_currentFrame)
+    {
+        scanDirection(-1);
+    }
+    if (endFrame > m_currentFrame)
+    {
+        scanDirection(1);
+    }
+
+    std::sort(matchedFrames->begin(), matchedFrames->end());
+    matchedFrames->erase(std::unique(matchedFrames->begin(), matchedFrames->end()), matchedFrames->end());
+    return true;
+}
+
 void MainWindow::appendCorrectionsToFrames(const QVector<CorrectionShape>& corrections,
                                            const QVector<int>& frames,
                                            const QString& actionName)
@@ -1488,7 +1961,51 @@ void MainWindow::appendCorrectionsToFrames(const QVector<CorrectionShape>& corre
                                  .arg(addedCount));
 }
 
-void MainWindow::batchAddCorrections(const QVector<int>& correctionRows, int startFrame, int endFrame)
+void MainWindow::appendResolvedCorrections(const QVector<CorrectionShape>& corrections,
+                                           const QString& actionName)
+{
+    if (corrections.isEmpty())
+    {
+        QMessageBox::information(this, actionName, QStringLiteral("没有可添加的目标帧。"));
+        return;
+    }
+
+    QVector<int> targetFrames;
+    int addedCount = 0;
+    for (CorrectionShape correction : corrections)
+    {
+        if (correction.frame < 0 || correction.frame >= m_reader.frameCount())
+        {
+            QMessageBox::warning(this, actionName, QStringLiteral("目标帧号超出视频有效范围。"));
+            return;
+        }
+        if (!targetFrames.contains(correction.frame))
+        {
+            targetFrames.push_back(correction.frame);
+        }
+        if (correction.name.trimmed().isEmpty())
+        {
+            correction.name = annotationTypeDisplayName(correction.errorType);
+        }
+        m_annotations.addCorrection(correction);
+        ++addedCount;
+    }
+
+    std::sort(targetFrames.begin(), targetFrames.end());
+    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
+    updateAnnotationList();
+    showFrame(m_currentFrame);
+    QMessageBox::information(this,
+                             actionName,
+                             QStringLiteral("批量添加完成：已向 %1 个目标帧追加 %2 条纠错。")
+                                 .arg(targetFrames.size())
+                                 .arg(addedCount));
+}
+
+void MainWindow::batchAddCorrections(const QVector<int>& correctionRows,
+                                     int startFrame,
+                                     int endFrame,
+                                     double overlapPixelThreshold)
 {
     if (!m_reader.isOpen())
     {
@@ -1516,6 +2033,48 @@ void MainWindow::batchAddCorrections(const QVector<int>& correctionRows, int sta
         QMessageBox::warning(this, QStringLiteral("手动批量添加"), error);
         return;
     }
+    if (correctionsHaveMixedBatchTypes(corrections))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("批量操作"),
+                             QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
+        return;
+    }
+    if (correctionsAreAllMissed(corrections))
+    {
+        QVector<CorrectionShape> matchedCorrections;
+        QVector<int> matchedFrames;
+        QVector<int> failedFrames;
+        if (!buildMissedBatchCorrections(corrections,
+                                         startFrame,
+                                         endFrame,
+                                         overlapPixelThreshold,
+                                         &matchedCorrections,
+                                         &matchedFrames,
+                                         &failedFrames,
+                                         &error))
+        {
+            QMessageBox::warning(this, QStringLiteral("手动批量添加"), error);
+            return;
+        }
+        if (!failedFrames.isEmpty())
+        {
+            QMessageBox::warning(this,
+                                 QStringLiteral("手动批量添加"),
+                                 QStringLiteral("漏检匹配在帧 %1 失败，已停止对应方向检索。")
+                                     .arg(framesText(failedFrames)));
+        }
+        if (matchedCorrections.isEmpty())
+        {
+            if (failedFrames.isEmpty())
+            {
+                QMessageBox::information(this, QStringLiteral("手动批量添加"), QStringLiteral("没有可添加的目标帧。"));
+            }
+            return;
+        }
+        appendResolvedCorrections(matchedCorrections, QStringLiteral("手动批量添加"));
+        return;
+    }
 
     QVector<int> frames;
     for (int frame = startFrame; frame <= endFrame; ++frame)
@@ -1528,18 +2087,57 @@ void MainWindow::batchAddCorrections(const QVector<int>& correctionRows, int sta
 void MainWindow::autoMatchCorrectionFrames(const QVector<int>& correctionRows,
                                            int backwardMaxFrames,
                                            int forwardMaxFrames,
-                                           double positionThreshold)
+                                           double positionThreshold,
+                                           double overlapPixelThreshold)
 {
     if (!m_reader.isOpen())
     {
         return;
     }
+    m_pendingAutoBatchRows.clear();
+    m_pendingAutoMatchedCorrections.clear();
 
     QVector<CorrectionShape> corrections;
     QString error;
     if (!collectBatchCorrections(correctionRows, &corrections, &error))
     {
         QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
+        return;
+    }
+    if (correctionsHaveMixedBatchTypes(corrections))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("批量操作"),
+                             QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
+        return;
+    }
+    if (correctionsAreAllMissed(corrections))
+    {
+        QVector<CorrectionShape> matchedCorrections;
+        QVector<int> matchedFrames;
+        QVector<int> failedFrames;
+        if (!buildMissedBatchCorrections(corrections,
+                                         0,
+                                         m_reader.frameCount() - 1,
+                                         overlapPixelThreshold,
+                                         &matchedCorrections,
+                                         &matchedFrames,
+                                         &failedFrames,
+                                         &error))
+        {
+            QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
+            return;
+        }
+
+        m_pendingAutoBatchRows = normalizedRows(correctionRows);
+        m_pendingAutoMatchedCorrections = matchedCorrections;
+        m_annotationPanel->setAutoMatchedBatchFrames(matchedFrames);
+        QString status = QStringLiteral("自动识别匹配帧完成：%1 帧").arg(matchedFrames.size());
+        if (!failedFrames.isEmpty())
+        {
+            status += QStringLiteral("；停止帧：%1").arg(framesText(failedFrames));
+        }
+        statusBar()->showMessage(status, 3000);
         return;
     }
 
@@ -1624,6 +2222,36 @@ void MainWindow::batchAddCorrectionsToFrames(const QVector<int>& correctionRows,
     if (!collectBatchCorrections(correctionRows, &corrections, &error))
     {
         QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
+        return;
+    }
+    if (correctionsHaveMixedBatchTypes(corrections))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("批量操作"),
+                             QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
+        return;
+    }
+    if (correctionsAreAllMissed(corrections))
+    {
+        const QVector<int> rows = normalizedRows(correctionRows);
+        if (m_pendingAutoBatchRows != rows || m_pendingAutoMatchedCorrections.isEmpty())
+        {
+            QMessageBox::warning(this,
+                                 QStringLiteral("自动批量添加"),
+                                 QStringLiteral("请先点击“自动识别匹配帧”生成匹配帧列表。"));
+            return;
+        }
+
+        const QVector<int> targetFrames = normalizedRows(frames);
+        QVector<CorrectionShape> resolvedCorrections;
+        for (const CorrectionShape& correction : m_pendingAutoMatchedCorrections)
+        {
+            if (targetFrames.contains(correction.frame))
+            {
+                resolvedCorrections.push_back(correction);
+            }
+        }
+        appendResolvedCorrections(resolvedCorrections, QStringLiteral("自动批量添加"));
         return;
     }
 

@@ -244,55 +244,79 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_batchSelectionLabel->setText(QStringLiteral("请选择当前帧已保存纠错条目后执行批量操作。"));
     batchLayout->addWidget(m_batchSelectionLabel);
 
-    auto* manualGroup = new QGroupBox(QStringLiteral("手动批量添加"), m_batchGroup);
-    auto* manualLayout = new QFormLayout(manualGroup);
+    m_batchManualGroup = new QGroupBox(QStringLiteral("手动批量添加"), m_batchGroup);
+    auto* manualLayout = new QFormLayout(m_batchManualGroup);
     manualLayout->setContentsMargins(10, 8, 10, 10);
     manualLayout->setVerticalSpacing(7);
     manualLayout->setHorizontalSpacing(8);
-    m_batchStartSpin = new QSpinBox(manualGroup);
+    m_batchStartSpin = new QSpinBox(m_batchManualGroup);
     m_batchStartSpin->setRange(0, 0);
     m_batchStartSpin->setMinimumWidth(96);
-    m_batchEndSpin = new QSpinBox(manualGroup);
+    m_batchEndSpin = new QSpinBox(m_batchManualGroup);
     m_batchEndSpin->setRange(0, 0);
     m_batchEndSpin->setMinimumWidth(96);
     auto* manualFrameRow = new QHBoxLayout;
     manualFrameRow->setContentsMargins(0, 0, 0, 0);
     manualFrameRow->setSpacing(6);
-    manualFrameRow->addWidget(makeSpinColumn(QStringLiteral("起始帧"), m_batchStartSpin, manualGroup), 1);
-    manualFrameRow->addWidget(makeSpinColumn(QStringLiteral("结束帧"), m_batchEndSpin, manualGroup), 1);
-    auto* manualAddButton = new QPushButton(QStringLiteral("确认批量添加"), manualGroup);
+    manualFrameRow->addWidget(makeSpinColumn(QStringLiteral("起始帧"), m_batchStartSpin, m_batchManualGroup), 1);
+    manualFrameRow->addWidget(makeSpinColumn(QStringLiteral("结束帧"), m_batchEndSpin, m_batchManualGroup), 1);
+    auto* manualAddButton = new QPushButton(QStringLiteral("确认批量添加"), m_batchManualGroup);
     manualLayout->addRow(QStringLiteral("目标帧"), manualFrameRow);
+    m_batchManualOverlapSpin = new QDoubleSpinBox(m_batchManualGroup);
+    m_batchManualOverlapSpin->setRange(0.0, BEACON_IMAGE_W * BEACON_IMAGE_H);
+    m_batchManualOverlapSpin->setDecimals(0);
+    m_batchManualOverlapSpin->setValue(1.0);
+    m_batchManualOverlapSpin->setSuffix(QStringLiteral(" px"));
+    m_batchManualOverlapSpin->setMinimumWidth(110);
+    m_batchManualOverlapWidget = makeSpinColumn(QStringLiteral("两帧目标圆最小重叠像素阈值"),
+                                                m_batchManualOverlapSpin,
+                                                m_batchManualGroup);
+    manualLayout->addRow(m_batchManualOverlapWidget);
     manualLayout->addRow(QString(), manualAddButton);
-    batchLayout->addWidget(manualGroup);
+    batchLayout->addWidget(m_batchManualGroup);
 
-    auto* autoGroup = new QGroupBox(QStringLiteral("自动批量添加"), m_batchGroup);
-    auto* autoLayout = new QFormLayout(autoGroup);
+    m_batchAutoGroup = new QGroupBox(QStringLiteral("自动批量添加"), m_batchGroup);
+    auto* autoLayout = new QFormLayout(m_batchAutoGroup);
     autoLayout->setContentsMargins(10, 8, 10, 10);
     autoLayout->setVerticalSpacing(7);
     autoLayout->setHorizontalSpacing(8);
-    m_batchBackwardSpin = new QSpinBox(autoGroup);
+    m_batchBackwardSpin = new QSpinBox(m_batchAutoGroup);
     m_batchBackwardSpin->setRange(0, 100000);
     m_batchBackwardSpin->setValue(30);
     m_batchBackwardSpin->setMinimumWidth(110);
-    m_batchForwardSpin = new QSpinBox(autoGroup);
+    m_batchForwardSpin = new QSpinBox(m_batchAutoGroup);
     m_batchForwardSpin->setRange(0, 100000);
     m_batchForwardSpin->setValue(30);
     m_batchForwardSpin->setMinimumWidth(110);
-    m_batchThresholdSpin = new QDoubleSpinBox(autoGroup);
+    m_batchThresholdSpin = new QDoubleSpinBox(m_batchAutoGroup);
     m_batchThresholdSpin->setRange(0.0, 1000.0);
     m_batchThresholdSpin->setDecimals(2);
     m_batchThresholdSpin->setValue(3.0);
     m_batchThresholdSpin->setSuffix(QStringLiteral(" px"));
     m_batchThresholdSpin->setMinimumWidth(110);
-    auto* autoFrameRow = new QHBoxLayout;
+    m_batchAutoFrameWidget = new QWidget(m_batchAutoGroup);
+    auto* autoFrameRow = new QHBoxLayout(m_batchAutoFrameWidget);
     autoFrameRow->setContentsMargins(0, 0, 0, 0);
     autoFrameRow->setSpacing(6);
-    autoFrameRow->addWidget(makeSpinColumn(QStringLiteral("向前最大帧数"), m_batchBackwardSpin, autoGroup), 1);
-    autoFrameRow->addWidget(makeSpinColumn(QStringLiteral("向后最大帧数"), m_batchForwardSpin, autoGroup), 1);
-    autoLayout->addRow(autoFrameRow);
-    autoLayout->addRow(makeSpinColumn(QStringLiteral("坐标偏差阈值"), m_batchThresholdSpin, autoGroup));
-    auto* autoMatchButton = new QPushButton(QStringLiteral("自动识别匹配帧"), autoGroup);
-    m_batchApplyAutoButton = new QPushButton(QStringLiteral("全部批量标记"), autoGroup);
+    autoFrameRow->addWidget(makeSpinColumn(QStringLiteral("向前最大帧数"), m_batchBackwardSpin, m_batchAutoGroup), 1);
+    autoFrameRow->addWidget(makeSpinColumn(QStringLiteral("向后最大帧数"), m_batchForwardSpin, m_batchAutoGroup), 1);
+    autoLayout->addRow(m_batchAutoFrameWidget);
+    m_batchPositionThresholdWidget = makeSpinColumn(QStringLiteral("坐标偏差阈值"),
+                                                    m_batchThresholdSpin,
+                                                    m_batchAutoGroup);
+    autoLayout->addRow(m_batchPositionThresholdWidget);
+    m_batchAutoOverlapSpin = new QDoubleSpinBox(m_batchAutoGroup);
+    m_batchAutoOverlapSpin->setRange(0.0, BEACON_IMAGE_W * BEACON_IMAGE_H);
+    m_batchAutoOverlapSpin->setDecimals(0);
+    m_batchAutoOverlapSpin->setValue(1.0);
+    m_batchAutoOverlapSpin->setSuffix(QStringLiteral(" px"));
+    m_batchAutoOverlapSpin->setMinimumWidth(110);
+    m_batchAutoOverlapWidget = makeSpinColumn(QStringLiteral("两帧目标圆最小重叠像素阈值"),
+                                              m_batchAutoOverlapSpin,
+                                              m_batchAutoGroup);
+    autoLayout->addRow(m_batchAutoOverlapWidget);
+    auto* autoMatchButton = new QPushButton(QStringLiteral("自动识别匹配帧"), m_batchAutoGroup);
+    m_batchApplyAutoButton = new QPushButton(QStringLiteral("全部批量标记"), m_batchAutoGroup);
     m_batchApplyAutoButton->setEnabled(false);
     auto* autoButtonRow = new QHBoxLayout;
     autoButtonRow->setContentsMargins(0, 0, 0, 0);
@@ -300,12 +324,13 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     autoButtonRow->addWidget(autoMatchButton);
     autoButtonRow->addWidget(m_batchApplyAutoButton);
     autoLayout->addRow(QString(), autoButtonRow);
-    m_batchMatchedFrameList = new QListWidget(autoGroup);
+    m_batchMatchedFrameList = new QListWidget(m_batchAutoGroup);
     m_batchMatchedFrameList->setSelectionMode(QAbstractItemView::NoSelection);
     m_batchMatchedFrameList->setMaximumHeight(82);
     autoLayout->addRow(QStringLiteral("匹配帧"), m_batchMatchedFrameList);
-    batchLayout->addWidget(autoGroup);
+    batchLayout->addWidget(m_batchAutoGroup);
     m_batchGroup->setVisible(true);
+    setBatchPanelMode(false);
 
     savedLayout->addWidget(m_savedList, 1);
     savedLayout->addWidget(deleteSavedButton);
@@ -415,6 +440,9 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     });
     connect(autoIdentifyButton, &QPushButton::clicked, this, &AnnotationPanel::autoIdentifyRequested);
     connect(m_savedList, &QListWidget::itemSelectionChanged, this, &AnnotationPanel::refreshBatchPanel);
+    connect(m_savedList, &QListWidget::currentItemChanged, this, [this](QListWidgetItem*, QListWidgetItem*) {
+        refreshBatchPanel();
+    });
     connect(m_savedList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         if (item != nullptr)
         {
@@ -640,6 +668,101 @@ QVector<int> AnnotationPanel::selectedCurrentFrameCorrectionRows() const
     return rows;
 }
 
+bool AnnotationPanel::selectedBatchTypes(bool* hasMissed, bool* hasNonMissed, bool* latestIsMissed) const
+{
+    bool missed = false;
+    bool nonMissed = false;
+    bool latestMissed = false;
+    bool latestFound = false;
+
+    const QListWidgetItem* current = m_savedList->currentItem();
+    for (const QListWidgetItem* item : m_savedList->selectedItems())
+    {
+        if (item == nullptr ||
+            item->data(KindRole).toString() != QStringLiteral("correction") ||
+            item->data(FrameRole).toInt() != m_currentFrame)
+        {
+            continue;
+        }
+
+        QString type = item->data(TypeCodeRole).toString();
+        const int row = item->data(IndexRole).toInt();
+        if (type.isEmpty() && row >= 0 && row < m_allCorrections.size())
+        {
+            type = m_allCorrections[row].errorType;
+        }
+
+        const bool itemIsMissed = isMissedType(type);
+        missed = missed || itemIsMissed;
+        nonMissed = nonMissed || !itemIsMissed;
+        if (item == current)
+        {
+            latestMissed = itemIsMissed;
+            latestFound = true;
+        }
+        else if (!latestFound)
+        {
+            latestMissed = itemIsMissed;
+        }
+    }
+
+    if (hasMissed != nullptr)
+    {
+        *hasMissed = missed;
+    }
+    if (hasNonMissed != nullptr)
+    {
+        *hasNonMissed = nonMissed;
+    }
+    if (latestIsMissed != nullptr)
+    {
+        *latestIsMissed = latestMissed;
+    }
+    return missed || nonMissed;
+}
+
+bool AnnotationPanel::selectedBatchHasMixedTypes() const
+{
+    bool hasMissed = false;
+    bool hasNonMissed = false;
+    selectedBatchTypes(&hasMissed, &hasNonMissed, nullptr);
+    return hasMissed && hasNonMissed;
+}
+
+bool AnnotationPanel::batchPanelPreviewUsesMissed() const
+{
+    bool latestIsMissed = false;
+    selectedBatchTypes(nullptr, nullptr, &latestIsMissed);
+    return latestIsMissed;
+}
+
+void AnnotationPanel::setBatchPanelMode(bool missedMode)
+{
+    if (m_batchManualOverlapWidget != nullptr)
+    {
+        m_batchManualOverlapWidget->setVisible(missedMode);
+    }
+    if (m_batchAutoOverlapWidget != nullptr)
+    {
+        m_batchAutoOverlapWidget->setVisible(missedMode);
+    }
+    if (m_batchAutoFrameWidget != nullptr)
+    {
+        m_batchAutoFrameWidget->setVisible(!missedMode);
+    }
+    if (m_batchPositionThresholdWidget != nullptr)
+    {
+        m_batchPositionThresholdWidget->setVisible(!missedMode);
+    }
+}
+
+void AnnotationPanel::warnMixedBatchTypes()
+{
+    QMessageBox::warning(this,
+                         QStringLiteral("批量操作"),
+                         QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
+}
+
 bool AnnotationPanel::batchFrameRangeAccepted(int startFrame, int endFrame) const
 {
     if (startFrame > endFrame)
@@ -804,6 +927,7 @@ void AnnotationPanel::refreshSavedList()
         item->setData(KindRole, QStringLiteral("correction"));
         item->setData(IndexRole, i);
         item->setData(FrameRole, shape.frame);
+        item->setData(TypeCodeRole, shape.errorType);
         m_savedList->addItem(item);
     }
     refreshBatchPanel();
@@ -831,9 +955,14 @@ void AnnotationPanel::refreshBatchPanel()
 {
     const QVector<int> rows = selectedCurrentFrameCorrectionRows();
     const bool hasSelection = !rows.isEmpty();
+    bool hasMissed = false;
+    bool hasNonMissed = false;
+    bool latestIsMissed = false;
+    selectedBatchTypes(&hasMissed, &hasNonMissed, &latestIsMissed);
     m_batchGroup->setVisible(true);
     if (!hasSelection)
     {
+        setBatchPanelMode(false);
         m_batchSelectionLabel->setText(QStringLiteral("请选择当前帧已保存纠错条目后执行批量操作。"));
         m_autoMatchedBatchFrames.clear();
         m_batchMatchedFrameList->clear();
@@ -841,7 +970,19 @@ void AnnotationPanel::refreshBatchPanel()
         return;
     }
 
-    m_batchSelectionLabel->setText(QStringLiteral("已选择当前帧纠错条目：%1 条").arg(rows.size()));
+    setBatchPanelMode(latestIsMissed);
+    if (hasMissed && hasNonMissed)
+    {
+        m_batchSelectionLabel->setText(QStringLiteral("已选择当前帧纠错条目：%1 条；包含漏检和非漏检，执行批量操作时会拦截。").arg(rows.size()));
+    }
+    else if (hasMissed)
+    {
+        m_batchSelectionLabel->setText(QStringLiteral("已选择当前帧漏检纠错条目：%1 条").arg(rows.size()));
+    }
+    else
+    {
+        m_batchSelectionLabel->setText(QStringLiteral("已选择当前帧非漏检纠错条目：%1 条").arg(rows.size()));
+    }
     if (m_currentFrame >= m_firstFrame && m_currentFrame <= m_lastFrame)
     {
         if (m_batchStartSpin->value() < m_firstFrame || m_batchStartSpin->value() > m_lastFrame)
@@ -862,6 +1003,11 @@ void AnnotationPanel::refreshBatchPanel()
 void AnnotationPanel::applyManualBatchAdd()
 {
     const QVector<int> rows = selectedCurrentFrameCorrectionRows();
+    if (selectedBatchHasMixedTypes())
+    {
+        warnMixedBatchTypes();
+        return;
+    }
     if (rows.isEmpty())
     {
         QMessageBox::warning(this,
@@ -877,12 +1023,20 @@ void AnnotationPanel::applyManualBatchAdd()
         return;
     }
 
-    emit batchAddCorrectionsRequested(rows, startFrame, endFrame);
+    emit batchAddCorrectionsRequested(rows,
+                                      startFrame,
+                                      endFrame,
+                                      m_batchManualOverlapSpin != nullptr ? m_batchManualOverlapSpin->value() : 0.0);
 }
 
 void AnnotationPanel::requestAutoBatchMatch()
 {
     const QVector<int> rows = selectedCurrentFrameCorrectionRows();
+    if (selectedBatchHasMixedTypes())
+    {
+        warnMixedBatchTypes();
+        return;
+    }
     if (rows.isEmpty())
     {
         QMessageBox::warning(this,
@@ -897,12 +1051,18 @@ void AnnotationPanel::requestAutoBatchMatch()
     emit autoMatchCorrectionFramesRequested(rows,
                                             m_batchBackwardSpin->value(),
                                             m_batchForwardSpin->value(),
-                                            m_batchThresholdSpin->value());
+                                            m_batchThresholdSpin->value(),
+                                            m_batchAutoOverlapSpin != nullptr ? m_batchAutoOverlapSpin->value() : 0.0);
 }
 
 void AnnotationPanel::applyAutoBatchAdd()
 {
     const QVector<int> rows = selectedCurrentFrameCorrectionRows();
+    if (selectedBatchHasMixedTypes())
+    {
+        warnMixedBatchTypes();
+        return;
+    }
     if (rows.isEmpty())
     {
         QMessageBox::warning(this,
