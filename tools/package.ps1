@@ -6,8 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$MsysRoot = "C:/msys64/mingw64"
-$MsysBin = "$MsysRoot/bin"
+. "$PSScriptRoot/env.ps1"
 $BuildScript = Join-Path $PSScriptRoot "build.ps1"
 $Exe = Join-Path $ProjectRoot "build/BeaconImageAnalyzer.exe"
 $WindeployQt = Join-Path $MsysBin "windeployqt.exe"

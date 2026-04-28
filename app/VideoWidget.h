@@ -2,6 +2,7 @@
 #define VIDEO_WIDGET_H
 
 #include <QImage>
+#include <QColor>
 #include <QLabel>
 #include <QPoint>
 #include <QPointF>
@@ -19,6 +20,7 @@ public:
     void setPixelSourceImage(const QImage& image);
     void setFrameGeometry(const QSize& originalSize, int displayScale);
     void setCorrectionTool(const QString& tool);
+    void setCorrectionStyle(const QColor& color, int lineWidth);
     QSize sizeHint() const override;
 
 signals:
@@ -45,6 +47,8 @@ private:
     QPoint m_lastHoverWidgetPoint;
     int m_displayScale = 1;
     QString m_correctionTool = QStringLiteral("select");
+    QColor m_correctionColor = QColor(255, 80, 80);
+    int m_correctionLineWidth = 2;
     bool m_hasHoverPoint = false;
     bool m_drawing = false;
     QVector<QPointF> m_previewPoints;

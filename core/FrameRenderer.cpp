@@ -80,6 +80,12 @@ QImage FrameRenderer::render(const QImage& grayImage,
 
     for (const CorrectionShape& shape : corrections)
     {
+        const QColor shapeColor = shape.lineColor.isValid() ? shape.lineColor : QColor(255, 80, 80);
+        correctionPen.setColor(shapeColor);
+        correctionPen.setWidth(qMax(1, shape.lineWidth * safeScale));
+        painter.setPen(correctionPen);
+        painter.setBrush(Qt::NoBrush);
+
         QVector<QPointF> displayPoints;
         for (const QPointF& point : shape.points)
         {
@@ -102,7 +108,7 @@ QImage FrameRenderer::render(const QImage& grayImage,
         }
         else if (shape.shapeType == QStringLiteral("point") && !displayPoints.isEmpty())
         {
-            painter.setBrush(QColor(255, 80, 80));
+            painter.setBrush(shapeColor);
             painter.drawEllipse(displayPoints[0], 2 * safeScale, 2 * safeScale);
             painter.setBrush(Qt::NoBrush);
         }
@@ -116,11 +122,16 @@ QImage FrameRenderer::render(const QImage& grayImage,
             }
         }
 
-        if (!displayPoints.isEmpty() && shape.expectedIndex >= 0)
+        const QString circleText = errorCirclesDisplayName(shape.errorCircles);
+        const bool hasCircleText = !shape.errorCircles.isEmpty();
+        if (!displayPoints.isEmpty() && (shape.expectedIndex >= 0 || hasCircleText))
         {
-            painter.setPen(QColor(255, 170, 170));
+            painter.setPen(shapeColor.lighter(150));
+            const QString label = hasCircleText
+                ? circleText
+                : QStringLiteral("GT #%1").arg(shape.expectedIndex);
             painter.drawText(displayPoints.first() + QPointF(2 * safeScale, -2 * safeScale),
-                             QStringLiteral("GT #%1").arg(shape.expectedIndex));
+                             label);
             painter.setPen(correctionPen);
         }
     }

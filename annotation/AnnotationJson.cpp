@@ -6,6 +6,94 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+namespace
+{
+QJsonArray stringListToJson(const QStringList& values)
+{
+    QJsonArray array;
+    for (const QString& value : values)
+    {
+        if (!value.trimmed().isEmpty())
+        {
+            array.append(value);
+        }
+    }
+    return array;
+}
+
+QStringList stringListFromJson(const QJsonValue& value, const QString& fallback)
+{
+    QStringList result;
+    const QJsonArray array = value.toArray();
+    for (const QJsonValue& item : array)
+    {
+        const QString text = item.toString().trimmed();
+        if (!text.isEmpty())
+        {
+            result.push_back(text);
+        }
+    }
+    if (result.isEmpty() && !fallback.trimmed().isEmpty())
+    {
+        result.push_back(fallback);
+    }
+    return result;
+}
+
+QJsonArray errorCirclesToJson(const QVector<ErrorCircle>& circles)
+{
+    QJsonArray array;
+    for (const ErrorCircle& circle : circles)
+    {
+        QJsonObject object;
+        object.insert(QStringLiteral("circle_index"), circle.circleIndex);
+        object.insert(QStringLiteral("expected_index"), circle.expectedIndex);
+        array.append(object);
+    }
+    return array;
+}
+
+QVector<ErrorCircle> errorCirclesFromJson(const QJsonValue& value, int legacyCircle, int legacyExpected)
+{
+    QVector<ErrorCircle> result;
+    const QJsonArray array = value.toArray();
+    for (const QJsonValue& item : array)
+    {
+        const QJsonObject object = item.toObject();
+        ErrorCircle circle;
+        circle.circleIndex = object.value(QStringLiteral("circle_index")).toInt(-1);
+        circle.expectedIndex = object.value(QStringLiteral("expected_index")).toInt(-1);
+        if (circle.circleIndex >= 0)
+        {
+            result.push_back(circle);
+        }
+    }
+
+    if (result.isEmpty() && legacyCircle >= 0)
+    {
+        ErrorCircle circle;
+        circle.circleIndex = legacyCircle;
+        circle.expectedIndex = legacyExpected;
+        result.push_back(circle);
+    }
+
+    return result;
+}
+
+QJsonArray pointsToJson(const QVector<QPointF>& points)
+{
+    QJsonArray array;
+    for (const QPointF& point : points)
+    {
+        QJsonObject pointObject;
+        pointObject.insert(QStringLiteral("x"), point.x());
+        pointObject.insert(QStringLiteral("y"), point.y());
+        array.append(pointObject);
+    }
+    return array;
+}
+}
+
 bool AnnotationJson::save(const QString& path,
                           const AnnotationVideoInfo& videoInfo,
                           const AnnotationModel& model,
@@ -43,11 +131,13 @@ bool AnnotationJson::save(const QString& path,
     {
         QJsonObject item;
         item.insert(QStringLiteral("type"), record.type);
+        item.insert(QStringLiteral("types"), stringListToJson(record.types));
         item.insert(QStringLiteral("start_frame"), record.startFrame);
         item.insert(QStringLiteral("end_frame"), record.endFrame);
         item.insert(QStringLiteral("start_time_sec"), record.startTimeSec);
         item.insert(QStringLiteral("end_time_sec"), record.endTimeSec);
         item.insert(QStringLiteral("circle_index"), record.circleIndex);
+        item.insert(QStringLiteral("error_circles"), errorCirclesToJson(record.errorCircles));
         item.insert(QStringLiteral("description"), record.description);
         annotations.append(item);
     }
@@ -60,18 +150,13 @@ bool AnnotationJson::save(const QString& path,
         item.insert(QStringLiteral("shape_type"), shape.shapeType);
         item.insert(QStringLiteral("frame"), shape.frame);
         item.insert(QStringLiteral("error_type"), shape.errorType);
+        item.insert(QStringLiteral("error_types"), stringListToJson(shape.errorTypes));
         item.insert(QStringLiteral("expected_index"), shape.expectedIndex);
+        item.insert(QStringLiteral("error_circles"), errorCirclesToJson(shape.errorCircles));
         item.insert(QStringLiteral("description"), shape.description);
-
-        QJsonArray points;
-        for (const QPointF& point : shape.points)
-        {
-            QJsonObject pointObject;
-            pointObject.insert(QStringLiteral("x"), point.x());
-            pointObject.insert(QStringLiteral("y"), point.y());
-            points.append(pointObject);
-        }
-        item.insert(QStringLiteral("points"), points);
+        item.insert(QStringLiteral("line_color"), shape.lineColor.name(QColor::HexRgb));
+        item.insert(QStringLiteral("line_width"), shape.lineWidth);
+        item.insert(QStringLiteral("points"), pointsToJson(shape.points));
         corrections.append(item);
     }
     root.insert(QStringLiteral("corrections"), corrections);
@@ -121,11 +206,15 @@ bool AnnotationJson::load(const QString& path,
         const QJsonObject object = value.toObject();
         AnnotationRecord record;
         record.type = object.value(QStringLiteral("type")).toString(QStringLiteral("other"));
+        record.types = stringListFromJson(object.value(QStringLiteral("types")), record.type);
         record.startFrame = object.value(QStringLiteral("start_frame")).toInt();
         record.endFrame = object.value(QStringLiteral("end_frame")).toInt(record.startFrame);
         record.startTimeSec = object.value(QStringLiteral("start_time_sec")).toDouble();
         record.endTimeSec = object.value(QStringLiteral("end_time_sec")).toDouble(record.startTimeSec);
         record.circleIndex = object.value(QStringLiteral("circle_index")).toInt(-1);
+        record.errorCircles = errorCirclesFromJson(object.value(QStringLiteral("error_circles")),
+                                                   record.circleIndex,
+                                                   -1);
         record.description = object.value(QStringLiteral("description")).toString();
         model->add(record);
     }
@@ -138,8 +227,18 @@ bool AnnotationJson::load(const QString& path,
         shape.shapeType = object.value(QStringLiteral("shape_type")).toString();
         shape.frame = object.value(QStringLiteral("frame")).toInt();
         shape.errorType = object.value(QStringLiteral("error_type")).toString(QStringLiteral("other"));
+        shape.errorTypes = stringListFromJson(object.value(QStringLiteral("error_types")), shape.errorType);
         shape.expectedIndex = object.value(QStringLiteral("expected_index")).toInt(-1);
+        shape.errorCircles = errorCirclesFromJson(object.value(QStringLiteral("error_circles")),
+                                                  -1,
+                                                  shape.expectedIndex);
         shape.description = object.value(QStringLiteral("description")).toString();
+        shape.lineColor = QColor(object.value(QStringLiteral("line_color")).toString(QStringLiteral("#ff5050")));
+        if (!shape.lineColor.isValid())
+        {
+            shape.lineColor = QColor(255, 80, 80);
+        }
+        shape.lineWidth = qBound(1, object.value(QStringLiteral("line_width")).toInt(1), 15);
 
         const QJsonArray points = object.value(QStringLiteral("points")).toArray();
         for (const QJsonValue& pointValue : points)

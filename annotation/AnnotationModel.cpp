@@ -74,6 +74,11 @@ QVector<CorrectionShape> AnnotationModel::correctionsForFrame(int frame) const
 
 QString annotationTypeDisplayName(const QString& type)
 {
+    if (type.startsWith(QStringLiteral("custom:")))
+    {
+        const QString name = type.mid(QStringLiteral("custom:").size()).trimmed();
+        return name.isEmpty() ? QStringLiteral("自定义") : name;
+    }
     if (type == QStringLiteral("missed_detection"))
     {
         return QStringLiteral("漏检");
@@ -95,6 +100,41 @@ QString annotationTypeDisplayName(const QString& type)
         return QStringLiteral("目标跳变");
     }
     return QStringLiteral("其他");
+}
+
+QString annotationTypesDisplayName(const QStringList& types)
+{
+    QStringList names;
+    for (const QString& type : types)
+    {
+        if (!type.trimmed().isEmpty())
+        {
+            names.push_back(annotationTypeDisplayName(type));
+        }
+    }
+    return names.isEmpty() ? QStringLiteral("未分类") : names.join(QStringLiteral("+"));
+}
+
+QString errorCirclesDisplayName(const QVector<ErrorCircle>& circles)
+{
+    if (circles.isEmpty())
+    {
+        return QStringLiteral("无错误圆");
+    }
+
+    QStringList names;
+    for (const ErrorCircle& circle : circles)
+    {
+        QString text = circle.circleIndex >= 0
+            ? QStringLiteral("#%1").arg(circle.circleIndex)
+            : QStringLiteral("未指定");
+        if (circle.expectedIndex >= 0)
+        {
+            text += QStringLiteral("->GT #%1").arg(circle.expectedIndex);
+        }
+        names.push_back(text);
+    }
+    return names.join(QStringLiteral(", "));
 }
 
 QString annotationTypeCodeFromIndex(int index)

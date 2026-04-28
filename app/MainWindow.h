@@ -18,6 +18,7 @@ class QSlider;
 class QSpinBox;
 class QDoubleSpinBox;
 class QTextEdit;
+class QPushButton;
 class VideoWidget;
 
 class MainWindow : public QMainWindow
@@ -40,13 +41,20 @@ private slots:
     void jumpToFrame();
     void jumpToTime();
     void showFrameFromSlider(int value);
-    void markCurrentFrameAnnotation(const QString& type, int circleIndex, const QString& description);
+    void markCurrentFrameAnnotation(const QStringList& types,
+                                    const QVector<ErrorCircle>& errorCircles,
+                                    const QString& description);
     void setSegmentStart();
     void setSegmentEnd();
-    void saveSegmentAnnotation(const QString& type, int circleIndex, const QString& description);
+    void saveSegmentAnnotation(const QStringList& types,
+                               const QVector<ErrorCircle>& errorCircles,
+                               const QString& description);
     void deleteAnnotation(int row);
     void deleteCorrection(int row);
+    void deleteAnnotations(const QVector<int>& rows);
+    void deleteCorrections(const QVector<int>& rows);
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
+    void autoIdentifyCorrectionTargets();
     void openAlgorithmLocation();
     void jumpToRecordFrame(int frame);
     void updateHoverPixelInfo(int x, int y, int gray, bool valid);
@@ -62,6 +70,10 @@ private:
     void updateCurrentAnnotationInfo();
     void updateAnnotationList();
     void togglePlayPause();
+    void updatePlayPauseButton();
+    bool validateAnnotationInput(const QStringList& types,
+                                 const QVector<ErrorCircle>& errorCircles,
+                                 const QString& actionName) const;
     void restoreLastSession();
     void saveProject();
     bool loadProject();
@@ -83,6 +95,7 @@ private:
     QLabel* m_algorithmInfoLabel = nullptr;
     QTextEdit* m_resultText = nullptr;
     AnnotationPanel* m_annotationPanel = nullptr;
+    QPushButton* m_playPauseButton = nullptr;
     QSlider* m_slider = nullptr;
     QSpinBox* m_frameSpin = nullptr;
     QDoubleSpinBox* m_timeSpin = nullptr;
@@ -96,6 +109,7 @@ private:
     double m_usedFps = 50.0;
     int m_segmentStartFrame = -1;
     int m_segmentEndFrame = -1;
+    beacon_result_t m_currentResult = {};
 };
 
 #endif

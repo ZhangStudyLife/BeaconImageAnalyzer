@@ -26,12 +26,15 @@
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineF>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPolygonF>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QRectF>
 #include <QSettings>
 #include <QScrollArea>
 #include <QSlider>
@@ -44,6 +47,9 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <algorithm>
+#include <functional>
 
 namespace
 {
@@ -75,6 +81,72 @@ QJsonArray pointsToJson(const QVector<QPointF>& points)
         array.append(object);
     }
     return array;
+}
+
+QJsonArray stringListToJson(const QStringList& values)
+{
+    QJsonArray array;
+    for (const QString& value : values)
+    {
+        if (!value.trimmed().isEmpty())
+        {
+            array.append(value);
+        }
+    }
+    return array;
+}
+
+QJsonArray errorCirclesToJson(const QVector<ErrorCircle>& circles)
+{
+    QJsonArray array;
+    for (const ErrorCircle& circle : circles)
+    {
+        QJsonObject object;
+        object.insert(QStringLiteral("circle_index"), circle.circleIndex);
+        object.insert(QStringLiteral("expected_index"), circle.expectedIndex);
+        array.append(object);
+    }
+    return array;
+}
+
+bool typesRequireErrorSource(const QStringList& types)
+{
+    if (types.isEmpty())
+    {
+        return false;
+    }
+    for (const QString& type : types)
+    {
+        if (type != QStringLiteral("missed_detection"))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isClosedCorrectionShape(const CorrectionShape& shape)
+{
+    return (shape.shapeType == QStringLiteral("circle") && shape.points.size() >= 2) ||
+           (shape.shapeType == QStringLiteral("rect") && shape.points.size() >= 2) ||
+           (shape.shapeType == QStringLiteral("polygon") && shape.points.size() >= 3);
+}
+
+bool shapeContainsPoint(const CorrectionShape& shape, const QPointF& point)
+{
+    if (shape.shapeType == QStringLiteral("circle") && shape.points.size() >= 2)
+    {
+        return QLineF(shape.points[0], point).length() <= QLineF(shape.points[0], shape.points[1]).length();
+    }
+    if (shape.shapeType == QStringLiteral("rect") && shape.points.size() >= 2)
+    {
+        return QRectF(shape.points[0], shape.points[1]).normalized().contains(point);
+    }
+    if (shape.shapeType == QStringLiteral("polygon") && shape.points.size() >= 3)
+    {
+        return QPolygonF(shape.points).containsPoint(point, Qt::OddEvenFill);
+    }
+    return false;
 }
 
 QString djiStyleSheet()
@@ -408,12 +480,12 @@ void MainWindow::buildUi()
     rightScroll->setObjectName(QStringLiteral("RightScroll"));
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setMinimumWidth(340);
-    rightScroll->setMaximumWidth(430);
+    rightScroll->setMinimumWidth(390);
+    rightScroll->setMaximumWidth(560);
 
     auto* rightPanel = new QWidget(rightScroll);
     rightPanel->setObjectName(QStringLiteral("RightPanel"));
-    rightPanel->setMinimumWidth(320);
+    rightPanel->setMinimumWidth(370);
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(12);
@@ -427,7 +499,7 @@ void MainWindow::buildUi()
     m_currentAnnotationsLabel = new QLabel(QStringLiteral("当前帧标注: -"), rightPanel);
     m_currentAnnotationsLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_currentAnnotationsLabel->setWordWrap(true);
-    m_currentAnnotationsLabel->setMaximumHeight(84);
+    m_currentAnnotationsLabel->setMaximumHeight(132);
     m_resultText = new QTextEdit(rightPanel);
     m_resultText->setReadOnly(true);
     m_resultText->setFixedHeight(112);
@@ -486,11 +558,9 @@ void MainWindow::buildUi()
     controlsTitle->setObjectName(QStringLiteral("ConsoleTitle"));
     auto* playbackRow = new QHBoxLayout;
     playbackRow->setSpacing(8);
-    auto* playButton = new QPushButton(QStringLiteral("播放"), controlsFrame);
-    playButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-    playButton->setProperty("role", QStringLiteral("primary"));
-    auto* pauseButton = new QPushButton(QStringLiteral("暂停"), controlsFrame);
-    pauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPause));
+    m_playPauseButton = new QPushButton(QStringLiteral("播放"), controlsFrame);
+    m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    m_playPauseButton->setProperty("role", QStringLiteral("primary"));
     auto* previousButton = new QPushButton(QStringLiteral("上一帧"), controlsFrame);
     previousButton->setIcon(style()->standardIcon(QStyle::SP_MediaSeekBackward));
     auto* nextButton = new QPushButton(QStringLiteral("下一帧"), controlsFrame);
@@ -521,8 +591,7 @@ void MainWindow::buildUi()
     auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
     timeLabel->setObjectName(QStringLiteral("SoftLabel"));
 
-    playbackRow->addWidget(playButton);
-    playbackRow->addWidget(pauseButton);
+    playbackRow->addWidget(m_playPauseButton);
     playbackRow->addWidget(previousButton);
     playbackRow->addWidget(nextButton);
     playbackRow->addSpacing(10);
@@ -548,8 +617,7 @@ void MainWindow::buildUi()
     connect(exportAviRailButton, &QToolButton::clicked, this, &MainWindow::exportMarkedAvi);
     connect(exportCsvRailButton, &QToolButton::clicked, this, &MainWindow::exportCsv);
     connect(exitRailButton, &QToolButton::clicked, this, &QWidget::close);
-    connect(playButton, &QPushButton::clicked, this, &MainWindow::play);
-    connect(pauseButton, &QPushButton::clicked, this, &MainWindow::pause);
+    connect(m_playPauseButton, &QPushButton::clicked, this, &MainWindow::togglePlayPause);
     connect(previousButton, &QPushButton::clicked, this, &MainWindow::previousFrame);
     connect(nextButton, &QPushButton::clicked, this, &MainWindow::nextFrame);
     connect(jumpFrameButton, &QPushButton::clicked, this, &MainWindow::jumpToFrame);
@@ -576,8 +644,16 @@ void MainWindow::buildUi()
             this, &MainWindow::deleteAnnotation);
     connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionRequested,
             this, &MainWindow::deleteCorrection);
+    connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationsRequested,
+            this, &MainWindow::deleteAnnotations);
+    connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionsRequested,
+            this, &MainWindow::deleteCorrections);
     connect(m_annotationPanel, &AnnotationPanel::correctionToolChanged,
             m_videoWidget, &VideoWidget::setCorrectionTool);
+    connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged,
+            m_videoWidget, &VideoWidget::setCorrectionStyle);
+    connect(m_annotationPanel, &AnnotationPanel::autoIdentifyRequested,
+            this, &MainWindow::autoIdentifyCorrectionTargets);
     connect(m_annotationPanel, &AnnotationPanel::recordActivated,
             this, &MainWindow::jumpToRecordFrame);
     connect(m_videoWidget, &VideoWidget::correctionShapeFinished,
@@ -822,12 +898,14 @@ void MainWindow::play()
     if (m_reader.isOpen())
     {
         m_playTimer.start(qMax(1, (int)(1000.0 / m_usedFps)));
+        updatePlayPauseButton();
     }
 }
 
 void MainWindow::pause()
 {
     m_playTimer.stop();
+    updatePlayPauseButton();
 }
 
 void MainWindow::togglePlayPause()
@@ -840,6 +918,48 @@ void MainWindow::togglePlayPause()
     {
         play();
     }
+}
+
+void MainWindow::updatePlayPauseButton()
+{
+    if (m_playPauseButton == nullptr)
+    {
+        return;
+    }
+
+    if (m_playTimer.isActive())
+    {
+        m_playPauseButton->setText(QStringLiteral("暂停"));
+        m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPause));
+    }
+    else
+    {
+        m_playPauseButton->setText(QStringLiteral("播放"));
+        m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    }
+}
+
+bool MainWindow::validateAnnotationInput(const QStringList& types,
+                                         const QVector<ErrorCircle>& errorCircles,
+                                         const QString& actionName) const
+{
+    if (types.isEmpty())
+    {
+        QMessageBox::warning(const_cast<MainWindow*>(this),
+                             actionName,
+                             QStringLiteral("请至少选择一个错误类型。"));
+        return false;
+    }
+
+    if (typesRequireErrorSource(types) && errorCircles.isEmpty())
+    {
+        QMessageBox::warning(const_cast<MainWindow*>(this),
+                             actionName,
+                             QStringLiteral("选中误检、排序错误、目标跳变或其他类型时，必须选择至少一个错误圆并填写对应期望编号。"));
+        return false;
+    }
+
+    return true;
 }
 
 void MainWindow::nextFrame()
@@ -902,6 +1022,7 @@ void MainWindow::showFrame(int frameIndex)
 
     m_currentFrame = frameIndex;
     const beacon_result_t result = m_runner.process(gray);
+    m_currentResult = result;
     QImage displayImage = gray;
     if (viewMode() == QStringLiteral("binary"))
     {
@@ -995,42 +1116,48 @@ void MainWindow::updateCurrentAnnotationInfo()
     QString text = QStringLiteral("当前帧标注: 文字 %1 条 / 图形 %2 条\n").arg(records.size()).arg(corrections.size());
     for (const AnnotationRecord& record : records)
     {
-        const QString circle = record.circleIndex >= 0
-            ? QStringLiteral("#%1").arg(record.circleIndex)
-            : QStringLiteral("全部");
+        const QStringList types = record.types.isEmpty() ? QStringList{ record.type } : record.types;
+        const QVector<ErrorCircle> circles = record.errorCircles.isEmpty() && record.circleIndex >= 0
+            ? QVector<ErrorCircle>{ ErrorCircle{ record.circleIndex, -1 } }
+            : record.errorCircles;
         text += QStringLiteral("- %1 %2 %3\n")
-                    .arg(annotationTypeDisplayName(record.type))
-                    .arg(circle)
+                    .arg(annotationTypesDisplayName(types))
+                    .arg(errorCirclesDisplayName(circles))
                     .arg(record.description);
     }
     for (const CorrectionShape& shape : corrections)
     {
-        const QString expected = shape.expectedIndex >= 0
-            ? QStringLiteral("GT #%1").arg(shape.expectedIndex)
-            : QStringLiteral("GT 未指定");
         text += QStringLiteral("- 图形 %1 %2 %3 %4\n")
-                    .arg(annotationTypeDisplayName(shape.errorType))
+                    .arg(annotationTypesDisplayName(shape.errorTypes.isEmpty() ? QStringList{ shape.errorType } : shape.errorTypes))
                     .arg(shape.shapeType)
-                    .arg(expected)
+                    .arg(errorCirclesDisplayName(shape.errorCircles))
                     .arg(shape.description);
     }
     m_currentAnnotationsLabel->setText(text.trimmed());
 }
 
-void MainWindow::markCurrentFrameAnnotation(const QString& type, int circleIndex, const QString& description)
+void MainWindow::markCurrentFrameAnnotation(const QStringList& types,
+                                            const QVector<ErrorCircle>& errorCircles,
+                                            const QString& description)
 {
     if (!m_reader.isOpen())
     {
         return;
     }
+    if (!validateAnnotationInput(types, errorCircles, QStringLiteral("标记当前帧")))
+    {
+        return;
+    }
 
     AnnotationRecord record;
-    record.type = type;
+    record.type = types.isEmpty() ? QStringLiteral("other") : types.first();
+    record.types = types;
     record.startFrame = m_currentFrame;
     record.endFrame = m_currentFrame;
     record.startTimeSec = frameTime(m_currentFrame);
     record.endTimeSec = record.startTimeSec;
-    record.circleIndex = circleIndex;
+    record.circleIndex = errorCircles.isEmpty() ? -1 : errorCircles.first().circleIndex;
+    record.errorCircles = errorCircles;
     record.description = description;
     m_annotations.add(record);
     updateAnnotationList();
@@ -1056,23 +1183,31 @@ void MainWindow::setSegmentEnd()
     m_annotationPanel->setSegmentEnd(m_segmentEndFrame);
 }
 
-void MainWindow::saveSegmentAnnotation(const QString& type, int circleIndex, const QString& description)
+void MainWindow::saveSegmentAnnotation(const QStringList& types,
+                                       const QVector<ErrorCircle>& errorCircles,
+                                       const QString& description)
 {
     if (!m_reader.isOpen() || m_segmentStartFrame < 0 || m_segmentEndFrame < 0)
     {
         QMessageBox::warning(this, QStringLiteral("片段不完整"), QStringLiteral("请先设置片段开始和结束"));
         return;
     }
+    if (!validateAnnotationInput(types, errorCircles, QStringLiteral("保存片段标注")))
+    {
+        return;
+    }
 
     const int startFrame = qMin(m_segmentStartFrame, m_segmentEndFrame);
     const int endFrame = qMax(m_segmentStartFrame, m_segmentEndFrame);
     AnnotationRecord record;
-    record.type = type;
+    record.type = types.isEmpty() ? QStringLiteral("other") : types.first();
+    record.types = types;
     record.startFrame = startFrame;
     record.endFrame = endFrame;
     record.startTimeSec = frameTime(startFrame);
     record.endTimeSec = frameTime(endFrame);
-    record.circleIndex = circleIndex;
+    record.circleIndex = errorCircles.isEmpty() ? -1 : errorCircles.first().circleIndex;
+    record.errorCircles = errorCircles;
     record.description = description;
     m_annotations.add(record);
     updateAnnotationList();
@@ -1096,6 +1231,38 @@ void MainWindow::deleteCorrection(int row)
     }
 }
 
+void MainWindow::deleteAnnotations(const QVector<int>& rows)
+{
+    bool changed = false;
+    QVector<int> sortedRows = rows;
+    std::sort(sortedRows.begin(), sortedRows.end(), std::greater<int>());
+    for (int row : sortedRows)
+    {
+        changed = m_annotations.removeAt(row) || changed;
+    }
+    if (changed)
+    {
+        updateAnnotationList();
+        showFrame(m_currentFrame);
+    }
+}
+
+void MainWindow::deleteCorrections(const QVector<int>& rows)
+{
+    bool changed = false;
+    QVector<int> sortedRows = rows;
+    std::sort(sortedRows.begin(), sortedRows.end(), std::greater<int>());
+    for (int row : sortedRows)
+    {
+        changed = m_annotations.removeCorrectionAt(row) || changed;
+    }
+    if (changed)
+    {
+        updateAnnotationList();
+        showFrame(m_currentFrame);
+    }
+}
+
 void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
 {
     if (!m_reader.isOpen() || points.isEmpty())
@@ -1106,13 +1273,72 @@ void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPoi
     CorrectionShape shape;
     shape.shapeType = shapeType;
     shape.frame = m_currentFrame;
-    shape.errorType = m_annotationPanel->selectedType();
-    shape.expectedIndex = m_annotationPanel->selectedExpectedIndex();
+    shape.errorTypes = m_annotationPanel->selectedTypes();
+    shape.errorType = shape.errorTypes.isEmpty() ? QStringLiteral("other") : shape.errorTypes.first();
+    shape.errorCircles = m_annotationPanel->selectedErrorCircles();
+    shape.expectedIndex = shape.errorCircles.isEmpty() ? -1 : shape.errorCircles.first().expectedIndex;
     shape.description = m_annotationPanel->noteText();
     shape.points = points;
+    shape.lineColor = m_annotationPanel->selectedCorrectionColor();
+    shape.lineWidth = m_annotationPanel->selectedCorrectionLineWidth();
     m_annotations.addCorrection(shape);
     updateAnnotationList();
     showFrame(m_currentFrame);
+}
+
+void MainWindow::autoIdentifyCorrectionTargets()
+{
+    if (!m_reader.isOpen())
+    {
+        return;
+    }
+
+    const QVector<CorrectionShape>& allCorrections = m_annotations.corrections();
+    const CorrectionShape* shape = nullptr;
+    for (int i = allCorrections.size() - 1; i >= 0; --i)
+    {
+        const CorrectionShape& candidate = allCorrections[i];
+        if (candidate.frame == m_currentFrame && isClosedCorrectionShape(candidate))
+        {
+            shape = &candidate;
+            break;
+        }
+    }
+
+    if (shape == nullptr)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("自动识别"),
+                                 QStringLiteral("请先在当前帧绘制一个封闭纠错图形（圆、矩形或自由闭合）。"));
+        return;
+    }
+
+    QVector<int> matchedIndices;
+    for (int i = 0; i < m_currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    {
+        const beacon_circle_t& circle = m_currentResult.circles[i];
+        if (circle.valid == 0)
+        {
+            continue;
+        }
+
+        const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
+        if (shapeContainsPoint(*shape, imagePoint))
+        {
+            matchedIndices.push_back(i);
+        }
+    }
+
+    if (matchedIndices.isEmpty())
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("自动识别"),
+                                 QStringLiteral("封闭区域内没有已识别的光点目标。"));
+        return;
+    }
+
+    m_annotationPanel->setSelectedErrorCircleIndices(matchedIndices);
+    statusBar()->showMessage(QStringLiteral("已自动选择 %1 个错误圆").arg(matchedIndices.size()), 3000);
 }
 
 void MainWindow::openAlgorithmLocation()
@@ -1253,11 +1479,13 @@ void MainWindow::saveProject()
     {
         QJsonObject item;
         item.insert(QStringLiteral("type"), record.type);
+        item.insert(QStringLiteral("types"), stringListToJson(record.types));
         item.insert(QStringLiteral("start_frame"), record.startFrame);
         item.insert(QStringLiteral("end_frame"), record.endFrame);
         item.insert(QStringLiteral("start_time_sec"), record.startTimeSec);
         item.insert(QStringLiteral("end_time_sec"), record.endTimeSec);
         item.insert(QStringLiteral("circle_index"), record.circleIndex);
+        item.insert(QStringLiteral("error_circles"), errorCirclesToJson(record.errorCircles));
         item.insert(QStringLiteral("description"), record.description);
         annotations.append(item);
     }
@@ -1270,8 +1498,12 @@ void MainWindow::saveProject()
         item.insert(QStringLiteral("shape_type"), shape.shapeType);
         item.insert(QStringLiteral("frame"), shape.frame);
         item.insert(QStringLiteral("error_type"), shape.errorType);
+        item.insert(QStringLiteral("error_types"), stringListToJson(shape.errorTypes));
         item.insert(QStringLiteral("expected_index"), shape.expectedIndex);
+        item.insert(QStringLiteral("error_circles"), errorCirclesToJson(shape.errorCircles));
         item.insert(QStringLiteral("description"), shape.description);
+        item.insert(QStringLiteral("line_color"), shape.lineColor.name(QColor::HexRgb));
+        item.insert(QStringLiteral("line_width"), shape.lineWidth);
         item.insert(QStringLiteral("points"), pointsToJson(shape.points));
         corrections.append(item);
     }

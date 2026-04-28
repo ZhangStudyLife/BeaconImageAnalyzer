@@ -2,17 +2,27 @@
 #define ANNOTATION_MODEL_H
 
 #include <QPointF>
+#include <QColor>
 #include <QString>
+#include <QStringList>
 #include <QVector>
+
+struct ErrorCircle
+{
+    int circleIndex = -1;
+    int expectedIndex = -1;
+};
 
 struct AnnotationRecord
 {
     QString type;
+    QStringList types;
     int startFrame = 0;
     int endFrame = 0;
     double startTimeSec = 0.0;
     double endTimeSec = 0.0;
     int circleIndex = -1;
+    QVector<ErrorCircle> errorCircles;
     QString description;
 };
 
@@ -21,9 +31,13 @@ struct CorrectionShape
     QString shapeType;
     int frame = 0;
     QString errorType;
+    QStringList errorTypes;
     int expectedIndex = -1;
+    QVector<ErrorCircle> errorCircles;
     QString description;
     QVector<QPointF> points;
+    QColor lineColor = QColor(255, 80, 80);
+    int lineWidth = 1;
 };
 
 class AnnotationModel
@@ -45,6 +59,8 @@ private:
 };
 
 QString annotationTypeDisplayName(const QString& type);
+QString annotationTypesDisplayName(const QStringList& types);
+QString errorCirclesDisplayName(const QVector<ErrorCircle>& circles);
 QString annotationTypeCodeFromIndex(int index);
 
 #endif

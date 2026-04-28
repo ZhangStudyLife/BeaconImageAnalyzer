@@ -58,6 +58,13 @@ void VideoWidget::setCorrectionTool(const QString& tool)
     update();
 }
 
+void VideoWidget::setCorrectionStyle(const QColor& color, int lineWidth)
+{
+    m_correctionColor = color.isValid() ? color : QColor(255, 80, 80);
+    m_correctionLineWidth = qBound(1, lineWidth, 15);
+    update();
+}
+
 QSize VideoWidget::sizeHint() const
 {
     if (!m_image.isNull())
@@ -215,8 +222,8 @@ void VideoWidget::paintEvent(QPaintEvent* event)
         return;
     }
 
-    QPen pen(QColor(255, 80, 80));
-    pen.setWidth(2);
+    QPen pen(m_correctionColor);
+    pen.setWidth(m_correctionLineWidth);
     painter.setPen(pen);
     painter.setBrush(Qt::NoBrush);
 
