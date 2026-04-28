@@ -62,6 +62,7 @@ int main(int argc, char* argv[])
             QString error;
             const bool ok = exporter.exportMarkedAvi(args.at(2), args.at(3), 50.0,
                                                      nullptr,
+                                                     nullptr,
                                                      [](int current, int total) {
                                                          if (current == total || current % 100 == 0)
                                                          {

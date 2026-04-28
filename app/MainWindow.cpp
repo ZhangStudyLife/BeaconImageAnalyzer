@@ -2183,7 +2183,7 @@ void MainWindow::exportMarkedAvi()
 
     VideoExporter exporter;
     QString error;
-    const bool ok = exporter.exportMarkedAvi(m_currentVideoPath, path, m_usedFps, &m_runner,
+    const bool ok = exporter.exportMarkedAvi(m_currentVideoPath, path, m_usedFps, &m_runner, &m_annotations,
                                              [&](int current, int total) {
                                                  progress.setMaximum(total);
                                                  progress.setValue(current);

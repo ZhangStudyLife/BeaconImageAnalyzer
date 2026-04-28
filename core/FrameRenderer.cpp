@@ -21,6 +21,37 @@ QString correctionType(const CorrectionShape& shape)
     return shape.errorType.trimmed();
 }
 
+QString correctionLabel(const CorrectionShape& shape)
+{
+    QStringList types;
+    for (const QString& type : shape.errorTypes)
+    {
+        if (!type.trimmed().isEmpty())
+        {
+            types.push_back(type.trimmed());
+        }
+    }
+    if (types.isEmpty() && !shape.errorType.trimmed().isEmpty())
+    {
+        types.push_back(shape.errorType.trimmed());
+    }
+    return annotationTypesDisplayName(types);
+}
+
+QString correctionSummary(const CorrectionShape& shape)
+{
+    QString text = correctionLabel(shape);
+    if (!shape.description.trimmed().isEmpty())
+    {
+        if (!text.trimmed().isEmpty())
+        {
+            text += QStringLiteral(": ");
+        }
+        text += shape.description.trimmed();
+    }
+    return text;
+}
+
 QColor correctionColor(const QString& type)
 {
     if (type == QStringLiteral("false_positive"))
@@ -64,6 +95,26 @@ void drawCorrectionLabel(QPainter& painter,
     painter.setFont(font);
     painter.setPen(color);
     painter.drawText(anchor + QPointF(2 * safeScale, -2 * safeScale), text);
+}
+
+void drawCorrectionSummary(QPainter& painter,
+                           int row,
+                           const QString& text,
+                           const QColor& color,
+                           int safeScale)
+{
+    if (text.trimmed().isEmpty())
+    {
+        return;
+    }
+
+    QFont font = painter.font();
+    font.setPixelSize(safeScale == 1 ? 7 : 10);
+    font.setBold(false);
+    painter.setFont(font);
+    painter.setPen(color);
+    const int lineHeight = font.pixelSize() + 3 * safeScale;
+    painter.drawText(QPointF(4 * safeScale, (row + 1) * lineHeight), text);
 }
 
 QVector<QPointF> displayPointsForShape(const CorrectionShape& shape, int safeScale)
@@ -146,11 +197,12 @@ QImage FrameRenderer::render(const QImage& grayImage,
     QPen correctionPen;
     correctionPen.setWidth(1);
     painter.setBrush(Qt::NoBrush);
+    int summaryRow = 0;
 
     for (const CorrectionShape& shape : corrections)
     {
         const QString type = correctionType(shape);
-        const QString label = annotationTypeDisplayName(type);
+        const QString label = correctionLabel(shape);
         const QColor shapeColor = correctionColor(type);
         correctionPen.setColor(shapeColor);
         correctionPen.setWidth(1);
@@ -242,6 +294,12 @@ QImage FrameRenderer::render(const QImage& grayImage,
                 painter.drawLine(displayPoints.last(), displayPoints.first());
             }
             drawCorrectionLabel(painter, displayPoints.first(), label, shapeColor, safeScale);
+            painter.setPen(correctionPen);
+        }
+        else
+        {
+            drawCorrectionSummary(painter, summaryRow, correctionSummary(shape), shapeColor, safeScale);
+            ++summaryRow;
             painter.setPen(correctionPen);
         }
     }
