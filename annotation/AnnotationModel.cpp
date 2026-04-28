@@ -54,6 +54,20 @@ bool AnnotationModel::removeCorrectionAt(int index)
     return true;
 }
 
+bool AnnotationModel::removeCorrectionsForFrame(int frame)
+{
+    bool changed = false;
+    for (int i = m_corrections.size() - 1; i >= 0; --i)
+    {
+        if (m_corrections[i].frame == frame)
+        {
+            m_corrections.removeAt(i);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 const QVector<CorrectionShape>& AnnotationModel::corrections() const
 {
     return m_corrections;
@@ -125,9 +139,19 @@ QString errorCirclesDisplayName(const QVector<ErrorCircle>& circles)
     QStringList names;
     for (const ErrorCircle& circle : circles)
     {
-        QString text = circle.circleIndex >= 0
-            ? QStringLiteral("#%1").arg(circle.circleIndex)
-            : QStringLiteral("未指定");
+        QString text;
+        if (circle.circleIndex >= 0)
+        {
+            text = QStringLiteral("#%1").arg(circle.circleIndex);
+        }
+        else if (circle.expectedIndex >= 0)
+        {
+            text = QStringLiteral("漏检");
+        }
+        else
+        {
+            text = QStringLiteral("未指定");
+        }
         if (circle.expectedIndex >= 0)
         {
             text += QStringLiteral("->GT #%1").arg(circle.expectedIndex);

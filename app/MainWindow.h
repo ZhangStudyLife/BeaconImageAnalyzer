@@ -53,6 +53,7 @@ private slots:
     void deleteCorrection(int row);
     void deleteAnnotations(const QVector<int>& rows);
     void deleteCorrections(const QVector<int>& rows);
+    void saveCurrentFrameCorrections(const QVector<CorrectionShape>& corrections);
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
     void autoIdentifyCorrectionTargets();
     void openAlgorithmLocation();

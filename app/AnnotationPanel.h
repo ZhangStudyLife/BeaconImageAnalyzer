@@ -5,19 +5,17 @@
 
 #include <QColor>
 #include <QMap>
-#include <QStringList>
 #include <QWidget>
 
-class QCheckBox;
 class QComboBox;
 class QFormLayout;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QSpinBox;
 class QTextEdit;
-class QVBoxLayout;
 
 class AnnotationPanel : public QWidget
 {
@@ -29,25 +27,15 @@ public:
     void setCurrentContext(int frame, double timeSec, int circleCount);
     void setSegmentStart(int frame);
     void setSegmentEnd(int frame);
+    void setCurrentFrameCorrections(const QVector<CorrectionShape>& corrections, bool force = false);
     void setAnnotations(const QVector<AnnotationRecord>& records, const QVector<CorrectionShape>& corrections);
-    void setSelectedErrorCircleIndices(const QVector<int>& circleIndices);
-    QStringList selectedTypes() const;
-    QVector<ErrorCircle> selectedErrorCircles() const;
-    QColor selectedCorrectionColor() const;
-    int selectedCorrectionLineWidth() const;
-    QString noteText() const;
+    QVector<CorrectionShape> draftCorrections() const;
+    bool activeDraftShape(CorrectionShape* shape) const;
+    void applyDrawnCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
+    void applyAutoIdentifiedErrorCircles(const QVector<int>& circleIndices);
 
 signals:
-    void currentFrameAnnotationRequested(const QStringList& types,
-                                         const QVector<ErrorCircle>& errorCircles,
-                                         const QString& description);
-    void segmentStartRequested();
-    void segmentEndRequested();
-    void segmentAnnotationRequested(const QStringList& types,
-                                    const QVector<ErrorCircle>& errorCircles,
-                                    const QString& description);
-    void deleteAnnotationRequested(int row);
-    void deleteCorrectionRequested(int row);
+    void saveCurrentFrameCorrectionsRequested(const QVector<CorrectionShape>& corrections);
     void deleteAnnotationsRequested(const QVector<int>& rows);
     void deleteCorrectionsRequested(const QVector<int>& rows);
     void correctionToolChanged(const QString& tool);
@@ -56,31 +44,70 @@ signals:
     void recordActivated(int frame);
 
 private:
+    void addDraftEntry();
+    void deleteDraftEntry();
+    void saveDraftEntries();
     void addCustomType();
     void deleteSelectedRecords();
+    void syncActiveDraftFromWidgets();
+    void syncWidgetsFromActiveDraft();
+    void refreshDraftList();
+    void refreshSourceList();
+    void refreshExpectedEditors();
+    void refreshTypeFields();
+    void refreshFilterTypes();
+    void refreshSavedList();
+    void clearSavedFilters();
     void updateColorButton();
-    void updateExpectedEditors();
+    void ensureCustomTypeAvailable(const QString& type, const QString& description = QString());
+    int activeDraftIndex() const;
+    QString defaultDraftName(int index) const;
+    QString draftDisplayName(const CorrectionShape& draft, int index) const;
+    QString savedAnnotationSummary(const AnnotationRecord& record) const;
+    QString savedCorrectionSummary(const CorrectionShape& shape) const;
+    QStringList checkedFilterTypes() const;
+    bool frameRangeAccepted(int* startFrame, int* endFrame);
+    bool savedFrameMatches(int startFrame, int endFrame, int itemStartFrame, int itemEndFrame) const;
+    bool savedTypesMatch(const QStringList& types) const;
+    bool validateDraft(const CorrectionShape& draft, int index, QString* errorMessage) const;
+    bool typeRequiresSource(const QString& type) const;
+    bool typeRequiresExpectedForSources(const QString& type) const;
+    bool isCustomType(const QString& type) const;
 
     QLabel* m_contextLabel = nullptr;
-    QCheckBox* m_falsePositiveCheck = nullptr;
-    QCheckBox* m_missedDetectionCheck = nullptr;
-    QCheckBox* m_wrongOrderCheck = nullptr;
-    QCheckBox* m_targetJumpCheck = nullptr;
-    QCheckBox* m_otherCheck = nullptr;
-    QLineEdit* m_customTypeEdit = nullptr;
-    QVBoxLayout* m_customTypeLayout = nullptr;
-    QVector<QCheckBox*> m_customTypeChecks;
+    QListWidget* m_draftList = nullptr;
+    QLineEdit* m_nameEdit = nullptr;
+    QComboBox* m_typeCombo = nullptr;
+    QLineEdit* m_customTypeNameEdit = nullptr;
+    QTextEdit* m_customTypeDescriptionEdit = nullptr;
+    QGroupBox* m_sourceGroup = nullptr;
     QListWidget* m_errorCircleList = nullptr;
     QWidget* m_expectedEditorWidget = nullptr;
     QFormLayout* m_expectedEditorLayout = nullptr;
     QMap<int, QSpinBox*> m_expectedSpins;
+    QGroupBox* m_missingGroup = nullptr;
+    QLabel* m_missingExpectedLabel = nullptr;
+    QSpinBox* m_missingExpectedSpin = nullptr;
+    QTextEdit* m_noteEdit = nullptr;
+    QGroupBox* m_toolGroup = nullptr;
     QComboBox* m_toolCombo = nullptr;
     QPushButton* m_colorButton = nullptr;
     QSpinBox* m_lineWidthSpin = nullptr;
+    QSpinBox* m_filterStartSpin = nullptr;
+    QSpinBox* m_filterEndSpin = nullptr;
+    QListWidget* m_filterTypeList = nullptr;
+    QListWidget* m_savedList = nullptr;
+
+    QVector<AnnotationRecord> m_allRecords;
+    QVector<CorrectionShape> m_allCorrections;
+    QVector<CorrectionShape> m_drafts;
+    QMap<QString, QString> m_customTypeDescriptions;
+    int m_currentFrame = -1;
+    int m_circleCount = 0;
+    int m_nextDraftNumber = 1;
+    bool m_draftsDirty = false;
+    bool m_updating = false;
     QColor m_lineColor = QColor(255, 80, 80);
-    QTextEdit* m_noteEdit = nullptr;
-    QLabel* m_segmentLabel = nullptr;
-    QListWidget* m_listWidget = nullptr;
 };
 
 #endif

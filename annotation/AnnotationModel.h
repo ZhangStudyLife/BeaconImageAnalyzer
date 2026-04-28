@@ -28,6 +28,7 @@ struct AnnotationRecord
 
 struct CorrectionShape
 {
+    QString name;
     QString shapeType;
     int frame = 0;
     QString errorType;
@@ -50,6 +51,7 @@ public:
     QVector<AnnotationRecord> recordsForFrame(int frame) const;
     void addCorrection(const CorrectionShape& shape);
     bool removeCorrectionAt(int index);
+    bool removeCorrectionsForFrame(int frame);
     const QVector<CorrectionShape>& corrections() const;
     QVector<CorrectionShape> correctionsForFrame(int frame) const;
 

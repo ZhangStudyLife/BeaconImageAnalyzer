@@ -632,18 +632,8 @@ void MainWindow::buildUi()
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         showFrame(m_currentFrame);
     });
-    connect(m_annotationPanel, &AnnotationPanel::currentFrameAnnotationRequested,
-            this, &MainWindow::markCurrentFrameAnnotation);
-    connect(m_annotationPanel, &AnnotationPanel::segmentStartRequested,
-            this, &MainWindow::setSegmentStart);
-    connect(m_annotationPanel, &AnnotationPanel::segmentEndRequested,
-            this, &MainWindow::setSegmentEnd);
-    connect(m_annotationPanel, &AnnotationPanel::segmentAnnotationRequested,
-            this, &MainWindow::saveSegmentAnnotation);
-    connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationRequested,
-            this, &MainWindow::deleteAnnotation);
-    connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionRequested,
-            this, &MainWindow::deleteCorrection);
+    connect(m_annotationPanel, &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
+            this, &MainWindow::saveCurrentFrameCorrections);
     connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationsRequested,
             this, &MainWindow::deleteAnnotations);
     connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionsRequested,
@@ -1032,7 +1022,10 @@ void MainWindow::showFrame(int frameIndex)
             displayImage = binary;
         }
     }
-    const QVector<CorrectionShape> corrections = m_annotations.correctionsForFrame(m_currentFrame);
+    const QVector<CorrectionShape> savedCorrections = m_annotations.correctionsForFrame(m_currentFrame);
+    m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
+    m_annotationPanel->setCurrentFrameCorrections(savedCorrections);
+    const QVector<CorrectionShape> corrections = m_annotationPanel->draftCorrections();
     m_videoWidget->setFrameGeometry(QSize(BEACON_IMAGE_W, BEACON_IMAGE_H), 1);
     m_videoWidget->setPixelSourceImage(gray);
     m_videoWidget->setImage(FrameRenderer::render(displayImage, result, corrections, 1, m_showOverlay));
@@ -1075,7 +1068,6 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
         text = QStringLiteral("无有效圆");
     }
     m_resultText->setPlainText(text);
-    m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
     updateCurrentAnnotationInfo();
 }
 
@@ -1263,6 +1255,30 @@ void MainWindow::deleteCorrections(const QVector<int>& rows)
     }
 }
 
+void MainWindow::saveCurrentFrameCorrections(const QVector<CorrectionShape>& corrections)
+{
+    if (!m_reader.isOpen())
+    {
+        return;
+    }
+
+    m_annotations.removeCorrectionsForFrame(m_currentFrame);
+    for (CorrectionShape correction : corrections)
+    {
+        correction.frame = m_currentFrame;
+        if (correction.name.trimmed().isEmpty())
+        {
+            correction.name = annotationTypeDisplayName(correction.errorType);
+        }
+        m_annotations.addCorrection(correction);
+    }
+
+    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
+    updateAnnotationList();
+    showFrame(m_currentFrame);
+    statusBar()->showMessage(QStringLiteral("当前帧纠错已保存"), 3000);
+}
+
 void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
 {
     if (!m_reader.isOpen() || points.isEmpty())
@@ -1270,19 +1286,7 @@ void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPoi
         return;
     }
 
-    CorrectionShape shape;
-    shape.shapeType = shapeType;
-    shape.frame = m_currentFrame;
-    shape.errorTypes = m_annotationPanel->selectedTypes();
-    shape.errorType = shape.errorTypes.isEmpty() ? QStringLiteral("other") : shape.errorTypes.first();
-    shape.errorCircles = m_annotationPanel->selectedErrorCircles();
-    shape.expectedIndex = shape.errorCircles.isEmpty() ? -1 : shape.errorCircles.first().expectedIndex;
-    shape.description = m_annotationPanel->noteText();
-    shape.points = points;
-    shape.lineColor = m_annotationPanel->selectedCorrectionColor();
-    shape.lineWidth = m_annotationPanel->selectedCorrectionLineWidth();
-    m_annotations.addCorrection(shape);
-    updateAnnotationList();
+    m_annotationPanel->applyDrawnCorrectionShape(shapeType, points);
     showFrame(m_currentFrame);
 }
 
@@ -1293,19 +1297,8 @@ void MainWindow::autoIdentifyCorrectionTargets()
         return;
     }
 
-    const QVector<CorrectionShape>& allCorrections = m_annotations.corrections();
-    const CorrectionShape* shape = nullptr;
-    for (int i = allCorrections.size() - 1; i >= 0; --i)
-    {
-        const CorrectionShape& candidate = allCorrections[i];
-        if (candidate.frame == m_currentFrame && isClosedCorrectionShape(candidate))
-        {
-            shape = &candidate;
-            break;
-        }
-    }
-
-    if (shape == nullptr)
+    CorrectionShape shape;
+    if (!m_annotationPanel->activeDraftShape(&shape) || !isClosedCorrectionShape(shape))
     {
         QMessageBox::information(this,
                                  QStringLiteral("自动识别"),
@@ -1323,7 +1316,7 @@ void MainWindow::autoIdentifyCorrectionTargets()
         }
 
         const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
-        if (shapeContainsPoint(*shape, imagePoint))
+        if (shapeContainsPoint(shape, imagePoint))
         {
             matchedIndices.push_back(i);
         }
@@ -1337,7 +1330,8 @@ void MainWindow::autoIdentifyCorrectionTargets()
         return;
     }
 
-    m_annotationPanel->setSelectedErrorCircleIndices(matchedIndices);
+    m_annotationPanel->applyAutoIdentifiedErrorCircles(matchedIndices);
+    showFrame(m_currentFrame);
     statusBar()->showMessage(QStringLiteral("已自动选择 %1 个错误圆").arg(matchedIndices.size()), 3000);
 }
 
@@ -1495,6 +1489,7 @@ void MainWindow::saveProject()
     for (const CorrectionShape& shape : m_annotations.corrections())
     {
         QJsonObject item;
+        item.insert(QStringLiteral("name"), shape.name);
         item.insert(QStringLiteral("shape_type"), shape.shapeType);
         item.insert(QStringLiteral("frame"), shape.frame);
         item.insert(QStringLiteral("error_type"), shape.errorType);

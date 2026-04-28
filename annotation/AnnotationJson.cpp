@@ -63,7 +63,7 @@ QVector<ErrorCircle> errorCirclesFromJson(const QJsonValue& value, int legacyCir
         ErrorCircle circle;
         circle.circleIndex = object.value(QStringLiteral("circle_index")).toInt(-1);
         circle.expectedIndex = object.value(QStringLiteral("expected_index")).toInt(-1);
-        if (circle.circleIndex >= 0)
+        if (circle.circleIndex >= 0 || circle.expectedIndex >= 0)
         {
             result.push_back(circle);
         }
@@ -147,6 +147,7 @@ bool AnnotationJson::save(const QString& path,
     for (const CorrectionShape& shape : model.corrections())
     {
         QJsonObject item;
+        item.insert(QStringLiteral("name"), shape.name);
         item.insert(QStringLiteral("shape_type"), shape.shapeType);
         item.insert(QStringLiteral("frame"), shape.frame);
         item.insert(QStringLiteral("error_type"), shape.errorType);
@@ -224,6 +225,7 @@ bool AnnotationJson::load(const QString& path,
     {
         const QJsonObject object = value.toObject();
         CorrectionShape shape;
+        shape.name = object.value(QStringLiteral("name")).toString();
         shape.shapeType = object.value(QStringLiteral("shape_type")).toString();
         shape.frame = object.value(QStringLiteral("frame")).toInt();
         shape.errorType = object.value(QStringLiteral("error_type")).toString(QStringLiteral("other"));
@@ -248,7 +250,10 @@ bool AnnotationJson::load(const QString& path,
                                            pointObject.value(QStringLiteral("y")).toDouble()));
         }
 
-        if (!shape.shapeType.isEmpty() && !shape.points.isEmpty())
+        if (!shape.errorType.isEmpty() ||
+            !shape.name.trimmed().isEmpty() ||
+            !shape.description.trimmed().isEmpty() ||
+            (!shape.shapeType.isEmpty() && !shape.points.isEmpty()))
         {
             model->addCorrection(shape);
         }
