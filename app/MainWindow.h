@@ -54,6 +54,12 @@ private slots:
     void deleteAnnotations(const QVector<int>& rows);
     void deleteCorrections(const QVector<int>& rows);
     void saveCurrentFrameCorrections(const QVector<CorrectionShape>& corrections);
+    void batchAddCorrections(const QVector<int>& correctionRows, int startFrame, int endFrame);
+    void autoMatchCorrectionFrames(const QVector<int>& correctionRows,
+                                   int backwardMaxFrames,
+                                   int forwardMaxFrames,
+                                   double positionThreshold);
+    void batchAddCorrectionsToFrames(const QVector<int>& correctionRows, const QVector<int>& frames);
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
     void autoIdentifyCorrectionTargets();
     void openAlgorithmLocation();
@@ -72,9 +78,22 @@ private:
     void updateAnnotationList();
     void togglePlayPause();
     void updatePlayPauseButton();
+    void setPlaybackSpeed(double speed);
+    int playbackIntervalMs() const;
     bool validateAnnotationInput(const QStringList& types,
                                  const QVector<ErrorCircle>& errorCircles,
                                  const QString& actionName) const;
+    bool collectBatchCorrections(const QVector<int>& correctionRows,
+                                 QVector<CorrectionShape>* corrections,
+                                 QString* errorMessage) const;
+    bool processFrameForBatch(int frame, beacon_result_t* result, QString* errorMessage) const;
+    bool batchCorrectionsMatchAdjacent(const QVector<CorrectionShape>& corrections,
+                                       const beacon_result_t& previous,
+                                       const beacon_result_t& next,
+                                       double positionThreshold) const;
+    void appendCorrectionsToFrames(const QVector<CorrectionShape>& corrections,
+                                   const QVector<int>& frames,
+                                   const QString& actionName);
     void restoreLastSession();
     void saveProject();
     bool loadProject();
@@ -101,6 +120,7 @@ private:
     QSpinBox* m_frameSpin = nullptr;
     QDoubleSpinBox* m_timeSpin = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
+    QComboBox* m_speedCombo = nullptr;
 
     QString m_currentVideoPath;
     int m_currentFrame = 0;
@@ -108,6 +128,7 @@ private:
     bool m_showOverlay = true;
     bool m_updatingControls = false;
     double m_usedFps = 50.0;
+    double m_playbackSpeed = 1.0;
     int m_segmentStartFrame = -1;
     int m_segmentEndFrame = -1;
     beacon_result_t m_currentResult = {};

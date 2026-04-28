@@ -49,6 +49,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 
 namespace
@@ -385,7 +386,7 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1120, 680);
     resize(1320, 780);
 
-    m_playTimer.setInterval(20);
+    m_playTimer.setInterval(playbackIntervalMs());
     connect(&m_playTimer, &QTimer::timeout, this, &MainWindow::nextFrame);
     qApp->installEventFilter(this);
     QTimer::singleShot(0, this, &MainWindow::restoreLastSession);
@@ -583,9 +584,21 @@ void MainWindow::buildUi()
     m_viewModeCombo->addItem(QStringLiteral("原始图像"), QStringLiteral("original"));
     m_viewModeCombo->addItem(QStringLiteral("二值化图像"), QStringLiteral("binary"));
     m_viewModeCombo->setFixedWidth(128);
+    m_speedCombo = new QComboBox(controlsFrame);
+    m_speedCombo->addItem(QStringLiteral("1/8倍速"), 0.125);
+    m_speedCombo->addItem(QStringLiteral("1/4倍速"), 0.25);
+    m_speedCombo->addItem(QStringLiteral("1/2倍速"), 0.5);
+    m_speedCombo->addItem(QStringLiteral("正常1倍速"), 1.0);
+    m_speedCombo->addItem(QStringLiteral("2倍速"), 2.0);
+    m_speedCombo->addItem(QStringLiteral("4倍速"), 4.0);
+    m_speedCombo->addItem(QStringLiteral("8倍速"), 8.0);
+    m_speedCombo->setCurrentIndex(3);
+    m_speedCombo->setFixedWidth(118);
 
     auto* viewLabel = new QLabel(QStringLiteral("视图"), controlsFrame);
     viewLabel->setObjectName(QStringLiteral("SoftLabel"));
+    auto* speedLabel = new QLabel(QStringLiteral("倍速"), controlsFrame);
+    speedLabel->setObjectName(QStringLiteral("SoftLabel"));
     auto* frameLabel = new QLabel(QStringLiteral("Frame"), controlsFrame);
     frameLabel->setObjectName(QStringLiteral("SoftLabel"));
     auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
@@ -597,6 +610,8 @@ void MainWindow::buildUi()
     playbackRow->addSpacing(10);
     playbackRow->addWidget(viewLabel);
     playbackRow->addWidget(m_viewModeCombo);
+    playbackRow->addWidget(speedLabel);
+    playbackRow->addWidget(m_speedCombo);
     playbackRow->addStretch(1);
     playbackRow->addWidget(frameLabel);
     playbackRow->addWidget(m_frameSpin);
@@ -632,12 +647,21 @@ void MainWindow::buildUi()
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         showFrame(m_currentFrame);
     });
+    connect(m_speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+        setPlaybackSpeed(m_speedCombo->currentData().toDouble());
+    });
     connect(m_annotationPanel, &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
             this, &MainWindow::saveCurrentFrameCorrections);
     connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationsRequested,
             this, &MainWindow::deleteAnnotations);
     connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionsRequested,
             this, &MainWindow::deleteCorrections);
+    connect(m_annotationPanel, &AnnotationPanel::batchAddCorrectionsRequested,
+            this, &MainWindow::batchAddCorrections);
+    connect(m_annotationPanel, &AnnotationPanel::autoMatchCorrectionFramesRequested,
+            this, &MainWindow::autoMatchCorrectionFrames);
+    connect(m_annotationPanel, &AnnotationPanel::batchAddCorrectionsToFramesRequested,
+            this, &MainWindow::batchAddCorrectionsToFrames);
     connect(m_annotationPanel, &AnnotationPanel::correctionToolChanged,
             m_videoWidget, &VideoWidget::setCorrectionTool);
     connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged,
@@ -720,6 +744,7 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
     m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
     m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
     m_timeSpin->setRange(0.0, frameTime(qMax(0, m_reader.frameCount() - 1)));
+    m_annotationPanel->setVideoFrameRange(0, qMax(0, m_reader.frameCount() - 1));
 
     m_videoInfoLabel->setText(QStringLiteral("%1 | %2x%3 | %4帧\nFPS: %5 / 使用 %6 | %7 | %8 %9-bit")
                                   .arg(QFileInfo(path).fileName())
@@ -887,7 +912,7 @@ void MainWindow::play()
 {
     if (m_reader.isOpen())
     {
-        m_playTimer.start(qMax(1, (int)(1000.0 / m_usedFps)));
+        m_playTimer.start(playbackIntervalMs());
         updatePlayPauseButton();
     }
 }
@@ -927,6 +952,27 @@ void MainWindow::updatePlayPauseButton()
         m_playPauseButton->setText(QStringLiteral("播放"));
         m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
     }
+}
+
+void MainWindow::setPlaybackSpeed(double speed)
+{
+    if (speed <= 0.0)
+    {
+        return;
+    }
+
+    const bool wasPlaying = m_playTimer.isActive();
+    m_playbackSpeed = speed;
+    if (wasPlaying)
+    {
+        m_playTimer.start(playbackIntervalMs());
+    }
+}
+
+int MainWindow::playbackIntervalMs() const
+{
+    const double fps = m_usedFps > 0.0 ? m_usedFps : 50.0;
+    return qMax(1, (int)std::round(1000.0 / (fps * m_playbackSpeed)));
 }
 
 bool MainWindow::validateAnnotationInput(const QStringList& types,
@@ -1277,6 +1323,321 @@ void MainWindow::saveCurrentFrameCorrections(const QVector<CorrectionShape>& cor
     updateAnnotationList();
     showFrame(m_currentFrame);
     statusBar()->showMessage(QStringLiteral("当前帧纠错已保存"), 3000);
+}
+
+bool MainWindow::collectBatchCorrections(const QVector<int>& correctionRows,
+                                         QVector<CorrectionShape>* corrections,
+                                         QString* errorMessage) const
+{
+    if (corrections == nullptr)
+    {
+        return false;
+    }
+
+    corrections->clear();
+    QVector<int> rows = correctionRows;
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    if (rows.isEmpty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("请先选择当前帧已保存的纠错条目。");
+        }
+        return false;
+    }
+
+    const QVector<CorrectionShape>& allCorrections = m_annotations.corrections();
+    for (int row : rows)
+    {
+        if (row < 0 || row >= allCorrections.size())
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("选中的纠错条目已失效，请刷新后重新选择。");
+            }
+            return false;
+        }
+
+        const CorrectionShape& correction = allCorrections[row];
+        if (correction.frame != m_currentFrame)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("只能批量添加当前帧已保存的纠错条目。");
+            }
+            return false;
+        }
+        corrections->push_back(correction);
+    }
+
+    return true;
+}
+
+bool MainWindow::processFrameForBatch(int frame, beacon_result_t* result, QString* errorMessage) const
+{
+    if (result == nullptr)
+    {
+        return false;
+    }
+    if (!m_reader.isOpen() || frame < 0 || frame >= m_reader.frameCount())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("帧号超出视频有效范围。");
+        }
+        return false;
+    }
+
+    QImage gray;
+    QString readError;
+    if (!m_reader.readFrame(frame, &gray, &readError))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = readError;
+        }
+        return false;
+    }
+
+    *result = m_runner.process(gray);
+    return true;
+}
+
+bool MainWindow::batchCorrectionsMatchAdjacent(const QVector<CorrectionShape>& corrections,
+                                               const beacon_result_t& previous,
+                                               const beacon_result_t& next,
+                                               double positionThreshold) const
+{
+    for (const CorrectionShape& correction : corrections)
+    {
+        QVector<int> sourceIndices;
+        for (const ErrorCircle& circle : correction.errorCircles)
+        {
+            if (circle.circleIndex >= 0 && !sourceIndices.contains(circle.circleIndex))
+            {
+                sourceIndices.push_back(circle.circleIndex);
+            }
+        }
+        if (sourceIndices.isEmpty())
+        {
+            return false;
+        }
+
+        for (int circleIndex : sourceIndices)
+        {
+            if (circleIndex >= BEACON_MAX_CIRCLE_COUNT ||
+                circleIndex >= previous.count ||
+                circleIndex >= next.count)
+            {
+                return false;
+            }
+
+            const beacon_circle_t& previousCircle = previous.circles[circleIndex];
+            const beacon_circle_t& nextCircle = next.circles[circleIndex];
+            if (previousCircle.valid == 0 || nextCircle.valid == 0)
+            {
+                return false;
+            }
+
+            const QPointF previousPoint = FrameRenderer::algorithmToImagePoint(previousCircle.x, previousCircle.y);
+            const QPointF nextPoint = FrameRenderer::algorithmToImagePoint(nextCircle.x, nextCircle.y);
+            if (QLineF(previousPoint, nextPoint).length() > positionThreshold)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void MainWindow::appendCorrectionsToFrames(const QVector<CorrectionShape>& corrections,
+                                           const QVector<int>& frames,
+                                           const QString& actionName)
+{
+    QVector<int> targetFrames = frames;
+    std::sort(targetFrames.begin(), targetFrames.end());
+    targetFrames.erase(std::unique(targetFrames.begin(), targetFrames.end()), targetFrames.end());
+    if (corrections.isEmpty() || targetFrames.isEmpty())
+    {
+        QMessageBox::information(this, actionName, QStringLiteral("没有可添加的目标帧。"));
+        return;
+    }
+
+    for (int frame : targetFrames)
+    {
+        if (frame < 0 || frame >= m_reader.frameCount())
+        {
+            QMessageBox::warning(this, actionName, QStringLiteral("目标帧号超出视频有效范围。"));
+            return;
+        }
+    }
+
+    int addedCount = 0;
+    for (int frame : targetFrames)
+    {
+        for (CorrectionShape correction : corrections)
+        {
+            correction.frame = frame;
+            if (correction.name.trimmed().isEmpty())
+            {
+                correction.name = annotationTypeDisplayName(correction.errorType);
+            }
+            m_annotations.addCorrection(correction);
+            ++addedCount;
+        }
+    }
+
+    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
+    updateAnnotationList();
+    showFrame(m_currentFrame);
+    QMessageBox::information(this,
+                             actionName,
+                             QStringLiteral("批量添加完成：已向 %1 个目标帧追加 %2 条纠错。")
+                                 .arg(targetFrames.size())
+                                 .arg(addedCount));
+}
+
+void MainWindow::batchAddCorrections(const QVector<int>& correctionRows, int startFrame, int endFrame)
+{
+    if (!m_reader.isOpen())
+    {
+        return;
+    }
+    if (startFrame > endFrame)
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("手动批量添加"),
+                             QStringLiteral("起始帧不能大于结束帧，请修正后再操作。"));
+        return;
+    }
+    if (startFrame < 0 || endFrame >= m_reader.frameCount())
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("手动批量添加"),
+                             QStringLiteral("目标帧号超出视频有效范围。"));
+        return;
+    }
+
+    QVector<CorrectionShape> corrections;
+    QString error;
+    if (!collectBatchCorrections(correctionRows, &corrections, &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("手动批量添加"), error);
+        return;
+    }
+
+    QVector<int> frames;
+    for (int frame = startFrame; frame <= endFrame; ++frame)
+    {
+        frames.push_back(frame);
+    }
+    appendCorrectionsToFrames(corrections, frames, QStringLiteral("手动批量添加"));
+}
+
+void MainWindow::autoMatchCorrectionFrames(const QVector<int>& correctionRows,
+                                           int backwardMaxFrames,
+                                           int forwardMaxFrames,
+                                           double positionThreshold)
+{
+    if (!m_reader.isOpen())
+    {
+        return;
+    }
+
+    QVector<CorrectionShape> corrections;
+    QString error;
+    if (!collectBatchCorrections(correctionRows, &corrections, &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
+        return;
+    }
+
+    for (const CorrectionShape& correction : corrections)
+    {
+        bool hasSource = false;
+        for (const ErrorCircle& circle : correction.errorCircles)
+        {
+            if (circle.circleIndex >= 0)
+            {
+                hasSource = true;
+                break;
+            }
+        }
+        if (!hasSource)
+        {
+            QMessageBox::warning(this,
+                                 QStringLiteral("自动批量添加"),
+                                 QStringLiteral("自动匹配要求选中的每个纠错条目都包含错误源光点。"));
+            return;
+        }
+    }
+
+    beacon_result_t baseResult;
+    if (!processFrameForBatch(m_currentFrame, &baseResult, &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
+        return;
+    }
+
+    QVector<int> matchedFrames;
+    auto scanDirection = [&](int direction, int maxFrames) {
+        beacon_result_t previousResult = baseResult;
+        int previousFrame = m_currentFrame;
+        for (int step = 1; step <= maxFrames; ++step)
+        {
+            const int nextFrame = previousFrame + direction;
+            if (nextFrame < 0 || nextFrame >= m_reader.frameCount())
+            {
+                break;
+            }
+
+            beacon_result_t nextResult;
+            QString frameError;
+            if (!processFrameForBatch(nextFrame, &nextResult, &frameError))
+            {
+                break;
+            }
+            if (!batchCorrectionsMatchAdjacent(corrections, previousResult, nextResult, positionThreshold))
+            {
+                break;
+            }
+
+            if (direction < 0)
+            {
+                matchedFrames.prepend(nextFrame);
+            }
+            else
+            {
+                matchedFrames.push_back(nextFrame);
+            }
+            previousResult = nextResult;
+            previousFrame = nextFrame;
+        }
+    };
+
+    scanDirection(-1, qMax(0, backwardMaxFrames));
+    scanDirection(1, qMax(0, forwardMaxFrames));
+    m_annotationPanel->setAutoMatchedBatchFrames(matchedFrames);
+    statusBar()->showMessage(QStringLiteral("自动识别匹配帧完成：%1 帧").arg(matchedFrames.size()), 3000);
+}
+
+void MainWindow::batchAddCorrectionsToFrames(const QVector<int>& correctionRows, const QVector<int>& frames)
+{
+    if (!m_reader.isOpen())
+    {
+        return;
+    }
+
+    QVector<CorrectionShape> corrections;
+    QString error;
+    if (!collectBatchCorrections(correctionRows, &corrections, &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
+        return;
+    }
+
+    appendCorrectionsToFrames(corrections, frames, QStringLiteral("自动批量添加"));
 }
 
 void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
