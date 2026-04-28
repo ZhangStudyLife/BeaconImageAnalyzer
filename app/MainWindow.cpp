@@ -187,6 +187,27 @@ bool isMissedCorrectionType(const QString& type)
     return type == QStringLiteral("missed_detection");
 }
 
+CorrectionShape batchCorrectionConfigOnly(const CorrectionShape& correction)
+{
+    CorrectionShape sanitized = correction;
+    sanitized.lineColor = QColor();
+    sanitized.lineWidth = 1;
+
+    if (isMissedCorrectionType(sanitized.errorType) &&
+        sanitized.shapeType == QStringLiteral("circle") &&
+        sanitized.points.size() >= 2)
+    {
+        sanitized.points = QVector<QPointF>{ sanitized.points[0], sanitized.points[1] };
+    }
+    else
+    {
+        sanitized.shapeType.clear();
+        sanitized.points.clear();
+    }
+
+    return sanitized;
+}
+
 QVector<int> normalizedRows(QVector<int> rows)
 {
     std::sort(rows.begin(), rows.end());
@@ -2634,6 +2655,7 @@ void MainWindow::appendCorrectionsToFrames(const QVector<CorrectionShape>& corre
     {
         for (CorrectionShape correction : corrections)
         {
+            correction = batchCorrectionConfigOnly(correction);
             correction.frame = frame;
             if (correction.name.trimmed().isEmpty())
             {
@@ -2667,6 +2689,7 @@ void MainWindow::appendResolvedCorrections(const QVector<CorrectionShape>& corre
     int addedCount = 0;
     for (CorrectionShape correction : corrections)
     {
+        correction = batchCorrectionConfigOnly(correction);
         if (correction.frame < 0 || correction.frame >= m_reader.frameCount())
         {
             QMessageBox::warning(this, actionName, QStringLiteral("目标帧号超出视频有效范围。"));
