@@ -5,6 +5,8 @@
 
 #include <functional>
 
+class AlgorithmRunner;
+
 class VideoExporter
 {
 public:
@@ -13,12 +15,14 @@ public:
     bool exportMarkedAvi(const QString& inputPath,
                          const QString& outputPath,
                          double fps,
+                         const AlgorithmRunner* runner,
                          const ProgressCallback& progress,
                          QString* errorMessage) const;
 
     bool exportResultCsv(const QString& inputPath,
                          const QString& outputPath,
                          double fps,
+                         const AlgorithmRunner* runner,
                          const ProgressCallback& progress,
                          QString* errorMessage) const;
 };

@@ -65,6 +65,16 @@ void VideoWidget::setCorrectionStyle(const QColor& color, int lineWidth)
     update();
 }
 
+void VideoWidget::setSelected(bool selected)
+{
+    if (m_selected == selected)
+    {
+        return;
+    }
+    m_selected = selected;
+    update();
+}
+
 QSize VideoWidget::sizeHint() const
 {
     if (!m_image.isNull())
@@ -77,6 +87,18 @@ QSize VideoWidget::sizeHint() const
 void VideoWidget::mousePressEvent(QMouseEvent* event)
 {
     updateHoverPixel(event->pos());
+
+    if (event->button() == Qt::LeftButton)
+    {
+        emit activated();
+    }
+    if (event->button() == Qt::MiddleButton)
+    {
+        m_middleDragging = true;
+        emit middleDragStarted();
+        event->accept();
+        return;
+    }
 
     if (event->button() != Qt::LeftButton || m_correctionTool == QStringLiteral("select"))
     {
@@ -144,6 +166,14 @@ void VideoWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     updateHoverPixel(event->pos());
 
+    if (event->button() == Qt::MiddleButton && m_middleDragging)
+    {
+        m_middleDragging = false;
+        emit middleDragReleased(event->globalPosition().toPoint());
+        event->accept();
+        return;
+    }
+
     if (event->button() != Qt::LeftButton || !m_drawing)
     {
         QLabel::mouseReleaseEvent(event);
@@ -208,6 +238,13 @@ void VideoWidget::paintEvent(QPaintEvent* event)
     {
         painter.setPen(QColor(174, 182, 190));
         painter.drawText(rect(), Qt::AlignCenter, text());
+        if (m_selected)
+        {
+            QPen selectedPen(QColor(246, 212, 74));
+            selectedPen.setWidth(4);
+            painter.setPen(selectedPen);
+            painter.drawRect(rect().adjusted(2, 2, -2, -2));
+        }
         return;
     }
 
@@ -219,6 +256,13 @@ void VideoWidget::paintEvent(QPaintEvent* event)
 
     if (m_previewPoints.isEmpty())
     {
+        if (m_selected)
+        {
+            QPen selectedPen(QColor(246, 212, 74));
+            selectedPen.setWidth(4);
+            painter.setPen(selectedPen);
+            painter.drawRect(rect().adjusted(2, 2, -2, -2));
+        }
         return;
     }
 
@@ -240,6 +284,15 @@ void VideoWidget::paintEvent(QPaintEvent* event)
     else if (m_correctionTool == QStringLiteral("polygon") && points.size() >= 2)
     {
         painter.drawPolyline(QPolygonF(points));
+    }
+
+    if (m_selected)
+    {
+        QPen selectedPen(QColor(246, 212, 74));
+        selectedPen.setWidth(4);
+        painter.setPen(selectedPen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(rect().adjusted(2, 2, -2, -2));
     }
 }
 

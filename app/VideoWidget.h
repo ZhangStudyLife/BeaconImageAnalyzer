@@ -21,11 +21,15 @@ public:
     void setFrameGeometry(const QSize& originalSize, int displayScale);
     void setCorrectionTool(const QString& tool);
     void setCorrectionStyle(const QColor& color, int lineWidth);
+    void setSelected(bool selected);
     QSize sizeHint() const override;
 
 signals:
+    void activated();
     void correctionShapeFinished(const QString& shapeType, const QVector<QPointF>& points);
     void hoverPixelChanged(int x, int y, int gray, bool valid);
+    void middleDragStarted();
+    void middleDragReleased(const QPoint& globalPos);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -51,6 +55,8 @@ private:
     int m_correctionLineWidth = 2;
     bool m_hasHoverPoint = false;
     bool m_drawing = false;
+    bool m_selected = false;
+    bool m_middleDragging = false;
     QVector<QPointF> m_previewPoints;
 };
 

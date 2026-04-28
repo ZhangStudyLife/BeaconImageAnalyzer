@@ -13,7 +13,10 @@ class AnnotationPanel;
 class QCloseEvent;
 class QComboBox;
 class QKeyEvent;
+class QGridLayout;
 class QLabel;
+class QListWidget;
+class QListWidgetItem;
 class QSlider;
 class QSpinBox;
 class QDoubleSpinBox;
@@ -21,14 +24,33 @@ class QTextEdit;
 class QPushButton;
 class VideoWidget;
 
+struct AnalyzerInstance
+{
+    int id = -1;
+    QString name;
+    QString rootDir;
+    QString algorithmPath;
+    AlgorithmRunner runner;
+    AnnotationModel annotations;
+    double usedFps = 50.0;
+    int segmentStartFrame = -1;
+    int segmentEndFrame = -1;
+    beacon_result_t currentResult = {};
+    QVector<int> pendingAutoBatchRows;
+    QVector<CorrectionShape> pendingAutoMatchedCorrections;
+};
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
 
 private slots:
+    void newInstance();
+    void importAlgorithmFile();
     void openVideo();
     void saveAnnotation();
     void loadAnnotation();
@@ -77,6 +99,30 @@ private:
     void buildMenus();
     bool loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame);
     void showFrame(int frameIndex);
+    void advancePlayingInstances();
+    AnalyzerInstance* currentInstance();
+    const AnalyzerInstance* currentInstance() const;
+    AnalyzerInstance* instanceById(int id);
+    const AnalyzerInstance* instanceById(int id) const;
+    AnalyzerInstance* createInstance(const QString& rootDir,
+                                     const QString& algorithmPath,
+                                     const QString& name,
+                                     bool compileAlgorithm,
+                                     QString* errorMessage);
+    bool ensureDefaultInstance(QString* errorMessage = nullptr);
+    void selectInstance(int id);
+    void refreshInstanceList();
+    void updateSplitLayout();
+    void updateCurrentVideoWidget();
+    void renderInstance(AnalyzerInstance* instance);
+    void renderAllDisplayedInstances();
+    int slotForInstance(int instanceId) const;
+    int slotAtGlobalPos(const QPoint& globalPos) const;
+    void setInstanceVisible(int instanceId, bool visible);
+    void handleSlotActivated(int slot);
+    void handleSlotMiddleDragStarted(int slot);
+    void handleSlotMiddleDragReleased(int slot, const QPoint& globalPos);
+    void refreshCurrentInstanceUi();
     void updateFrameInfo(const beacon_result_t& result);
     void updateCurrentAnnotationInfo();
     void updateAnnotationList();
@@ -118,12 +164,14 @@ private:
     QString defaultOutputPath(const QString& suffix) const;
     double frameTime(int frame) const;
 
-    VideoReader m_reader;
-    AlgorithmRunner m_runner;
-    AnnotationModel m_annotations;
+    QVector<AnalyzerInstance*> m_instances;
+    VideoReader m_globalReader;
     QTimer m_playTimer;
 
     VideoWidget* m_videoWidget = nullptr;
+    QVector<VideoWidget*> m_videoWidgets;
+    QGridLayout* m_videoGrid = nullptr;
+    QListWidget* m_instanceList = nullptr;
     QLabel* m_videoInfoLabel = nullptr;
     QLabel* m_frameInfoLabel = nullptr;
     QLabel* m_pixelInfoLabel = nullptr;
@@ -137,18 +185,18 @@ private:
     QComboBox* m_viewModeCombo = nullptr;
     QComboBox* m_speedCombo = nullptr;
 
-    QString m_currentVideoPath;
-    int m_currentFrame = 0;
-    int m_zoom = 1;
-    bool m_showOverlay = true;
+    QString m_globalVideoPath;
+    int m_globalCurrentFrame = 0;
+    int m_globalZoom = 1;
+    bool m_globalShowOverlay = true;
+    bool m_globalPlaying = false;
+    double m_globalUsedFps = 50.0;
+    double m_globalPlaybackSpeed = 1.0;
     bool m_updatingControls = false;
-    double m_usedFps = 50.0;
-    double m_playbackSpeed = 1.0;
-    int m_segmentStartFrame = -1;
-    int m_segmentEndFrame = -1;
-    beacon_result_t m_currentResult = {};
-    QVector<int> m_pendingAutoBatchRows;
-    QVector<CorrectionShape> m_pendingAutoMatchedCorrections;
+    QVector<int> m_splitSlotInstanceIds;
+    int m_currentInstanceId = -1;
+    int m_nextInstanceId = 1;
+    int m_dragSourceSlot = -1;
 };
 
 #endif

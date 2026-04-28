@@ -7,6 +7,7 @@
 #include "VideoWidget.h"
 
 #include <QAction>
+#include <QAbstractItemView>
 #include <QAbstractSpinBox>
 #include <QApplication>
 #include <QCloseEvent>
@@ -15,12 +16,16 @@
 #include <QDesktopServices>
 #include <QDoubleSpinBox>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFont>
 #include <QFrame>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -28,6 +33,8 @@
 #include <QLabel>
 #include <QLineF>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -36,6 +43,7 @@
 #include <QPushButton>
 #include <QRectF>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QScrollArea>
 #include <QSlider>
 #include <QSizePolicy>
@@ -194,6 +202,93 @@ QString framesText(const QVector<int>& frames)
         parts.push_back(QString::number(frame));
     }
     return parts.join(QStringLiteral(", "));
+}
+
+QString defaultAlgorithmPath()
+{
+#ifdef BEACON_SOURCE_DIR
+    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(QStringLiteral("algorithm/beacon_image.c"));
+#else
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../algorithm/beacon_image.c"));
+#endif
+}
+
+QString defaultAlgorithmHeaderPath(const QString& fileName)
+{
+#ifdef BEACON_SOURCE_DIR
+    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(QStringLiteral("algorithm/%1").arg(fileName));
+#else
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../algorithm/%1").arg(fileName));
+#endif
+}
+
+QString defaultInstancesRoot()
+{
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("instances"));
+}
+
+bool copyFileIfNeeded(const QString& source, const QString& destination, QString* errorMessage)
+{
+    if (QFileInfo::exists(destination))
+    {
+        return true;
+    }
+    if (!QFile::copy(source, destination))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("复制文件失败：%1 -> %2").arg(source, destination);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool seedAlgorithmFolder(const QString& rootDir,
+                         const QString& sourceCFile,
+                         QString* algorithmPath,
+                         QString* errorMessage)
+{
+    const QString algorithmDirPath = QDir(rootDir).absoluteFilePath(QStringLiteral("algorithm"));
+    if (!QDir().mkpath(algorithmDirPath))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("无法创建实例算法目录：%1").arg(algorithmDirPath);
+        }
+        return false;
+    }
+
+    const QString targetCPath = QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.c"));
+    if (QFileInfo::exists(targetCPath))
+    {
+        if (algorithmPath != nullptr)
+        {
+            *algorithmPath = targetCPath;
+        }
+        return true;
+    }
+    if (!QFile::copy(sourceCFile, targetCPath))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("复制 C 文件失败：%1 -> %2").arg(sourceCFile, targetCPath);
+        }
+        return false;
+    }
+
+    copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image.h")),
+                     QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.h")),
+                     nullptr);
+    copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image_config.h")),
+                     QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image_config.h")),
+                     nullptr);
+
+    if (algorithmPath != nullptr)
+    {
+        *algorithmPath = targetCPath;
+    }
+    return true;
 }
 
 double correctionCircleRadius(const CorrectionShape& correction)
@@ -720,19 +815,464 @@ QStatusBar {
 
 }
 
+#define m_reader m_globalReader
+#define m_runner (currentInstance()->runner)
+#define m_annotations (currentInstance()->annotations)
+#define m_currentVideoPath m_globalVideoPath
+#define m_currentFrame m_globalCurrentFrame
+#define m_zoom m_globalZoom
+#define m_showOverlay m_globalShowOverlay
+#define m_usedFps m_globalUsedFps
+#define m_playbackSpeed m_globalPlaybackSpeed
+#define m_segmentStartFrame (currentInstance()->segmentStartFrame)
+#define m_segmentEndFrame (currentInstance()->segmentEndFrame)
+#define m_currentResult (currentInstance()->currentResult)
+#define m_pendingAutoBatchRows (currentInstance()->pendingAutoBatchRows)
+#define m_pendingAutoMatchedCorrections (currentInstance()->pendingAutoMatchedCorrections)
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
     buildUi();
     buildMenus();
+    QString instanceError;
+    if (!ensureDefaultInstance(&instanceError))
+    {
+        statusBar()->showMessage(instanceError, 5000);
+    }
     setWindowTitle(QStringLiteral("BeaconImageAnalyzer"));
     setMinimumSize(1120, 680);
     resize(1320, 780);
 
     m_playTimer.setInterval(playbackIntervalMs());
-    connect(&m_playTimer, &QTimer::timeout, this, &MainWindow::nextFrame);
+    connect(&m_playTimer, &QTimer::timeout, this, &MainWindow::advancePlayingInstances);
     qApp->installEventFilter(this);
     QTimer::singleShot(0, this, &MainWindow::restoreLastSession);
+}
+
+MainWindow::~MainWindow()
+{
+    qDeleteAll(m_instances);
+    m_instances.clear();
+}
+
+AnalyzerInstance* MainWindow::currentInstance()
+{
+    AnalyzerInstance* instance = instanceById(m_currentInstanceId);
+    if (instance != nullptr)
+    {
+        return instance;
+    }
+    if (!m_instances.isEmpty())
+    {
+        m_currentInstanceId = m_instances.first()->id;
+        return m_instances.first();
+    }
+    ensureDefaultInstance();
+    return m_instances.isEmpty() ? nullptr : m_instances.first();
+}
+
+const AnalyzerInstance* MainWindow::currentInstance() const
+{
+    for (const AnalyzerInstance* instance : m_instances)
+    {
+        if (instance != nullptr && instance->id == m_currentInstanceId)
+        {
+            return instance;
+        }
+    }
+    return m_instances.isEmpty() ? nullptr : m_instances.first();
+}
+
+AnalyzerInstance* MainWindow::instanceById(int id)
+{
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        if (instance != nullptr && instance->id == id)
+        {
+            return instance;
+        }
+    }
+    return nullptr;
+}
+
+const AnalyzerInstance* MainWindow::instanceById(int id) const
+{
+    for (const AnalyzerInstance* instance : m_instances)
+    {
+        if (instance != nullptr && instance->id == id)
+        {
+            return instance;
+        }
+    }
+    return nullptr;
+}
+
+AnalyzerInstance* MainWindow::createInstance(const QString& rootDir,
+                                             const QString& algorithmPath,
+                                             const QString& name,
+                                             bool compileAlgorithm,
+                                             QString* errorMessage)
+{
+    auto* instance = new AnalyzerInstance;
+    instance->id = m_nextInstanceId++;
+    instance->rootDir = QFileInfo(rootDir).absoluteFilePath();
+    instance->algorithmPath = QFileInfo(algorithmPath).absoluteFilePath();
+    instance->name = name.trimmed().isEmpty()
+        ? QStringLiteral("实例 %1").arg(instance->id)
+        : name.trimmed();
+
+    if (compileAlgorithm)
+    {
+        QString compileError;
+        const QString buildDir = QDir(instance->rootDir).absoluteFilePath(QStringLiteral("build"));
+        if (!instance->runner.loadSourceFile(instance->algorithmPath, buildDir, &compileError))
+        {
+            delete instance;
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = compileError;
+            }
+            return nullptr;
+        }
+    }
+
+    m_instances.push_back(instance);
+    if (m_currentInstanceId < 0)
+    {
+        m_currentInstanceId = instance->id;
+    }
+    setInstanceVisible(instance->id, true);
+    refreshInstanceList();
+    updateSplitLayout();
+    return instance;
+}
+
+bool MainWindow::ensureDefaultInstance(QString* errorMessage)
+{
+    if (!m_instances.isEmpty())
+    {
+        return true;
+    }
+
+    const QString rootDir = QDir(defaultInstancesRoot()).absoluteFilePath(QStringLiteral("default"));
+    QString algorithmPath;
+    if (!seedAlgorithmFolder(rootDir, defaultAlgorithmPath(), &algorithmPath, errorMessage))
+    {
+        return false;
+    }
+    return createInstance(rootDir, algorithmPath, QStringLiteral("默认实例"), true, errorMessage) != nullptr;
+}
+
+int MainWindow::slotForInstance(int instanceId) const
+{
+    for (int i = 0; i < m_splitSlotInstanceIds.size(); ++i)
+    {
+        if (m_splitSlotInstanceIds[i] == instanceId)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int MainWindow::slotAtGlobalPos(const QPoint& globalPos) const
+{
+    for (int i = 0; i < m_videoWidgets.size(); ++i)
+    {
+        const VideoWidget* widget = m_videoWidgets[i];
+        if (widget != nullptr && widget->isVisible() && widget->rect().contains(widget->mapFromGlobal(globalPos)))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void MainWindow::setInstanceVisible(int instanceId, bool visible)
+{
+    if (m_splitSlotInstanceIds.size() != 4)
+    {
+        m_splitSlotInstanceIds = QVector<int>(4, -1);
+    }
+
+    const int existingSlot = slotForInstance(instanceId);
+    if (!visible)
+    {
+        if (instanceId == m_currentInstanceId)
+        {
+            return;
+        }
+        if (existingSlot >= 0)
+        {
+            m_splitSlotInstanceIds[existingSlot] = -1;
+        }
+        return;
+    }
+    if (existingSlot >= 0)
+    {
+        return;
+    }
+
+    int visibleCount = 0;
+    for (int id : m_splitSlotInstanceIds)
+    {
+        if (id >= 0)
+        {
+            ++visibleCount;
+        }
+    }
+    if (visibleCount >= 4)
+    {
+        QMessageBox::warning(this, QStringLiteral("分屏显示"), QStringLiteral("最多同时勾选 4 个实例。"));
+        return;
+    }
+
+    for (int i = 0; i < m_splitSlotInstanceIds.size(); ++i)
+    {
+        if (m_splitSlotInstanceIds[i] < 0)
+        {
+            m_splitSlotInstanceIds[i] = instanceId;
+            return;
+        }
+    }
+}
+
+void MainWindow::selectInstance(int id)
+{
+    if (instanceById(id) == nullptr)
+    {
+        return;
+    }
+    m_currentInstanceId = id;
+    setInstanceVisible(id, true);
+    AnalyzerInstance* instance = instanceById(id);
+    if (instance != nullptr)
+    {
+        m_annotationPanel->setCurrentFrameCorrections(instance->annotations.correctionsForFrame(m_currentFrame), true);
+    }
+    refreshInstanceList();
+    updateSplitLayout();
+    refreshCurrentInstanceUi();
+}
+
+void MainWindow::refreshInstanceList()
+{
+    if (m_instanceList == nullptr)
+    {
+        return;
+    }
+
+    QSignalBlocker blocker(m_instanceList);
+    m_instanceList->clear();
+    for (const AnalyzerInstance* instance : m_instances)
+    {
+        if (instance == nullptr)
+        {
+            continue;
+        }
+        auto* item = new QListWidgetItem(instance->name);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(slotForInstance(instance->id) >= 0 ? Qt::Checked : Qt::Unchecked);
+        item->setData(Qt::UserRole, instance->id);
+        if (instance->id == m_currentInstanceId)
+        {
+            QFont font = item->font();
+            font.setBold(true);
+            item->setFont(font);
+        }
+        m_instanceList->addItem(item);
+    }
+}
+
+void MainWindow::updateCurrentVideoWidget()
+{
+    const int slot = slotForInstance(m_currentInstanceId);
+    m_videoWidget = slot >= 0 && slot < m_videoWidgets.size() ? m_videoWidgets[slot] : nullptr;
+    for (int i = 0; i < m_videoWidgets.size(); ++i)
+    {
+        m_videoWidgets[i]->setSelected(i == slot && m_splitSlotInstanceIds.value(i, -1) >= 0);
+    }
+}
+
+void MainWindow::updateSplitLayout()
+{
+    if (m_videoGrid == nullptr || m_videoWidgets.size() != 4)
+    {
+        return;
+    }
+
+    while (QLayoutItem* item = m_videoGrid->takeAt(0))
+    {
+        delete item;
+    }
+
+    QVector<int> visibleSlots;
+    for (int i = 0; i < m_splitSlotInstanceIds.size(); ++i)
+    {
+        if (m_splitSlotInstanceIds[i] >= 0)
+        {
+            visibleSlots.push_back(i);
+        }
+    }
+
+    if (visibleSlots.size() <= 1)
+    {
+        const int slot = visibleSlots.isEmpty() ? 0 : visibleSlots.first();
+        for (int i = 0; i < m_videoWidgets.size(); ++i)
+        {
+            m_videoWidgets[i]->setVisible(i == slot);
+        }
+        m_videoGrid->addWidget(m_videoWidgets[slot], 0, 0, 2, 2);
+    }
+    else
+    {
+        for (int i = 0; i < m_videoWidgets.size(); ++i)
+        {
+            m_videoWidgets[i]->setVisible(true);
+            m_videoGrid->addWidget(m_videoWidgets[i], i / 2, i % 2);
+        }
+    }
+
+    updateCurrentVideoWidget();
+    renderAllDisplayedInstances();
+}
+
+void MainWindow::handleSlotActivated(int slot)
+{
+    if (slot < 0 || slot >= m_splitSlotInstanceIds.size())
+    {
+        return;
+    }
+    const int instanceId = m_splitSlotInstanceIds[slot];
+    if (instanceId >= 0)
+    {
+        selectInstance(instanceId);
+    }
+}
+
+void MainWindow::handleSlotMiddleDragStarted(int slot)
+{
+    int visibleCount = 0;
+    for (int id : m_splitSlotInstanceIds)
+    {
+        if (id >= 0)
+        {
+            ++visibleCount;
+        }
+    }
+    m_dragSourceSlot = visibleCount >= 2 ? slot : -1;
+}
+
+void MainWindow::handleSlotMiddleDragReleased(int slot, const QPoint& globalPos)
+{
+    Q_UNUSED(slot);
+    if (m_dragSourceSlot < 0 || m_dragSourceSlot >= m_splitSlotInstanceIds.size())
+    {
+        return;
+    }
+    const int targetSlot = slotAtGlobalPos(globalPos);
+    if (targetSlot >= 0 && targetSlot < m_splitSlotInstanceIds.size() && targetSlot != m_dragSourceSlot)
+    {
+        std::swap(m_splitSlotInstanceIds[m_dragSourceSlot], m_splitSlotInstanceIds[targetSlot]);
+        updateSplitLayout();
+    }
+    m_dragSourceSlot = -1;
+}
+
+void MainWindow::renderInstance(AnalyzerInstance* instance)
+{
+    if (instance == nullptr || !m_reader.isOpen())
+    {
+        return;
+    }
+
+    QImage gray;
+    QString error;
+    const int frameIndex = qBound(0, m_currentFrame, qMax(0, m_reader.frameCount() - 1));
+    if (!m_reader.readFrame(frameIndex, &gray, &error))
+    {
+        return;
+    }
+    const beacon_result_t result = instance->runner.process(gray);
+    instance->currentResult = result;
+    const QVector<CorrectionShape> corrections = instance->annotations.correctionsForFrame(frameIndex);
+    QImage displayImage = gray;
+    if (viewMode() == QStringLiteral("binary"))
+    {
+        const QImage binary = instance->runner.binaryImage(gray);
+        if (!binary.isNull())
+        {
+            displayImage = binary;
+        }
+    }
+    QVector<CorrectionShape> visibleCorrections = corrections;
+    if (instance->id == m_currentInstanceId && m_annotationPanel != nullptr)
+    {
+        visibleCorrections = m_annotationPanel->draftCorrections();
+    }
+    const QImage rendered = FrameRenderer::render(displayImage, result, visibleCorrections, 1, m_showOverlay);
+
+    const int slot = slotForInstance(instance->id);
+    if (slot >= 0 && slot < m_videoWidgets.size())
+    {
+        m_videoWidgets[slot]->setFrameGeometry(QSize(m_reader.width(), m_reader.height()), 1);
+        m_videoWidgets[slot]->setPixelSourceImage(gray);
+        m_videoWidgets[slot]->setImage(rendered);
+    }
+}
+
+void MainWindow::renderAllDisplayedInstances()
+{
+    for (int instanceId : m_splitSlotInstanceIds)
+    {
+        renderInstance(instanceById(instanceId));
+    }
+    updateCurrentVideoWidget();
+}
+
+void MainWindow::refreshCurrentInstanceUi()
+{
+    AnalyzerInstance* instance = currentInstance();
+    if (instance == nullptr)
+    {
+        return;
+    }
+    if (m_reader.isOpen())
+    {
+        m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
+        m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
+        m_timeSpin->setRange(0.0, frameTime(qMax(0, m_reader.frameCount() - 1)));
+        m_annotationPanel->setVideoFrameRange(0, qMax(0, m_reader.frameCount() - 1));
+        showFrame(m_currentFrame);
+    }
+    else
+    {
+        m_videoInfoLabel->setText(QStringLiteral("未打开视频"));
+        m_frameInfoLabel->setText(QStringLiteral("Frame: -"));
+        m_resultText->clear();
+        m_annotationPanel->setAnnotations(instance->annotations.records(), instance->annotations.corrections());
+        m_annotationPanel->setCurrentFrameCorrections(QVector<CorrectionShape>(), true);
+    }
+    updatePlayPauseButton();
+}
+
+void MainWindow::advancePlayingInstances()
+{
+    if (!m_globalPlaying || !m_reader.isOpen())
+    {
+        m_playTimer.stop();
+        updatePlayPauseButton();
+        return;
+    }
+    if (m_currentFrame + 1 >= m_reader.frameCount())
+    {
+        m_globalPlaying = false;
+        m_playTimer.stop();
+        updatePlayPauseButton();
+        return;
+    }
+    showFrame(m_currentFrame + 1);
 }
 
 void MainWindow::buildUi()
@@ -769,12 +1309,17 @@ void MainWindow::buildUi()
     };
 
     auto* openRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("打开 AVI"));
+    auto* newInstanceRailButton = makeRailButton(rail, QStyle::SP_FileDialogNewFolder, QStringLiteral("新建实例"));
+    auto* importAlgorithmRailButton = makeRailButton(rail, QStyle::SP_FileDialogDetailedView, QStringLiteral("导入 C 文件"));
     auto* saveRailButton = makeRailButton(rail, QStyle::SP_DialogSaveButton, QStringLiteral("保存标注"));
     auto* loadRailButton = makeRailButton(rail, QStyle::SP_FileDialogContentsView, QStringLiteral("读取标注"));
     auto* exportAviRailButton = makeRailButton(rail, QStyle::SP_DialogApplyButton, QStringLiteral("导出标注 AVI"));
     auto* exportCsvRailButton = makeRailButton(rail, QStyle::SP_FileIcon, QStringLiteral("导出 CSV"));
     auto* exitRailButton = makeRailButton(rail, QStyle::SP_DialogCloseButton, QStringLiteral("退出"));
     railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(newInstanceRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(importAlgorithmRailButton, 0, Qt::AlignHCenter);
+    railLayout->addSpacing(10);
     railLayout->addWidget(saveRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(loadRailButton, 0, Qt::AlignHCenter);
     railLayout->addSpacing(10);
@@ -815,9 +1360,48 @@ void MainWindow::buildUi()
     feedHeader->addWidget(m_videoInfoLabel, 1);
     feedHeader->addWidget(feedPill);
 
-    m_videoWidget = new VideoWidget(videoCard);
     videoLayout->addLayout(feedHeader);
-    videoLayout->addWidget(m_videoWidget, 1);
+
+    auto* instanceRow = new QHBoxLayout;
+    instanceRow->setSpacing(8);
+    m_instanceList = new QListWidget(videoCard);
+    m_instanceList->setMaximumHeight(78);
+    m_instanceList->setSelectionMode(QAbstractItemView::SingleSelection);
+    auto* newInstanceButton = new QPushButton(QStringLiteral("新建实例"), videoCard);
+    instanceRow->addWidget(m_instanceList, 1);
+    instanceRow->addWidget(newInstanceButton);
+    videoLayout->addLayout(instanceRow);
+
+    auto* gridHost = new QWidget(videoCard);
+    m_videoGrid = new QGridLayout(gridHost);
+    m_videoGrid->setContentsMargins(0, 0, 0, 0);
+    m_videoGrid->setSpacing(8);
+    m_splitSlotInstanceIds = QVector<int>(4, -1);
+    for (int slot = 0; slot < 4; ++slot)
+    {
+        auto* widget = new VideoWidget(gridHost);
+        widget->setText(QStringLiteral("空分屏"));
+        m_videoWidgets.push_back(widget);
+        connect(widget, &VideoWidget::activated, this, [this, slot]() {
+            handleSlotActivated(slot);
+        });
+        connect(widget, &VideoWidget::middleDragStarted, this, [this, slot]() {
+            handleSlotMiddleDragStarted(slot);
+        });
+        connect(widget, &VideoWidget::middleDragReleased, this, [this, slot](const QPoint& globalPos) {
+            handleSlotMiddleDragReleased(slot, globalPos);
+        });
+        connect(widget, &VideoWidget::correctionShapeFinished, this, &MainWindow::addCorrectionShape);
+        connect(widget, &VideoWidget::hoverPixelChanged, this, [this, slot](int x, int y, int gray, bool valid) {
+            if (slot >= 0 && slot < m_splitSlotInstanceIds.size() &&
+                m_splitSlotInstanceIds[slot] == m_currentInstanceId)
+            {
+                updateHoverPixelInfo(x, y, gray, valid);
+            }
+        });
+    }
+    m_videoWidget = m_videoWidgets.first();
+    videoLayout->addWidget(gridHost, 1);
     workspaceLayout->addWidget(videoCard, 1);
 
     auto* rightScroll = new QScrollArea;
@@ -953,6 +1537,9 @@ void MainWindow::buildUi()
     setCentralWidget(central);
 
     connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
+    connect(newInstanceRailButton, &QToolButton::clicked, this, &MainWindow::newInstance);
+    connect(importAlgorithmRailButton, &QToolButton::clicked, this, &MainWindow::importAlgorithmFile);
+    connect(newInstanceButton, &QPushButton::clicked, this, &MainWindow::newInstance);
     connect(saveRailButton, &QToolButton::clicked, this, &MainWindow::saveAnnotation);
     connect(loadRailButton, &QToolButton::clicked, this, &MainWindow::loadAnnotation);
     connect(exportAviRailButton, &QToolButton::clicked, this, &MainWindow::exportMarkedAvi);
@@ -970,7 +1557,8 @@ void MainWindow::buildUi()
     });
     connect(m_slider, &QSlider::valueChanged, this, &MainWindow::showFrameFromSlider);
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-        showFrame(m_currentFrame);
+        renderAllDisplayedInstances();
+        refreshCurrentInstanceUi();
     });
     connect(m_speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         setPlaybackSpeed(m_speedCombo->currentData().toDouble());
@@ -987,23 +1575,45 @@ void MainWindow::buildUi()
             this, &MainWindow::autoMatchCorrectionFrames);
     connect(m_annotationPanel, &AnnotationPanel::batchAddCorrectionsToFramesRequested,
             this, &MainWindow::batchAddCorrectionsToFrames);
-    connect(m_annotationPanel, &AnnotationPanel::correctionToolChanged,
-            m_videoWidget, &VideoWidget::setCorrectionTool);
-    connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged,
-            m_videoWidget, &VideoWidget::setCorrectionStyle);
+    connect(m_instanceList, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+        if (item != nullptr)
+        {
+            selectInstance(item->data(Qt::UserRole).toInt());
+        }
+    });
+    connect(m_instanceList, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
+        if (item == nullptr)
+        {
+            return;
+        }
+        setInstanceVisible(item->data(Qt::UserRole).toInt(), item->checkState() == Qt::Checked);
+        updateSplitLayout();
+        refreshInstanceList();
+    });
+    connect(m_annotationPanel, &AnnotationPanel::correctionToolChanged, this, [this](const QString& tool) {
+        for (VideoWidget* widget : m_videoWidgets)
+        {
+            widget->setCorrectionTool(tool);
+        }
+    });
+    connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged, this, [this](const QColor& color, int lineWidth) {
+        for (VideoWidget* widget : m_videoWidgets)
+        {
+            widget->setCorrectionStyle(color, lineWidth);
+        }
+    });
     connect(m_annotationPanel, &AnnotationPanel::autoIdentifyRequested,
             this, &MainWindow::autoIdentifyCorrectionTargets);
     connect(m_annotationPanel, &AnnotationPanel::recordActivated,
             this, &MainWindow::jumpToRecordFrame);
-    connect(m_videoWidget, &VideoWidget::correctionShapeFinished,
-            this, &MainWindow::addCorrectionShape);
-    connect(m_videoWidget, &VideoWidget::hoverPixelChanged,
-            this, &MainWindow::updateHoverPixelInfo);
 }
 
 void MainWindow::buildMenus()
 {
     auto* fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
+    fileMenu->addAction(QStringLiteral("新建实例"), this, &MainWindow::newInstance);
+    fileMenu->addAction(QStringLiteral("导入 C 文件"), this, &MainWindow::importAlgorithmFile);
+    fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("打开视频"), this, &MainWindow::openVideo);
     fileMenu->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
     fileMenu->addAction(QStringLiteral("读取标注"), this, &MainWindow::loadAnnotation);
@@ -1036,8 +1646,102 @@ void MainWindow::buildMenus()
     setStyleSheet(djiStyleSheet());
 }
 
+void MainWindow::newInstance()
+{
+    const QString rootDir = QFileDialog::getExistingDirectory(this,
+                                                              QStringLiteral("选择新实例文件夹"),
+                                                              defaultInstancesRoot());
+    if (rootDir.isEmpty())
+    {
+        return;
+    }
+
+    QString algorithmPath;
+    QString error;
+    if (!seedAlgorithmFolder(rootDir, defaultAlgorithmPath(), &algorithmPath, &error))
+    {
+        QMessageBox::critical(this, QStringLiteral("新建实例失败"), error);
+        return;
+    }
+
+    const QString defaultName = QFileInfo(rootDir).fileName().trimmed().isEmpty()
+        ? QStringLiteral("实例 %1").arg(m_nextInstanceId)
+        : QFileInfo(rootDir).fileName();
+    const QString name = QInputDialog::getText(this,
+                                               QStringLiteral("实例名称"),
+                                               QStringLiteral("名称"),
+                                               QLineEdit::Normal,
+                                               defaultName);
+    AnalyzerInstance* instance = createInstance(rootDir,
+                                                algorithmPath,
+                                                name.isEmpty() ? defaultName : name,
+                                                true,
+                                                &error);
+    if (instance == nullptr)
+    {
+        QMessageBox::critical(this, QStringLiteral("新建实例失败"), error);
+        return;
+    }
+    selectInstance(instance->id);
+}
+
+void MainWindow::importAlgorithmFile()
+{
+    const QString sourcePath = QFileDialog::getOpenFileName(this,
+                                                            QStringLiteral("导入 C 文件"),
+                                                            QString(),
+                                                            QStringLiteral("C Source (*.c)"));
+    if (sourcePath.isEmpty())
+    {
+        return;
+    }
+
+    const QString rootDir = QFileDialog::getExistingDirectory(this,
+                                                              QStringLiteral("选择实例文件夹"),
+                                                              defaultInstancesRoot());
+    if (rootDir.isEmpty())
+    {
+        return;
+    }
+
+    QString algorithmPath;
+    QString error;
+    if (!seedAlgorithmFolder(rootDir, sourcePath, &algorithmPath, &error))
+    {
+        QMessageBox::critical(this, QStringLiteral("导入 C 文件失败"), error);
+        return;
+    }
+
+    const QString defaultName = QFileInfo(rootDir).fileName().trimmed().isEmpty()
+        ? QFileInfo(sourcePath).completeBaseName()
+        : QFileInfo(rootDir).fileName();
+    const QString name = QInputDialog::getText(this,
+                                               QStringLiteral("实例名称"),
+                                               QStringLiteral("名称"),
+                                               QLineEdit::Normal,
+                                               defaultName);
+    AnalyzerInstance* instance = createInstance(rootDir,
+                                                algorithmPath,
+                                                name.isEmpty() ? defaultName : name,
+                                                true,
+                                                &error);
+    if (instance == nullptr)
+    {
+        QMessageBox::critical(this, QStringLiteral("导入 C 文件失败"), error);
+        return;
+    }
+    selectInstance(instance->id);
+}
+
 void MainWindow::openVideo()
 {
+    QString instanceError;
+    if (!ensureDefaultInstance(&instanceError))
+    {
+        QMessageBox::critical(this, QStringLiteral("打开失败"), instanceError);
+        return;
+    }
+
     const QString path = QFileDialog::getOpenFileName(this,
                                                       QStringLiteral("打开 AVI"),
                                                       QString(),
@@ -1062,9 +1766,6 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
 
     m_currentVideoPath = path;
     m_currentFrame = fallbackFrame;
-    m_segmentStartFrame = -1;
-    m_segmentEndFrame = -1;
-    m_annotations.clear();
 
     m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
     m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
@@ -1095,7 +1796,9 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
     }
 
     updateAnnotationList();
+    renderAllDisplayedInstances();
     showFrame(qBound(0, m_currentFrame, qMax(0, m_reader.frameCount() - 1)));
+    refreshInstanceList();
     statusBar()->showMessage(QStringLiteral("视频已打开"), 3000);
     return true;
 }
@@ -1177,7 +1880,7 @@ void MainWindow::exportMarkedAvi()
 
     VideoExporter exporter;
     QString error;
-    const bool ok = exporter.exportMarkedAvi(m_currentVideoPath, path, m_usedFps,
+    const bool ok = exporter.exportMarkedAvi(m_currentVideoPath, path, m_usedFps, &m_runner,
                                              [&](int current, int total) {
                                                  progress.setMaximum(total);
                                                  progress.setValue(current);
@@ -1216,7 +1919,7 @@ void MainWindow::exportCsv()
 
     VideoExporter exporter;
     QString error;
-    const bool ok = exporter.exportResultCsv(m_currentVideoPath, path, m_usedFps,
+    const bool ok = exporter.exportResultCsv(m_currentVideoPath, path, m_usedFps, &m_runner,
                                              [&](int current, int total) {
                                                  progress.setMaximum(total);
                                                  progress.setValue(current);
@@ -1237,6 +1940,7 @@ void MainWindow::play()
 {
     if (m_reader.isOpen())
     {
+        m_globalPlaying = true;
         m_playTimer.start(playbackIntervalMs());
         updatePlayPauseButton();
     }
@@ -1244,13 +1948,14 @@ void MainWindow::play()
 
 void MainWindow::pause()
 {
+    m_globalPlaying = false;
     m_playTimer.stop();
     updatePlayPauseButton();
 }
 
 void MainWindow::togglePlayPause()
 {
-    if (m_playTimer.isActive())
+    if (m_globalPlaying)
     {
         pause();
     }
@@ -1267,7 +1972,7 @@ void MainWindow::updatePlayPauseButton()
         return;
     }
 
-    if (m_playTimer.isActive())
+    if (m_globalPlaying)
     {
         m_playPauseButton->setText(QStringLiteral("暂停"));
         m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPause));
@@ -1286,7 +1991,7 @@ void MainWindow::setPlaybackSpeed(double speed)
         return;
     }
 
-    const bool wasPlaying = m_playTimer.isActive();
+    const bool wasPlaying = m_globalPlaying;
     m_playbackSpeed = speed;
     if (wasPlaying)
     {
@@ -1384,22 +2089,10 @@ void MainWindow::showFrame(int frameIndex)
     m_currentFrame = frameIndex;
     const beacon_result_t result = m_runner.process(gray);
     m_currentResult = result;
-    QImage displayImage = gray;
-    if (viewMode() == QStringLiteral("binary"))
-    {
-        const QImage binary = m_runner.binaryImage(gray);
-        if (!binary.isNull())
-        {
-            displayImage = binary;
-        }
-    }
     const QVector<CorrectionShape> savedCorrections = m_annotations.correctionsForFrame(m_currentFrame);
     m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
     m_annotationPanel->setCurrentFrameCorrections(savedCorrections);
-    const QVector<CorrectionShape> corrections = m_annotationPanel->draftCorrections();
-    m_videoWidget->setFrameGeometry(QSize(BEACON_IMAGE_W, BEACON_IMAGE_H), 1);
-    m_videoWidget->setPixelSourceImage(gray);
-    m_videoWidget->setImage(FrameRenderer::render(displayImage, result, corrections, 1, m_showOverlay));
+    renderAllDisplayedInstances();
 
     m_updatingControls = true;
     m_slider->setValue(frameIndex);
@@ -2316,11 +3009,9 @@ void MainWindow::autoIdentifyCorrectionTargets()
 
 void MainWindow::openAlgorithmLocation()
 {
-#ifdef BEACON_SOURCE_DIR
-    const QString algorithmPath = QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(QStringLiteral("algorithm/beacon_image.c"));
-#else
-    const QString algorithmPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../algorithm/beacon_image.c"));
-#endif
+    const QString algorithmPath = currentInstance()->algorithmPath.isEmpty()
+        ? defaultAlgorithmPath()
+        : currentInstance()->algorithmPath;
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(algorithmPath).absolutePath()));
 }
 
@@ -2378,7 +3069,16 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    saveProject();
+    const int previousInstanceId = m_currentInstanceId;
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        if (instance != nullptr)
+        {
+            m_currentInstanceId = instance->id;
+            saveProject();
+        }
+    }
+    m_currentInstanceId = previousInstanceId;
     QMainWindow::closeEvent(event);
 }
 
@@ -2444,6 +3144,8 @@ void MainWindow::saveProject()
     QJsonObject algorithm;
     algorithm.insert(QStringLiteral("name"), QStringLiteral("beacon_image_process"));
     algorithm.insert(QStringLiteral("version"), QStringLiteral("v1"));
+    algorithm.insert(QStringLiteral("source_path"), currentInstance()->algorithmPath);
+    algorithm.insert(QStringLiteral("instance_name"), currentInstance()->name);
     algorithm.insert(QStringLiteral("note"), QStringLiteral("simple threshold + connected components"));
     root.insert(QStringLiteral("algorithm"), algorithm);
 
@@ -2540,6 +3242,11 @@ bool MainWindow::loadProject()
 QString MainWindow::projectPathForVideo(const QString& videoPath) const
 {
     const QFileInfo info(videoPath);
+    const AnalyzerInstance* instance = currentInstance();
+    if (instance != nullptr && !instance->rootDir.isEmpty())
+    {
+        return QDir(instance->rootDir).absoluteFilePath(info.completeBaseName() + QStringLiteral(".bia_project.json"));
+    }
     return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".bia_project.json");
 }
 

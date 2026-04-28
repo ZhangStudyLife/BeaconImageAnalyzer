@@ -65,10 +65,11 @@ bool openWriter(cv::VideoWriter* writer,
 }
 
 bool VideoExporter::exportMarkedAvi(const QString& inputPath,
-                                    const QString& outputPath,
-                                    double fps,
-                                    const ProgressCallback& progress,
-                                    QString* errorMessage) const
+                                     const QString& outputPath,
+                                     double fps,
+                                     const AlgorithmRunner* runner,
+                                     const ProgressCallback& progress,
+                                     QString* errorMessage) const
 {
     VideoReader reader;
     if (!reader.open(inputPath, errorMessage))
@@ -87,7 +88,8 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
         return false;
     }
 
-    AlgorithmRunner runner;
+    AlgorithmRunner fallbackRunner;
+    const AlgorithmRunner* activeRunner = runner != nullptr ? runner : &fallbackRunner;
     for (int frame = 0; frame < reader.frameCount(); ++frame)
     {
         QImage gray;
@@ -96,7 +98,7 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
             return false;
         }
 
-        const beacon_result_t result = runner.process(gray);
+        const beacon_result_t result = activeRunner->process(gray);
         const QImage rendered = FrameRenderer::render(gray, result, QVector<CorrectionShape>(), 1, true);
         writer.write(qImageToBgrMat(rendered));
 
@@ -117,6 +119,7 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
 bool VideoExporter::exportResultCsv(const QString& inputPath,
                                     const QString& outputPath,
                                     double fps,
+                                    const AlgorithmRunner* runner,
                                     const ProgressCallback& progress,
                                     QString* errorMessage) const
 {
@@ -139,7 +142,8 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
     QTextStream stream(&file);
     stream << "frame,time_sec,index,valid,x,y,radius\n";
 
-    AlgorithmRunner runner;
+    AlgorithmRunner fallbackRunner;
+    const AlgorithmRunner* activeRunner = runner != nullptr ? runner : &fallbackRunner;
     for (int frame = 0; frame < reader.frameCount(); ++frame)
     {
         QImage gray;
@@ -148,7 +152,7 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
             return false;
         }
 
-        const beacon_result_t result = runner.process(gray);
+        const beacon_result_t result = activeRunner->process(gray);
         const double timeSec = (double)frame / (fps > 0.0 ? fps : 50.0);
         for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
         {
