@@ -397,15 +397,15 @@ void MainWindow::buildUi()
     auto* central = new QWidget(this);
     central->setObjectName(QStringLiteral("AppRoot"));
     auto* root = new QHBoxLayout(central);
-    root->setContentsMargins(10, 10, 10, 10);
-    root->setSpacing(12);
+    root->setContentsMargins(6, 8, 8, 8);
+    root->setSpacing(8);
 
     auto* rail = new QFrame(central);
     rail->setObjectName(QStringLiteral("Rail"));
-    rail->setFixedWidth(64);
+    rail->setFixedWidth(56);
     auto* railLayout = new QVBoxLayout(rail);
-    railLayout->setContentsMargins(10, 12, 10, 12);
-    railLayout->setSpacing(12);
+    railLayout->setContentsMargins(8, 10, 8, 10);
+    railLayout->setSpacing(10);
 
     auto* brand = new QLabel(QStringLiteral("DJI"), rail);
     brand->setObjectName(QStringLiteral("Brand"));
@@ -449,16 +449,16 @@ void MainWindow::buildUi()
     workspace->setObjectName(QStringLiteral("Workspace"));
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
-    workspaceLayout->setSpacing(12);
+    workspaceLayout->setSpacing(8);
 
     auto* videoCard = new QFrame(workspace);
     videoCard->setObjectName(QStringLiteral("VideoCard"));
     auto* videoLayout = new QVBoxLayout(videoCard);
-    videoLayout->setContentsMargins(14, 12, 14, 14);
-    videoLayout->setSpacing(10);
+    videoLayout->setContentsMargins(8, 8, 8, 10);
+    videoLayout->setSpacing(8);
 
     auto* feedHeader = new QHBoxLayout;
-    feedHeader->setSpacing(12);
+    feedHeader->setSpacing(8);
     auto* feedTitle = new QLabel(QStringLiteral("IR BEACON FEED"), videoCard);
     feedTitle->setObjectName(QStringLiteral("FeedTitle"));
     m_videoInfoLabel = new QLabel(QStringLiteral("未打开视频"), videoCard);
@@ -481,55 +481,40 @@ void MainWindow::buildUi()
     rightScroll->setObjectName(QStringLiteral("RightScroll"));
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setMinimumWidth(390);
-    rightScroll->setMaximumWidth(560);
+    rightScroll->setMinimumWidth(500);
+    rightScroll->setMaximumWidth(780);
 
     auto* rightPanel = new QWidget(rightScroll);
     rightPanel->setObjectName(QStringLiteral("RightPanel"));
-    rightPanel->setMinimumWidth(370);
+    rightPanel->setMinimumWidth(480);
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(12);
     m_frameInfoLabel = new QLabel(QStringLiteral("Frame: -"), rightPanel);
     m_frameInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_frameInfoLabel->setWordWrap(true);
-    m_pixelInfoLabel = new QLabel(QStringLiteral("Pixel: -"), rightPanel);
+    m_pixelInfoLabel = new QLabel(QStringLiteral("鼠标: -"), rightPanel);
     m_pixelInfoLabel->setObjectName(QStringLiteral("Pill"));
     m_pixelInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pixelInfoLabel->setWordWrap(true);
     m_currentAnnotationsLabel = new QLabel(QStringLiteral("当前帧标注: -"), rightPanel);
     m_currentAnnotationsLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_currentAnnotationsLabel->setWordWrap(true);
-    m_currentAnnotationsLabel->setMaximumHeight(132);
+    m_currentAnnotationsLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_resultText = new QTextEdit(rightPanel);
     m_resultText->setReadOnly(true);
-    m_resultText->setFixedHeight(112);
+    m_resultText->setMinimumHeight(160);
+    m_resultText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_annotationPanel = new AnnotationPanel(rightPanel);
 
-    auto* infoGroup = new QGroupBox(QStringLiteral("飞控状态 / 当前帧"), rightPanel);
+    auto* infoGroup = new QGroupBox(QStringLiteral("当前帧信息"), rightPanel);
     auto* infoLayout = new QVBoxLayout(infoGroup);
     infoLayout->setContentsMargins(12, 8, 12, 12);
     infoLayout->setSpacing(8);
     infoLayout->addWidget(m_frameInfoLabel);
     infoLayout->addWidget(m_pixelInfoLabel);
     infoLayout->addWidget(m_currentAnnotationsLabel);
-
-    auto* resultGroup = new QGroupBox(QStringLiteral("检测结果"), rightPanel);
-    auto* resultLayout = new QVBoxLayout(resultGroup);
-    resultLayout->setContentsMargins(12, 8, 12, 12);
-    resultLayout->addWidget(m_resultText);
-
-    auto* algorithmGroup = new QGroupBox(QStringLiteral("算法信息"), rightPanel);
-    auto* algorithmLayout = new QVBoxLayout(algorithmGroup);
-    algorithmLayout->setContentsMargins(12, 8, 12, 12);
-    algorithmLayout->setSpacing(8);
-    m_algorithmInfoLabel = new QLabel(QStringLiteral("入口: beacon_image_process()\n文件: algorithm/beacon_image.c"), algorithmGroup);
-    m_algorithmInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
-    m_algorithmInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_algorithmInfoLabel->setWordWrap(true);
-    auto* openAlgorithmButton = new QPushButton(QStringLiteral("打开算法文件位置"), algorithmGroup);
-    algorithmLayout->addWidget(m_algorithmInfoLabel);
-    algorithmLayout->addWidget(openAlgorithmButton);
+    infoLayout->addWidget(m_resultText, 1);
 
     auto* annotationGroup = new QGroupBox(QStringLiteral("错误标注"), rightPanel);
     auto* annotationLayout = new QVBoxLayout(annotationGroup);
@@ -537,15 +522,13 @@ void MainWindow::buildUi()
     annotationLayout->addWidget(m_annotationPanel);
 
     rightLayout->addWidget(infoGroup);
-    rightLayout->addWidget(resultGroup);
-    rightLayout->addWidget(algorithmGroup);
     rightLayout->addWidget(annotationGroup, 1);
 
     rightScroll->setWidget(rightPanel);
     splitter->addWidget(workspace);
     splitter->addWidget(rightScroll);
-    splitter->setStretchFactor(0, 4);
-    splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 2);
 
     auto* controlsFrame = new QFrame(workspace);
     controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
@@ -637,7 +620,6 @@ void MainWindow::buildUi()
     connect(nextButton, &QPushButton::clicked, this, &MainWindow::nextFrame);
     connect(jumpFrameButton, &QPushButton::clicked, this, &MainWindow::jumpToFrame);
     connect(jumpTimeButton, &QPushButton::clicked, this, &MainWindow::jumpToTime);
-    connect(openAlgorithmButton, &QPushButton::clicked, this, &MainWindow::openAlgorithmLocation);
     connect(m_slider, &QSlider::sliderPressed, this, &MainWindow::pause);
     connect(m_slider, &QSlider::sliderMoved, this, [this](int value) {
         pause();
@@ -1087,13 +1069,7 @@ void MainWindow::showFrame(int frameIndex)
 
 void MainWindow::updateFrameInfo(const beacon_result_t& result)
 {
-    m_frameInfoLabel->setText(QStringLiteral("Frame %1/%2 | %3s/%4s | Circles %5")
-                                  .arg(m_currentFrame)
-                                  .arg(qMax(0, m_reader.frameCount() - 1))
-                                  .arg(frameTime(m_currentFrame), 0, 'f', 3)
-                                  .arg(frameTime(qMax(0, m_reader.frameCount() - 1)), 0, 'f', 3)
-                                  .arg(result.count));
-
+    int validCircleCount = 0;
     QString text;
     for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
     {
@@ -1102,16 +1078,30 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
         {
             continue;
         }
-        text += QStringLiteral("#%1 valid=%2 x=%3 y=%4 r=%5\n")
+        ++validCircleCount;
+        const double area = 3.14159265358979323846 * circle.radius * circle.radius;
+        text += QStringLiteral("#%1  X=%2  Y=%3  R=%4  Area=%5\n")
                     .arg(i)
-                    .arg((int)circle.valid)
                     .arg(circle.x, 0, 'f', 2)
                     .arg(circle.y, 0, 'f', 2)
-                    .arg(circle.radius, 0, 'f', 2);
+                    .arg(circle.radius, 0, 'f', 2)
+                    .arg(area, 0, 'f', 2);
     }
+
+    m_frameInfoLabel->setText(QStringLiteral("当前帧: %1 / %2\n播放时间: %3 s / %4 s\n识别圆总数: %5")
+                                  .arg(m_currentFrame)
+                                  .arg(qMax(0, m_reader.frameCount() - 1))
+                                  .arg(frameTime(m_currentFrame), 0, 'f', 3)
+                                  .arg(frameTime(qMax(0, m_reader.frameCount() - 1)), 0, 'f', 3)
+                                  .arg(validCircleCount));
+
     if (text.isEmpty())
     {
-        text = QStringLiteral("无有效圆");
+        text = QStringLiteral("圆总数: 0\n无有效圆");
+    }
+    else
+    {
+        text.prepend(QStringLiteral("圆总数: %1\n").arg(validCircleCount));
     }
     m_resultText->setPlainText(text);
     updateCurrentAnnotationInfo();
@@ -1126,12 +1116,12 @@ void MainWindow::updateHoverPixelInfo(int x, int y, int gray, bool valid)
 
     if (!valid)
     {
-        m_pixelInfoLabel->setText(QStringLiteral("Pixel: -"));
+        m_pixelInfoLabel->setText(QStringLiteral("鼠标: -"));
         statusBar()->clearMessage();
         return;
     }
 
-    const QString text = QStringLiteral("Pixel X=%1 Y=%2 Gray=%3").arg(x).arg(y).arg(gray);
+    const QString text = QStringLiteral("鼠标 X=%1 Y=%2 灰度=%3").arg(x).arg(y).arg(gray);
     m_pixelInfoLabel->setText(text);
     statusBar()->showMessage(text);
 }

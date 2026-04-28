@@ -112,7 +112,6 @@ private:
     QLabel* m_frameInfoLabel = nullptr;
     QLabel* m_pixelInfoLabel = nullptr;
     QLabel* m_currentAnnotationsLabel = nullptr;
-    QLabel* m_algorithmInfoLabel = nullptr;
     QTextEdit* m_resultText = nullptr;
     AnnotationPanel* m_annotationPanel = nullptr;
     QPushButton* m_playPauseButton = nullptr;

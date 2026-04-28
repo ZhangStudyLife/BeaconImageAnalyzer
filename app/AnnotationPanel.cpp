@@ -188,10 +188,12 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_filterStartSpin->setRange(-1, 100000000);
     m_filterStartSpin->setSpecialValueText(QStringLiteral("不限"));
     m_filterStartSpin->setValue(-1);
+    m_filterStartSpin->setMinimumWidth(96);
     m_filterEndSpin = new QSpinBox(this);
     m_filterEndSpin->setRange(-1, 100000000);
     m_filterEndSpin->setSpecialValueText(QStringLiteral("不限"));
     m_filterEndSpin->setValue(-1);
+    m_filterEndSpin->setMinimumWidth(96);
     m_filterTypeList = new QListWidget(this);
     m_filterTypeList->setSelectionMode(QAbstractItemView::NoSelection);
     m_filterTypeList->setMaximumHeight(96);
@@ -202,13 +204,21 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     auto* filterLayout = new QVBoxLayout(filterGroup);
     filterLayout->setContentsMargins(10, 8, 10, 10);
     filterLayout->setSpacing(7);
+    auto makeSpinColumn = [](const QString& labelText, QWidget* editor, QWidget* parent) {
+        auto* container = new QWidget(parent);
+        auto* layout = new QVBoxLayout(container);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(4);
+        layout->addWidget(new QLabel(labelText, container));
+        layout->addWidget(editor);
+        return container;
+    };
+
     auto* frameFilterRow = new QHBoxLayout;
     frameFilterRow->setContentsMargins(0, 0, 0, 0);
     frameFilterRow->setSpacing(6);
-    frameFilterRow->addWidget(new QLabel(QStringLiteral("起始帧"), this));
-    frameFilterRow->addWidget(m_filterStartSpin);
-    frameFilterRow->addWidget(new QLabel(QStringLiteral("结束帧"), this));
-    frameFilterRow->addWidget(m_filterEndSpin);
+    frameFilterRow->addWidget(makeSpinColumn(QStringLiteral("起始帧"), m_filterStartSpin, filterGroup), 1);
+    frameFilterRow->addWidget(makeSpinColumn(QStringLiteral("结束帧"), m_filterEndSpin, filterGroup), 1);
     filterLayout->addLayout(frameFilterRow);
     filterLayout->addWidget(new QLabel(QStringLiteral("错误类型"), this));
     filterLayout->addWidget(m_filterTypeList);
@@ -224,13 +234,14 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     savedLayout->setContentsMargins(10, 8, 10, 10);
     savedLayout->setSpacing(7);
 
-    m_batchGroup = new QGroupBox(QStringLiteral("跨帧批量操作"), savedGroup);
+    m_batchGroup = new QGroupBox(QStringLiteral("跨帧批量操作"), this);
     auto* batchLayout = new QVBoxLayout(m_batchGroup);
     batchLayout->setContentsMargins(10, 8, 10, 10);
     batchLayout->setSpacing(8);
     m_batchSelectionLabel = new QLabel(m_batchGroup);
     m_batchSelectionLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_batchSelectionLabel->setWordWrap(true);
+    m_batchSelectionLabel->setText(QStringLiteral("请选择当前帧已保存纠错条目后执行批量操作。"));
     batchLayout->addWidget(m_batchSelectionLabel);
 
     auto* manualGroup = new QGroupBox(QStringLiteral("手动批量添加"), m_batchGroup);
@@ -240,14 +251,15 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     manualLayout->setHorizontalSpacing(8);
     m_batchStartSpin = new QSpinBox(manualGroup);
     m_batchStartSpin->setRange(0, 0);
+    m_batchStartSpin->setMinimumWidth(96);
     m_batchEndSpin = new QSpinBox(manualGroup);
     m_batchEndSpin->setRange(0, 0);
+    m_batchEndSpin->setMinimumWidth(96);
     auto* manualFrameRow = new QHBoxLayout;
     manualFrameRow->setContentsMargins(0, 0, 0, 0);
     manualFrameRow->setSpacing(6);
-    manualFrameRow->addWidget(m_batchStartSpin);
-    manualFrameRow->addWidget(new QLabel(QStringLiteral("至"), manualGroup));
-    manualFrameRow->addWidget(m_batchEndSpin);
+    manualFrameRow->addWidget(makeSpinColumn(QStringLiteral("起始帧"), m_batchStartSpin, manualGroup), 1);
+    manualFrameRow->addWidget(makeSpinColumn(QStringLiteral("结束帧"), m_batchEndSpin, manualGroup), 1);
     auto* manualAddButton = new QPushButton(QStringLiteral("确认批量添加"), manualGroup);
     manualLayout->addRow(QStringLiteral("目标帧"), manualFrameRow);
     manualLayout->addRow(QString(), manualAddButton);
@@ -261,23 +273,24 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_batchBackwardSpin = new QSpinBox(autoGroup);
     m_batchBackwardSpin->setRange(0, 100000);
     m_batchBackwardSpin->setValue(30);
+    m_batchBackwardSpin->setMinimumWidth(110);
     m_batchForwardSpin = new QSpinBox(autoGroup);
     m_batchForwardSpin->setRange(0, 100000);
     m_batchForwardSpin->setValue(30);
+    m_batchForwardSpin->setMinimumWidth(110);
     m_batchThresholdSpin = new QDoubleSpinBox(autoGroup);
     m_batchThresholdSpin->setRange(0.0, 1000.0);
     m_batchThresholdSpin->setDecimals(2);
     m_batchThresholdSpin->setValue(3.0);
     m_batchThresholdSpin->setSuffix(QStringLiteral(" px"));
+    m_batchThresholdSpin->setMinimumWidth(110);
     auto* autoFrameRow = new QHBoxLayout;
     autoFrameRow->setContentsMargins(0, 0, 0, 0);
     autoFrameRow->setSpacing(6);
-    autoFrameRow->addWidget(new QLabel(QStringLiteral("向前"), autoGroup));
-    autoFrameRow->addWidget(m_batchBackwardSpin);
-    autoFrameRow->addWidget(new QLabel(QStringLiteral("向后"), autoGroup));
-    autoFrameRow->addWidget(m_batchForwardSpin);
-    autoLayout->addRow(QStringLiteral("最大帧数"), autoFrameRow);
-    autoLayout->addRow(QStringLiteral("坐标偏差"), m_batchThresholdSpin);
+    autoFrameRow->addWidget(makeSpinColumn(QStringLiteral("向前最大帧数"), m_batchBackwardSpin, autoGroup), 1);
+    autoFrameRow->addWidget(makeSpinColumn(QStringLiteral("向后最大帧数"), m_batchForwardSpin, autoGroup), 1);
+    autoLayout->addRow(autoFrameRow);
+    autoLayout->addRow(makeSpinColumn(QStringLiteral("坐标偏差阈值"), m_batchThresholdSpin, autoGroup));
     auto* autoMatchButton = new QPushButton(QStringLiteral("自动识别匹配帧"), autoGroup);
     m_batchApplyAutoButton = new QPushButton(QStringLiteral("全部批量标记"), autoGroup);
     m_batchApplyAutoButton->setEnabled(false);
@@ -292,11 +305,10 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_batchMatchedFrameList->setMaximumHeight(82);
     autoLayout->addRow(QStringLiteral("匹配帧"), m_batchMatchedFrameList);
     batchLayout->addWidget(autoGroup);
-    m_batchGroup->setVisible(false);
+    m_batchGroup->setVisible(true);
 
     savedLayout->addWidget(m_savedList, 1);
     savedLayout->addWidget(deleteSavedButton);
-    savedLayout->addWidget(m_batchGroup);
 
     auto* coreGroup = new QGroupBox(QStringLiteral("核心操作区"), this);
     auto* coreLayout = new QGridLayout(coreGroup);
@@ -313,11 +325,21 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     coreLayout->setRowStretch(1, 1);
 
     auto* managementGroup = new QGroupBox(QStringLiteral("标注管理区"), this);
-    auto* managementLayout = new QHBoxLayout(managementGroup);
+    auto* managementLayout = new QGridLayout(managementGroup);
     managementLayout->setContentsMargins(10, 10, 10, 10);
-    managementLayout->setSpacing(10);
-    managementLayout->addWidget(filterGroup, 1);
-    managementLayout->addWidget(savedGroup, 1);
+    managementLayout->setHorizontalSpacing(10);
+    managementLayout->setVerticalSpacing(10);
+    filterGroup->setMaximumWidth(260);
+    filterGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    savedGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_batchGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    managementLayout->addWidget(savedGroup, 0, 0, 1, 2);
+    managementLayout->addWidget(filterGroup, 1, 0);
+    managementLayout->addWidget(m_batchGroup, 1, 1);
+    managementLayout->setColumnStretch(0, 0);
+    managementLayout->setColumnStretch(1, 1);
+    managementLayout->setRowStretch(0, 2);
+    managementLayout->setRowStretch(1, 1);
 
     auto* splitter = new QSplitter(Qt::Vertical, this);
     splitter->setChildrenCollapsible(false);
@@ -809,9 +831,10 @@ void AnnotationPanel::refreshBatchPanel()
 {
     const QVector<int> rows = selectedCurrentFrameCorrectionRows();
     const bool hasSelection = !rows.isEmpty();
-    m_batchGroup->setVisible(hasSelection);
+    m_batchGroup->setVisible(true);
     if (!hasSelection)
     {
+        m_batchSelectionLabel->setText(QStringLiteral("请选择当前帧已保存纠错条目后执行批量操作。"));
         m_autoMatchedBatchFrames.clear();
         m_batchMatchedFrameList->clear();
         m_batchApplyAutoButton->setEnabled(false);
