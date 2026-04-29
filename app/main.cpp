@@ -4,6 +4,7 @@
 #include "VideoReader.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QTextStream>
 
 namespace
@@ -24,6 +25,7 @@ int printUsage()
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+    app.setWindowIcon(QIcon(QStringLiteral(":/img/logo.png")));
     const QStringList args = app.arguments();
 
     if (args.size() > 1)

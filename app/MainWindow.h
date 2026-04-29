@@ -120,7 +120,13 @@ private:
     void updateSplitLayout();
     void updateCurrentVideoWidget();
     void renderInstance(AnalyzerInstance* instance);
+    void renderInstance(AnalyzerInstance* instance,
+                        const QImage& gray,
+                        const beacon_result_t& result,
+                        int frameIndex);
     void renderAllDisplayedInstances();
+    void renderAllDisplayedInstances(const QImage& gray,
+                                     const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results);
     int slotForInstance(int instanceId) const;
     int slotAtGlobalPos(const QPoint& globalPos) const;
     void setInstanceVisible(int instanceId, bool visible);

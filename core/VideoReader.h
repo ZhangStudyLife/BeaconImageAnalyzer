@@ -40,9 +40,6 @@ private:
 
     static QImage matToGrayImage(const cv::Mat& frame);
     static QString fourccToString(int fourcc);
-    static quint16 readU16(const QByteArray& data, qsizetype offset);
-    static quint32 readU32(const QByteArray& data, qsizetype offset);
-    static qint32 readI32(const QByteArray& data, qsizetype offset);
     static bool isUncompressedDibAvi(const QString& path);
 
     bool openOpenCv(const QString& path, const QVector<int>& backends, QString* lastError);

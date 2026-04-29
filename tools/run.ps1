@@ -5,7 +5,15 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Exe = "$ProjectRoot/build/BeaconImageAnalyzer.exe"
 
 if (!(Test-Path -LiteralPath $Exe)) {
-    throw "未找到可执行文件: $Exe，请先运行 tools/build.ps1"
+    & "$PSScriptRoot/build.ps1"
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+if (!(Test-Path -LiteralPath $Exe)) {
+    throw "Executable not found after build: $Exe"
 }
 
 & $Exe @args
+exit $LASTEXITCODE

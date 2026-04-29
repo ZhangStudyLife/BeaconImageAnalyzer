@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
@@ -19,7 +20,15 @@ target_include_directories(beacon_algorithm PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm
 )
 
+set(BEACON_APP_PLATFORM_SOURCES)
+if (WIN32)
+    list(APPEND BEACON_APP_PLATFORM_SOURCES
+        app/app.rc
+    )
+endif()
+
 add_executable(BeaconImageAnalyzer
+    resources.qrc
     app/main.cpp
     app/MainWindow.h
     app/MainWindow.cpp
@@ -39,6 +48,7 @@ add_executable(BeaconImageAnalyzer
     annotation/AnnotationModel.cpp
     annotation/AnnotationJson.h
     annotation/AnnotationJson.cpp
+    ${BEACON_APP_PLATFORM_SOURCES}
 )
 
 target_include_directories(BeaconImageAnalyzer PRIVATE

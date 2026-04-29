@@ -1,13 +1,60 @@
 #include "AnnotationJson.h"
 
+#include "beacon_image.h"
+
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <cmath>
+
 namespace
 {
+constexpr qint64 MaxAnnotationJsonBytes = 16LL * 1024LL * 1024LL;
+constexpr int MaxAnnotationItems = 200000;
+constexpr int MaxPointItemsPerShape = 1024;
+constexpr int MaxErrorCircleItems = 64;
+constexpr int MaxTextLength = 8192;
+constexpr double MaxPointAbs = 100000.0;
+
+void setError(QString* errorMessage, const QString& message)
+{
+    if (errorMessage != nullptr)
+    {
+        *errorMessage = message;
+    }
+}
+
+bool validFrameRange(int startFrame, int endFrame)
+{
+    return startFrame >= 0 && endFrame >= startFrame;
+}
+
+bool validCircleIndex(int index)
+{
+    return index >= -1 && index < BEACON_MAX_CIRCLE_COUNT;
+}
+
+QString boundedString(const QJsonValue& value, const QString& fallback = QString())
+{
+    QString text = value.toString(fallback);
+    if (text.size() > MaxTextLength)
+    {
+        text.truncate(MaxTextLength);
+    }
+    return text;
+}
+
+bool finitePoint(double x, double y)
+{
+    return std::isfinite(x) &&
+           std::isfinite(y) &&
+           std::abs(x) <= MaxPointAbs &&
+           std::abs(y) <= MaxPointAbs;
+}
+
 QJsonArray stringListToJson(const QStringList& values)
 {
     QJsonArray array;
@@ -24,13 +71,22 @@ QJsonArray stringListToJson(const QStringList& values)
 QStringList stringListFromJson(const QJsonValue& value, const QString& fallback)
 {
     QStringList result;
+    if (!value.isUndefined() && !value.isArray())
+    {
+        return fallback.trimmed().isEmpty() ? result : QStringList{ fallback.trimmed() };
+    }
+
     const QJsonArray array = value.toArray();
     for (const QJsonValue& item : array)
     {
         const QString text = item.toString().trimmed();
         if (!text.isEmpty())
         {
-            result.push_back(text);
+            result.push_back(text.left(MaxTextLength));
+        }
+        if (result.size() >= MaxErrorCircleItems)
+        {
+            break;
         }
     }
     if (result.isEmpty() && !fallback.trimmed().isEmpty())
@@ -56,24 +112,36 @@ QJsonArray errorCirclesToJson(const QVector<ErrorCircle>& circles)
 QVector<ErrorCircle> errorCirclesFromJson(const QJsonValue& value, int legacyCircle, int legacyExpected)
 {
     QVector<ErrorCircle> result;
+    if (!value.isUndefined() && !value.isArray())
+    {
+        return result;
+    }
+
     const QJsonArray array = value.toArray();
     for (const QJsonValue& item : array)
     {
+        if (!item.isObject() || result.size() >= MaxErrorCircleItems)
+        {
+            continue;
+        }
+
         const QJsonObject object = item.toObject();
         ErrorCircle circle;
         circle.circleIndex = object.value(QStringLiteral("circle_index")).toInt(-1);
         circle.expectedIndex = object.value(QStringLiteral("expected_index")).toInt(-1);
-        if (circle.circleIndex >= 0 || circle.expectedIndex >= 0)
+        if (validCircleIndex(circle.circleIndex) &&
+            validCircleIndex(circle.expectedIndex) &&
+            (circle.circleIndex >= 0 || circle.expectedIndex >= 0))
         {
             result.push_back(circle);
         }
     }
 
-    if (result.isEmpty() && legacyCircle >= 0)
+    if (result.isEmpty() && validCircleIndex(legacyCircle) && legacyCircle >= 0)
     {
         ErrorCircle circle;
         circle.circleIndex = legacyCircle;
-        circle.expectedIndex = legacyExpected;
+        circle.expectedIndex = validCircleIndex(legacyExpected) ? legacyExpected : -1;
         result.push_back(circle);
     }
 
@@ -162,7 +230,12 @@ bool AnnotationJson::save(const QString& path,
     }
     root.insert(QStringLiteral("corrections"), corrections);
 
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    const QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    if (file.write(payload) != payload.size())
+    {
+        setError(errorMessage, file.errorString());
+        return false;
+    }
     return true;
 }
 
@@ -182,10 +255,12 @@ bool AnnotationJson::load(const QString& path,
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = file.errorString();
-        }
+        setError(errorMessage, file.errorString());
+        return false;
+    }
+    if (file.size() > MaxAnnotationJsonBytes)
+    {
+        setError(errorMessage, QStringLiteral("Annotation JSON is too large"));
         return false;
     }
 
@@ -193,61 +268,125 @@ bool AnnotationJson::load(const QString& path,
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject())
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = parseError.errorString();
-        }
+        setError(errorMessage, parseError.errorString());
         return false;
     }
 
-    const QJsonArray annotations = document.object().value(QStringLiteral("annotations")).toArray();
-    model->clear();
+    const QJsonObject root = document.object();
+    const QJsonValue annotationsValue = root.value(QStringLiteral("annotations"));
+    const QJsonValue correctionsValue = root.value(QStringLiteral("corrections"));
+    if ((!annotationsValue.isUndefined() && !annotationsValue.isArray()) ||
+        (!correctionsValue.isUndefined() && !correctionsValue.isArray()))
+    {
+        setError(errorMessage, QStringLiteral("annotations/corrections must be arrays"));
+        return false;
+    }
+
+    const QJsonArray annotations = annotationsValue.toArray();
+    const QJsonArray corrections = correctionsValue.toArray();
+    if (annotations.size() > MaxAnnotationItems || corrections.size() > MaxAnnotationItems)
+    {
+        setError(errorMessage, QStringLiteral("Annotation JSON contains too many items"));
+        return false;
+    }
+
+    AnnotationModel loaded;
     for (const QJsonValue& value : annotations)
     {
+        if (!value.isObject())
+        {
+            setError(errorMessage, QStringLiteral("Annotation item must be an object"));
+            return false;
+        }
+
         const QJsonObject object = value.toObject();
         AnnotationRecord record;
-        record.type = object.value(QStringLiteral("type")).toString(QStringLiteral("other"));
+        record.type = boundedString(object.value(QStringLiteral("type")), QStringLiteral("other")).trimmed();
         record.types = stringListFromJson(object.value(QStringLiteral("types")), record.type);
         record.startFrame = object.value(QStringLiteral("start_frame")).toInt();
         record.endFrame = object.value(QStringLiteral("end_frame")).toInt(record.startFrame);
         record.startTimeSec = object.value(QStringLiteral("start_time_sec")).toDouble();
         record.endTimeSec = object.value(QStringLiteral("end_time_sec")).toDouble(record.startTimeSec);
         record.circleIndex = object.value(QStringLiteral("circle_index")).toInt(-1);
+        if (!validFrameRange(record.startFrame, record.endFrame) ||
+            !std::isfinite(record.startTimeSec) ||
+            !std::isfinite(record.endTimeSec) ||
+            record.endTimeSec < record.startTimeSec ||
+            !validCircleIndex(record.circleIndex))
+        {
+            setError(errorMessage, QStringLiteral("Annotation item contains invalid frame/time/circle fields"));
+            return false;
+        }
+
         record.errorCircles = errorCirclesFromJson(object.value(QStringLiteral("error_circles")),
                                                    record.circleIndex,
                                                    -1);
-        record.description = object.value(QStringLiteral("description")).toString();
-        model->add(record);
+        record.description = boundedString(object.value(QStringLiteral("description")));
+        loaded.add(record);
     }
 
-    const QJsonArray corrections = document.object().value(QStringLiteral("corrections")).toArray();
     for (const QJsonValue& value : corrections)
     {
+        if (!value.isObject())
+        {
+            setError(errorMessage, QStringLiteral("Correction item must be an object"));
+            return false;
+        }
+
         const QJsonObject object = value.toObject();
         CorrectionShape shape;
-        shape.name = object.value(QStringLiteral("name")).toString();
-        shape.shapeType = object.value(QStringLiteral("shape_type")).toString();
+        shape.name = boundedString(object.value(QStringLiteral("name")));
+        shape.shapeType = boundedString(object.value(QStringLiteral("shape_type"))).trimmed();
         shape.frame = object.value(QStringLiteral("frame")).toInt();
-        shape.errorType = object.value(QStringLiteral("error_type")).toString(QStringLiteral("other"));
+        shape.errorType = boundedString(object.value(QStringLiteral("error_type")), QStringLiteral("other")).trimmed();
         shape.errorTypes = stringListFromJson(object.value(QStringLiteral("error_types")), shape.errorType);
         shape.expectedIndex = object.value(QStringLiteral("expected_index")).toInt(-1);
+        if (shape.frame < 0 || !validCircleIndex(shape.expectedIndex))
+        {
+            setError(errorMessage, QStringLiteral("Correction item contains invalid frame or expected index"));
+            return false;
+        }
+
         shape.errorCircles = errorCirclesFromJson(object.value(QStringLiteral("error_circles")),
                                                   -1,
                                                   shape.expectedIndex);
-        shape.description = object.value(QStringLiteral("description")).toString();
-        shape.lineColor = QColor(object.value(QStringLiteral("line_color")).toString(QStringLiteral("#ff5050")));
+        shape.description = boundedString(object.value(QStringLiteral("description")));
+        shape.lineColor = QColor(boundedString(object.value(QStringLiteral("line_color")), QStringLiteral("#ff5050")));
         if (!shape.lineColor.isValid())
         {
             shape.lineColor = QColor(255, 80, 80);
         }
         shape.lineWidth = qBound(1, object.value(QStringLiteral("line_width")).toInt(1), 15);
 
-        const QJsonArray points = object.value(QStringLiteral("points")).toArray();
+        const QJsonValue pointsValue = object.value(QStringLiteral("points"));
+        if (!pointsValue.isUndefined() && !pointsValue.isArray())
+        {
+            setError(errorMessage, QStringLiteral("Correction points must be an array"));
+            return false;
+        }
+        const QJsonArray points = pointsValue.toArray();
+        if (points.size() > MaxPointItemsPerShape)
+        {
+            setError(errorMessage, QStringLiteral("Correction item contains too many points"));
+            return false;
+        }
         for (const QJsonValue& pointValue : points)
         {
+            if (!pointValue.isObject())
+            {
+                setError(errorMessage, QStringLiteral("Correction point must be an object"));
+                return false;
+            }
+
             const QJsonObject pointObject = pointValue.toObject();
-            shape.points.push_back(QPointF(pointObject.value(QStringLiteral("x")).toDouble(),
-                                           pointObject.value(QStringLiteral("y")).toDouble()));
+            const double x = pointObject.value(QStringLiteral("x")).toDouble();
+            const double y = pointObject.value(QStringLiteral("y")).toDouble();
+            if (!finitePoint(x, y))
+            {
+                setError(errorMessage, QStringLiteral("Correction point contains invalid coordinates"));
+                return false;
+            }
+            shape.points.push_back(QPointF(x, y));
         }
 
         if (!shape.errorType.isEmpty() ||
@@ -255,9 +394,18 @@ bool AnnotationJson::load(const QString& path,
             !shape.description.trimmed().isEmpty() ||
             (!shape.shapeType.isEmpty() && !shape.points.isEmpty()))
         {
-            model->addCorrection(shape);
+            loaded.addCorrection(shape);
         }
     }
 
+    model->clear();
+    for (const AnnotationRecord& record : loaded.records())
+    {
+        model->add(record);
+    }
+    for (const CorrectionShape& shape : loaded.corrections())
+    {
+        model->addCorrection(shape);
+    }
     return true;
 }

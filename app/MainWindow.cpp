@@ -26,6 +26,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -43,6 +44,7 @@
 #include <QPolygonF>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QPixmap>
 #include <QRectF>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -684,10 +686,8 @@ QFrame#Rail {
 
 QLabel#Brand {
     background: #f2f4f5;
-    color: #08090a;
-    border-radius: 4px;
-    font-weight: 800;
-    font-size: 12px;
+    border-radius: 8px;
+    padding: 4px;
 }
 
 QToolButton#RailButton {
@@ -875,6 +875,7 @@ QStatusBar {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
+    setWindowIcon(QIcon(QStringLiteral(":/img/logo.png")));
     buildUi();
     buildMenus();
     QString instanceError;
@@ -1513,6 +1514,19 @@ void MainWindow::renderInstance(AnalyzerInstance* instance)
         return;
     }
     const beacon_result_t result = instance->runner.process(gray);
+    renderInstance(instance, gray, result, frameIndex);
+}
+
+void MainWindow::renderInstance(AnalyzerInstance* instance,
+                                const QImage& gray,
+                                const beacon_result_t& result,
+                                int frameIndex)
+{
+    if (instance == nullptr || gray.isNull())
+    {
+        return;
+    }
+
     instance->currentResult = result;
     const QVector<CorrectionShape> corrections = instance->annotations.correctionsForFrame(frameIndex);
     QImage displayImage = gray;
@@ -1545,6 +1559,29 @@ void MainWindow::renderAllDisplayedInstances()
     for (int instanceId : m_splitSlotInstanceIds)
     {
         renderInstance(instanceById(instanceId));
+    }
+    updateCurrentVideoWidget();
+}
+
+void MainWindow::renderAllDisplayedInstances(const QImage& gray,
+                                             const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results)
+{
+    for (int instanceId : m_splitSlotInstanceIds)
+    {
+        AnalyzerInstance* instance = instanceById(instanceId);
+        if (instance == nullptr)
+        {
+            continue;
+        }
+
+        for (const auto& item : results)
+        {
+            if (item.first == instance)
+            {
+                renderInstance(instance, gray, item.second, m_currentFrame);
+                break;
+            }
+        }
     }
     updateCurrentVideoWidget();
 }
@@ -1608,10 +1645,11 @@ void MainWindow::buildUi()
     railLayout->setContentsMargins(8, 10, 8, 10);
     railLayout->setSpacing(10);
 
-    auto* brand = new QLabel(QStringLiteral("DJI"), rail);
+    auto* brand = new QLabel(rail);
     brand->setObjectName(QStringLiteral("Brand"));
     brand->setAlignment(Qt::AlignCenter);
-    brand->setFixedSize(40, 28);
+    brand->setFixedSize(40, 40);
+    brand->setPixmap(QPixmap(QStringLiteral(":/img/logo.png")).scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     railLayout->addWidget(brand, 0, Qt::AlignHCenter);
     railLayout->addSpacing(10);
 
@@ -2451,7 +2489,7 @@ void MainWindow::showFrame(int frameIndex)
     const QVector<CorrectionShape> savedCorrections = m_annotations.correctionsForFrame(m_currentFrame);
     m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
     m_annotationPanel->setCurrentFrameCorrections(savedCorrections);
-    renderAllDisplayedInstances();
+    renderAllDisplayedInstances(gray, results);
 
     m_updatingControls = true;
     m_slider->setValue(frameIndex);

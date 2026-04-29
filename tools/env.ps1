@@ -3,7 +3,16 @@ $ErrorActionPreference = "Stop"
 $env:BEACON_IMAGE_ANALYZER_ENV = "BeaconImageAnalyzer"
 
 if ([string]::IsNullOrWhiteSpace($env:BEACON_IMAGE_ANALYZER_MSYS_ROOT)) {
-    $env:BEACON_IMAGE_ANALYZER_MSYS_ROOT = "C:/code/msys64/mingw64"
+    $CandidateRoots = @(
+        "C:/code/msys64/mingw64",
+        "C:/msys64/mingw64"
+    )
+    foreach ($CandidateRoot in $CandidateRoots) {
+        if (Test-Path -LiteralPath "$CandidateRoot/bin") {
+            $env:BEACON_IMAGE_ANALYZER_MSYS_ROOT = $CandidateRoot
+            break
+        }
+    }
 }
 
 $MsysRoot = $env:BEACON_IMAGE_ANALYZER_MSYS_ROOT

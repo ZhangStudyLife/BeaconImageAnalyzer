@@ -5,24 +5,172 @@
 
 #include <opencv2/imgproc.hpp>
 
-quint16 VideoReader::readU16(const QByteArray& data, qsizetype offset)
+#include <cstring>
+#include <limits>
+
+namespace
 {
-    const auto* p = reinterpret_cast<const unsigned char*>(data.constData() + offset);
-    return (quint16)p[0] | ((quint16)p[1] << 8);
+constexpr qint64 MaxDibPixelCount = 8192LL * 8192LL;
+constexpr qint64 MaxDibFrameBytes = 512LL * 1024LL * 1024LL;
+
+struct DibAviChunks
+{
+    QByteArray avih;
+    QByteArray strh;
+    QByteArray strf;
+    QVector<VideoFrameChunk> frames;
+};
+
+void setError(QString* errorMessage, const QString& message)
+{
+    if (errorMessage != nullptr)
+    {
+        *errorMessage = message;
+    }
 }
 
-quint32 VideoReader::readU32(const QByteArray& data, qsizetype offset)
+bool readU16Le(const QByteArray& data, qsizetype offset, quint16* value)
 {
-    const auto* p = reinterpret_cast<const unsigned char*>(data.constData() + offset);
-    return (quint32)p[0] |
-           ((quint32)p[1] << 8) |
-           ((quint32)p[2] << 16) |
-           ((quint32)p[3] << 24);
+    if (value == nullptr || offset < 0 || offset + 2 > data.size())
+    {
+        return false;
+    }
+
+    const auto b0 = (quint8)data.at(offset);
+    const auto b1 = (quint8)data.at(offset + 1);
+    *value = (quint16)b0 | ((quint16)b1 << 8);
+    return true;
 }
 
-qint32 VideoReader::readI32(const QByteArray& data, qsizetype offset)
+bool readU32Le(const QByteArray& data, qsizetype offset, quint32* value)
 {
-    return (qint32)readU32(data, offset);
+    if (value == nullptr || offset < 0 || offset + 4 > data.size())
+    {
+        return false;
+    }
+
+    const auto b0 = (quint8)data.at(offset);
+    const auto b1 = (quint8)data.at(offset + 1);
+    const auto b2 = (quint8)data.at(offset + 2);
+    const auto b3 = (quint8)data.at(offset + 3);
+    *value = (quint32)b0 |
+             ((quint32)b1 << 8) |
+             ((quint32)b2 << 16) |
+             ((quint32)b3 << 24);
+    return true;
+}
+
+bool readI32Le(const QByteArray& data, qsizetype offset, qint32* value)
+{
+    quint32 unsignedValue = 0;
+    if (value == nullptr || !readU32Le(data, offset, &unsignedValue))
+    {
+        return false;
+    }
+    *value = (qint32)unsignedValue;
+    return true;
+}
+
+bool readBytesAt(QFile* file, qint64 offset, qint64 size, QByteArray* output)
+{
+    if (file == nullptr || output == nullptr || offset < 0 || size < 0)
+    {
+        return false;
+    }
+    if (!file->seek(offset))
+    {
+        return false;
+    }
+    *output = file->read(size);
+    return output->size() == size;
+}
+
+bool scanAviChunks(QFile* file,
+                   qint64 start,
+                   qint64 end,
+                   bool insideMovi,
+                   DibAviChunks* chunks)
+{
+    if (file == nullptr || chunks == nullptr || start < 0 || end < start)
+    {
+        return false;
+    }
+
+    qint64 position = start;
+    while (position + 8 <= end)
+    {
+        QByteArray header;
+        if (!readBytesAt(file, position, 8, &header))
+        {
+            return false;
+        }
+
+        const QByteArray chunkId = header.left(4);
+        quint32 chunkSize = 0;
+        if (!readU32Le(header, 4, &chunkSize))
+        {
+            return false;
+        }
+
+        const qint64 dataOffset = position + 8;
+        const qint64 dataEnd = dataOffset + (qint64)chunkSize;
+        if (dataEnd < dataOffset || dataEnd > end)
+        {
+            return false;
+        }
+
+        if (chunkId == QByteArrayLiteral("LIST") || chunkId == QByteArrayLiteral("RIFF"))
+        {
+            QByteArray listType;
+            if (chunkSize < 4 || !readBytesAt(file, dataOffset, 4, &listType))
+            {
+                return false;
+            }
+            const bool childInsideMovi = insideMovi || listType == QByteArrayLiteral("movi");
+            if (!scanAviChunks(file, dataOffset + 4, dataEnd, childInsideMovi, chunks))
+            {
+                return false;
+            }
+        }
+        else if (insideMovi && (chunkId == QByteArrayLiteral("00db") || chunkId == QByteArrayLiteral("00dc")))
+        {
+            VideoFrameChunk frame;
+            frame.dataOffset = dataOffset;
+            frame.size = chunkSize;
+            chunks->frames.push_back(frame);
+        }
+        else if (!insideMovi && chunkId == QByteArrayLiteral("avih"))
+        {
+            if (!readBytesAt(file, dataOffset, qMin<qint64>(chunkSize, 256), &chunks->avih))
+            {
+                return false;
+            }
+        }
+        else if (!insideMovi && chunkId == QByteArrayLiteral("strh"))
+        {
+            if (!readBytesAt(file, dataOffset, qMin<qint64>(chunkSize, 256), &chunks->strh))
+            {
+                return false;
+            }
+        }
+        else if (!insideMovi && chunkId == QByteArrayLiteral("strf"))
+        {
+            if (!readBytesAt(file, dataOffset, qMin<qint64>(chunkSize, 256), &chunks->strf))
+            {
+                return false;
+            }
+        }
+
+        const qint64 paddedSize = (qint64)chunkSize + (chunkSize & 1U);
+        position = dataOffset + paddedSize;
+        if (position < dataOffset)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
 }
 
 QImage VideoReader::matToGrayImage(const cv::Mat& frame)
@@ -89,19 +237,24 @@ bool VideoReader::isUncompressedDibAvi(const QString& path)
         return false;
     }
 
-    const QByteArray data = file.read(4096);
+    const QByteArray data = file.read(65536);
     const qsizetype strf = data.indexOf(QByteArrayLiteral("strf"));
     if (data.size() < 256 ||
         data.mid(0, 4) != QByteArrayLiteral("RIFF") ||
         data.mid(8, 4) != QByteArrayLiteral("AVI ") ||
         strf < 0 ||
-        strf + 32 >= data.size())
+        strf + 32 > data.size())
     {
         return false;
     }
 
-    const quint16 bitCount = readU16(data, strf + 22);
-    const quint32 compression = readU32(data, strf + 24);
+    quint16 bitCount = 0;
+    quint32 compression = 0;
+    if (!readU16Le(data, strf + 22, &bitCount) ||
+        !readU32Le(data, strf + 24, &compression))
+    {
+        return false;
+    }
     return (bitCount == 8 || bitCount == 24) && compression == 0;
 }
 
@@ -113,19 +266,13 @@ bool VideoReader::openOpenCv(const QString& path, const QVector<int>& backends, 
         m_capture.release();
         if (!m_capture.open(path.toStdString(), backend))
         {
-            if (lastError != nullptr)
-            {
-                *lastError = QStringLiteral("OpenCV 后端 %1 无法打开视频").arg(backend);
-            }
+            setError(lastError, QStringLiteral("OpenCV backend %1 cannot open video").arg(backend));
             continue;
         }
 
         if (!m_capture.read(firstFrame) || firstFrame.empty())
         {
-            if (lastError != nullptr)
-            {
-                *lastError = QStringLiteral("OpenCV 后端 %1 无法读取第 0 帧").arg(backend);
-            }
+            setError(lastError, QStringLiteral("OpenCV backend %1 cannot read frame 0").arg(backend));
             m_capture.release();
             continue;
         }
@@ -160,67 +307,100 @@ bool VideoReader::openDibAvi(const QString& path, QString* errorMessage)
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = file.errorString();
-        }
+        setError(errorMessage, file.errorString());
         return false;
     }
 
-    const QByteArray data = file.readAll();
-    if (data.size() < 256 ||
-        data.mid(0, 4) != QByteArrayLiteral("RIFF") ||
-        data.mid(8, 4) != QByteArrayLiteral("AVI "))
+    const qint64 fileSize = file.size();
+    QByteArray riffHeader;
+    if (fileSize < 12 ||
+        !readBytesAt(&file, 0, 12, &riffHeader) ||
+        riffHeader.mid(0, 4) != QByteArrayLiteral("RIFF") ||
+        riffHeader.mid(8, 4) != QByteArrayLiteral("AVI "))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("不是标准 RIFF AVI 文件");
-        }
+        setError(errorMessage, QStringLiteral("Invalid RIFF AVI file"));
         return false;
     }
 
-    const qsizetype avih = data.indexOf(QByteArrayLiteral("avih"));
-    const qsizetype strh = data.indexOf(QByteArrayLiteral("strh"));
-    const qsizetype strf = data.indexOf(QByteArrayLiteral("strf"));
-    const qsizetype movi = data.indexOf(QByteArrayLiteral("movi"));
-    if (avih < 0 || strh < 0 || strf < 0 || movi < 0)
+    quint32 riffPayloadSize = 0;
+    if (!readU32Le(riffHeader, 4, &riffPayloadSize))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("AVI 头不完整，缺少 avih/strh/strf/movi");
-        }
+        setError(errorMessage, QStringLiteral("Malformed RIFF AVI header"));
+        return false;
+    }
+    const qint64 riffEnd = qMin(fileSize, 8 + (qint64)riffPayloadSize);
+    if (riffEnd < 12)
+    {
+        setError(errorMessage, QStringLiteral("Malformed RIFF AVI size"));
         return false;
     }
 
-    const quint32 microSecondsPerFrame = readU32(data, avih + 8);
-    const int totalFrames = (int)readU32(data, avih + 8 + 16);
-    const int width = (int)readU32(data, avih + 8 + 32);
-    const int height = (int)readU32(data, avih + 8 + 36);
-    const QByteArray handler = data.mid(strh + 12, 4);
-    const int bitmapWidth = readI32(data, strf + 12);
-    const int bitmapHeight = readI32(data, strf + 16);
-    const quint16 planes = readU16(data, strf + 20);
-    const quint16 bitCount = readU16(data, strf + 22);
-    const quint32 compression = readU32(data, strf + 24);
+    DibAviChunks chunks;
+    if (!scanAviChunks(&file, 12, riffEnd, false, &chunks) ||
+        chunks.avih.size() < 40 ||
+        chunks.strh.size() < 8 ||
+        chunks.strf.size() < 20)
+    {
+        setError(errorMessage, QStringLiteral("Incomplete or malformed DIB AVI header"));
+        return false;
+    }
+
+    quint32 microSecondsPerFrame = 0;
+    quint32 totalFramesRaw = 0;
+    quint32 widthRaw = 0;
+    quint32 heightRaw = 0;
+    qint32 bitmapWidth = 0;
+    qint32 bitmapHeight = 0;
+    quint16 planes = 0;
+    quint16 bitCount = 0;
+    quint32 compression = 0;
+    if (!readU32Le(chunks.avih, 0, &microSecondsPerFrame) ||
+        !readU32Le(chunks.avih, 16, &totalFramesRaw) ||
+        !readU32Le(chunks.avih, 32, &widthRaw) ||
+        !readU32Le(chunks.avih, 36, &heightRaw) ||
+        !readI32Le(chunks.strf, 4, &bitmapWidth) ||
+        !readI32Le(chunks.strf, 8, &bitmapHeight) ||
+        !readU16Le(chunks.strf, 12, &planes) ||
+        !readU16Le(chunks.strf, 14, &bitCount) ||
+        !readU32Le(chunks.strf, 16, &compression))
+    {
+        setError(errorMessage, QStringLiteral("Malformed DIB AVI metadata"));
+        return false;
+    }
 
     if (planes != 1 || (bitCount != 24 && bitCount != 8) || compression != 0)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("内置兜底后端只支持未压缩 8-bit/24-bit DIB AVI");
-        }
+        setError(errorMessage, QStringLiteral("DIB AVI fallback only supports uncompressed 8-bit/24-bit frames"));
         return false;
     }
 
+    const int width = (int)widthRaw;
+    const int height = (int)heightRaw;
     m_width = bitmapWidth > 0 ? bitmapWidth : width;
     m_height = bitmapHeight < 0 ? -bitmapHeight : bitmapHeight > 0 ? bitmapHeight : height;
+    if (m_width <= 0 ||
+        m_height <= 0 ||
+        (qint64)m_width * (qint64)m_height > MaxDibPixelCount)
+    {
+        setError(errorMessage, QStringLiteral("Invalid or unsupported DIB AVI frame size"));
+        return false;
+    }
+
     m_bottomUp = bitmapHeight > 0;
     m_bitCount = (int)bitCount;
-    m_sourceStride = m_bitCount == 24
-        ? ((m_width * 3 + 3) / 4) * 4
-        : ((m_width + 3) / 4) * 4;
+    const qint64 stride = m_bitCount == 24
+        ? (((qint64)m_width * 3 + 3) / 4) * 4
+        : (((qint64)m_width + 3) / 4) * 4;
+    if (stride <= 0 ||
+        stride > std::numeric_limits<int>::max() ||
+        stride * (qint64)m_height > MaxDibFrameBytes)
+    {
+        setError(errorMessage, QStringLiteral("DIB AVI frame payload is too large"));
+        return false;
+    }
+    m_sourceStride = (int)stride;
     m_videoFps = microSecondsPerFrame > 0 ? 1000000.0 / (double)microSecondsPerFrame : 0.0;
-    m_codecName = QString::fromLatin1(handler).trimmed();
+    m_codecName = QString::fromLatin1(chunks.strh.mid(4, 4)).trimmed();
     if (m_codecName.isEmpty())
     {
         m_codecName = QStringLiteral("DIB");
@@ -228,41 +408,19 @@ bool VideoReader::openDibAvi(const QString& path, QString* errorMessage)
     m_filePath = QFileInfo(path).absoluteFilePath();
     m_backendName = QStringLiteral("Internal DIB AVI fallback");
     m_backendMode = BackendMode::DibAvi;
-    m_dibChunks.clear();
-
-    qsizetype position = movi + 4;
-    const qsizetype idx1 = data.indexOf(QByteArrayLiteral("idx1"), position);
-    const qsizetype scanEnd = idx1 > position ? idx1 : data.size();
-    while (position + 8 <= scanEnd)
-    {
-        const QByteArray chunkId = data.mid(position, 4);
-        const quint32 chunkSize = readU32(data, position + 4);
-        if (position + 8 + (qsizetype)chunkSize > data.size())
-        {
-            break;
-        }
-
-        if (chunkId == QByteArrayLiteral("00db") || chunkId == QByteArrayLiteral("00dc"))
-        {
-            VideoFrameChunk chunk;
-            chunk.dataOffset = position + 8;
-            chunk.size = chunkSize;
-            m_dibChunks.push_back(chunk);
-        }
-
-        position += 8 + (qsizetype)chunkSize + (chunkSize & 1U);
-    }
+    m_dibChunks = chunks.frames;
 
     if (m_dibChunks.isEmpty())
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("没有在 movi 段找到视频帧");
-        }
+        setError(errorMessage, QStringLiteral("No video frames found in DIB AVI movi section"));
         return false;
     }
 
-    m_frameCount = totalFrames > 0 ? qMin(totalFrames, m_dibChunks.size()) : m_dibChunks.size();
+    const int detectedFrames = (int)qMin<qsizetype>(m_dibChunks.size(), std::numeric_limits<int>::max());
+    const int totalFrames = totalFramesRaw > 0 && totalFramesRaw <= (quint32)std::numeric_limits<int>::max()
+        ? (int)totalFramesRaw
+        : detectedFrames;
+    m_frameCount = totalFrames > 0 ? qMin(totalFrames, detectedFrames) : detectedFrames;
     return true;
 }
 
@@ -305,10 +463,7 @@ bool VideoReader::open(const QString& path, QString* errorMessage)
         return true;
     }
 
-    if (errorMessage != nullptr)
-    {
-        *errorMessage = QStringLiteral("%1: %2").arg(openCvError, path);
-    }
+    setError(errorMessage, QStringLiteral("%1: %2").arg(openCvError, path));
     return false;
 }
 
@@ -329,18 +484,12 @@ bool VideoReader::readFrame(int frameIndex, QImage* grayImage, QString* errorMes
 {
     if (grayImage == nullptr)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("grayImage 为空");
-        }
+        setError(errorMessage, QStringLiteral("grayImage is null"));
         return false;
     }
     if (!isOpen() || frameIndex < 0 || frameIndex >= m_frameCount)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("帧号越界或视频未打开");
-        }
+        setError(errorMessage, QStringLiteral("Frame index is out of range or video is not open"));
         return false;
     }
 
@@ -351,30 +500,21 @@ bool VideoReader::readFrame(int frameIndex, QImage* grayImage, QString* errorMes
 
     if (!m_capture.set(cv::CAP_PROP_POS_FRAMES, frameIndex))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("OpenCV 跳转帧失败: %1").arg(frameIndex);
-        }
+        setError(errorMessage, QStringLiteral("OpenCV seek failed at frame %1").arg(frameIndex));
         return false;
     }
 
     cv::Mat frame;
     if (!m_capture.read(frame) || frame.empty())
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("OpenCV 读取帧失败: %1").arg(frameIndex);
-        }
+        setError(errorMessage, QStringLiteral("OpenCV read failed at frame %1").arg(frameIndex));
         return false;
     }
 
     *grayImage = matToGrayImage(frame);
     if (grayImage->isNull())
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("OpenCV 帧格式无法转换为灰度图");
-        }
+        setError(errorMessage, QStringLiteral("OpenCV frame format cannot convert to grayscale"));
         return false;
     }
     return true;
@@ -385,40 +525,28 @@ bool VideoReader::readDibFrame(int frameIndex, QImage* grayImage, QString* error
     QFile file(m_filePath);
     if (!file.open(QIODevice::ReadOnly))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = file.errorString();
-        }
+        setError(errorMessage, file.errorString());
         return false;
     }
 
     const VideoFrameChunk& chunk = m_dibChunks[frameIndex];
-    const int expectedBytes = m_sourceStride * m_height;
-    if ((int)chunk.size < expectedBytes)
+    const qint64 expectedBytes = (qint64)m_sourceStride * (qint64)m_height;
+    if ((qint64)chunk.size < expectedBytes)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("帧数据尺寸小于 DIB 期望尺寸");
-        }
+        setError(errorMessage, QStringLiteral("DIB frame payload is smaller than expected"));
         return false;
     }
 
     if (!file.seek(chunk.dataOffset))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("读取帧时 seek 失败");
-        }
+        setError(errorMessage, QStringLiteral("Failed to seek DIB frame payload"));
         return false;
     }
 
     const QByteArray raw = file.read(expectedBytes);
     if (raw.size() != expectedBytes)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("读取帧数据失败");
-        }
+        setError(errorMessage, QStringLiteral("Failed to read DIB frame payload"));
         return false;
     }
 
