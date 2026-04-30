@@ -34,6 +34,8 @@
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLayout>
+#include <QLayoutItem>
 #include <QLineF>
 #include <QLineEdit>
 #include <QListWidget>
@@ -47,6 +49,7 @@
 #include <QPushButton>
 #include <QPixmap>
 #include <QRectF>
+#include <QResizeEvent>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QScrollArea>
@@ -59,6 +62,7 @@
 #include <QTextEdit>
 #include <QToolButton>
 #include <QUrl>
+#include <QVariant>
 #include <QVBoxLayout>
 
 #include <opencv2/core.hpp>
@@ -101,6 +105,43 @@ void applyHardShadow(QWidget* widget, const QColor& color, int xOffset, int yOff
     shadow->setOffset(xOffset, yOffset);
     shadow->setColor(color);
     widget->setGraphicsEffect(shadow);
+}
+
+void refreshStyle(QWidget* widget)
+{
+    if (widget == nullptr)
+    {
+        return;
+    }
+
+    widget->style()->unpolish(widget);
+    widget->style()->polish(widget);
+    widget->update();
+}
+
+void setStyleProperty(QWidget* widget, const char* name, const QString& value)
+{
+    if (widget == nullptr || widget->property(name).toString() == value)
+    {
+        return;
+    }
+
+    widget->setProperty(name, value);
+    refreshStyle(widget);
+}
+
+void setLayoutSpacingRecursive(QLayout* layout, int spacing)
+{
+    if (layout == nullptr)
+    {
+        return;
+    }
+
+    layout->setSpacing(spacing);
+    for (int i = 0; i < layout->count(); ++i)
+    {
+        setLayoutSpacingRecursive(layout->itemAt(i)->layout(), spacing);
+    }
 }
 
 QJsonArray pointsToJson(const QVector<QPointF>& points)
@@ -968,6 +1009,141 @@ QSlider::handle:horizontal {
     margin: -8px 0;
 }
 
+QLabel#ConsoleTitle[consoleDensity="compact"] {
+    font-size: 17px;
+}
+
+QLabel#ConsoleTitle[consoleDensity="tiny"] {
+    font-size: 14px;
+}
+
+QLabel#ConsoleBadge[consoleDensity="compact"],
+QLabel#PanelKicker[consoleDensity="compact"] {
+    font-size: 11px;
+    padding: 3px 7px;
+    border: 2px solid #000000;
+}
+
+QLabel#ConsoleBadge[consoleDensity="tiny"],
+QLabel#PanelKicker[consoleDensity="tiny"] {
+    font-size: 10px;
+    padding: 2px 5px;
+    border: 2px solid #000000;
+}
+
+QLabel#SoftLabel[consoleDensity="compact"],
+QCheckBox[consoleDensity="compact"] {
+    font-size: 11px;
+}
+
+QLabel#SoftLabel[consoleDensity="tiny"],
+QCheckBox[consoleDensity="tiny"] {
+    font-size: 10px;
+}
+
+QPushButton[consoleDensity="compact"] {
+    font-size: 11px;
+    min-height: 24px;
+    padding: 3px 7px;
+    margin: 0 3px 3px 0;
+    border: 2px solid #000000;
+}
+
+QPushButton[consoleDensity="normal"] {
+    margin: 0 3px 3px 0;
+}
+
+QPushButton[consoleDensity="tiny"] {
+    font-size: 10px;
+    min-height: 22px;
+    padding: 2px 5px;
+    margin: 0 2px 2px 0;
+    border: 2px solid #000000;
+}
+
+QPushButton[consoleDensity="normal"]:pressed,
+QPushButton[consoleDensity="compact"]:pressed,
+QPushButton[consoleDensity="tiny"]:pressed {
+    margin: 2px 0 0 2px;
+}
+
+QComboBox[consoleDensity="compact"],
+QSpinBox[consoleDensity="compact"],
+QDoubleSpinBox[consoleDensity="compact"] {
+    font-size: 11px;
+    min-height: 24px;
+    padding: 1px 5px;
+    border: 2px solid #000000;
+}
+
+QComboBox[consoleDensity="tiny"],
+QSpinBox[consoleDensity="tiny"],
+QDoubleSpinBox[consoleDensity="tiny"] {
+    font-size: 10px;
+    min-height: 22px;
+    padding: 1px 4px;
+    border: 2px solid #000000;
+}
+
+QComboBox[consoleDensity="compact"]::drop-down {
+    width: 20px;
+    border-left: 2px solid #000000;
+}
+
+QComboBox[consoleDensity="tiny"]::drop-down {
+    width: 16px;
+    border-left: 2px solid #000000;
+}
+
+QCheckBox[consoleDensity="compact"] {
+    spacing: 5px;
+}
+
+QCheckBox[consoleDensity="tiny"] {
+    spacing: 4px;
+}
+
+QCheckBox[consoleDensity="compact"]::indicator {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #000000;
+}
+
+QCheckBox[consoleDensity="tiny"]::indicator {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #000000;
+}
+
+QSlider[consoleDensity="compact"]::groove:horizontal {
+    height: 9px;
+    border: 2px solid #000000;
+}
+
+QSlider[consoleDensity="tiny"]::groove:horizontal {
+    height: 7px;
+    border: 2px solid #000000;
+}
+
+QSlider[consoleDensity="compact"]::sub-page:horizontal,
+QSlider[consoleDensity="tiny"]::sub-page:horizontal {
+    border: 2px solid #000000;
+}
+
+QSlider[consoleDensity="compact"]::handle:horizontal {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #000000;
+    margin: -6px 0;
+}
+
+QSlider[consoleDensity="tiny"]::handle:horizontal {
+    width: 13px;
+    height: 13px;
+    border: 2px solid #000000;
+    margin: -5px 0;
+}
+
 QScrollArea,
 QWidget#RightPanel,
 QWidget#Workspace {
@@ -1037,7 +1213,7 @@ MainWindow::MainWindow(QWidget* parent)
         statusBar()->showMessage(instanceError, 5000);
     }
     setWindowTitle(QStringLiteral("BeaconImageAnalyzer"));
-    setMinimumSize(1120, 680);
+    setMinimumSize(960, 600);
     resize(1320, 780);
 
     m_playTimer.setTimerType(Qt::PreciseTimer);
@@ -1873,16 +2049,19 @@ void MainWindow::buildUi()
 
     auto* splitter = new QSplitter(Qt::Horizontal, central);
     splitter->setHandleWidth(8);
+    splitter->setChildrenCollapsible(false);
     root->addWidget(splitter, 1);
 
     auto* workspace = new QWidget;
     workspace->setObjectName(QStringLiteral("Workspace"));
+    workspace->setMinimumWidth(480);
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
     workspaceLayout->setSpacing(16);
 
     auto* videoCard = new QFrame(workspace);
     videoCard->setObjectName(QStringLiteral("VideoCard"));
+    videoCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     applyHardShadow(videoCard, QColor(116, 185, 255), 8, 8);
     auto* videoLayout = new QVBoxLayout(videoCard);
     videoLayout->setContentsMargins(18, 16, 18, 18);
@@ -1922,6 +2101,8 @@ void MainWindow::buildUi()
 
     auto* gridHost = new QWidget(videoCard);
     gridHost->setObjectName(QStringLiteral("GridHost"));
+    gridHost->setMinimumSize(240, 160);
+    gridHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_videoGrid = new QGridLayout(gridHost);
     m_videoGrid->setContentsMargins(12, 12, 12, 12);
     m_videoGrid->setSpacing(12);
@@ -1960,12 +2141,16 @@ void MainWindow::buildUi()
     rightScroll->setObjectName(QStringLiteral("RightScroll"));
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setMinimumWidth(520);
+    rightScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    rightScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    rightScroll->setMinimumWidth(360);
     rightScroll->setMaximumWidth(860);
+    rightScroll->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     auto* rightPanel = new QWidget(rightScroll);
     rightPanel->setObjectName(QStringLiteral("RightPanel"));
-    rightPanel->setMinimumWidth(500);
+    rightPanel->setMinimumWidth(340);
+    rightPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(10, 0, 10, 10);
     rightLayout->setSpacing(16);
@@ -1996,11 +2181,12 @@ void MainWindow::buildUi()
     m_resultText = new QTextEdit(rightPanel);
     m_resultText->setObjectName(QStringLiteral("ResultConsole"));
     m_resultText->setReadOnly(true);
-    m_resultText->setMinimumHeight(160);
+    m_resultText->setMinimumHeight(112);
     m_resultText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_annotationPanel = new AnnotationPanel(rightPanel);
 
     auto* infoGroup = new QGroupBox(QStringLiteral("帧状态 / FRAME BOARD"), rightPanel);
+    infoGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     applyHardShadow(infoGroup, QColor(255, 210, 63), 6, 6);
     auto* infoLayout = new QVBoxLayout(infoGroup);
     infoLayout->setContentsMargins(14, 12, 14, 14);
@@ -2011,6 +2197,7 @@ void MainWindow::buildUi()
     infoLayout->addWidget(m_resultText, 1);
 
     auto* annotationGroup = new QGroupBox(QStringLiteral("错误标注 / MARKUP COMMANDS"), rightPanel);
+    annotationGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     applyHardShadow(annotationGroup, QColor(255, 107, 107), 6, 6);
     auto* annotationLayout = new QVBoxLayout(annotationGroup);
     annotationLayout->setContentsMargins(14, 12, 14, 14);
@@ -2018,7 +2205,8 @@ void MainWindow::buildUi()
     annotationLayout->addWidget(m_annotationPanel);
 
     rightLayout->addWidget(infoGroup);
-    rightLayout->addWidget(annotationGroup, 1);
+    rightLayout->addWidget(annotationGroup);
+    rightLayout->addStretch(1);
 
     rightScroll->setWidget(rightPanel);
     splitter->addWidget(workspace);
@@ -2026,12 +2214,12 @@ void MainWindow::buildUi()
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 2);
 
-    auto* controlsFrame = new QFrame(workspace);
+    m_controlsFrame = new QFrame(workspace);
+    auto* controlsFrame = m_controlsFrame;
     controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
     applyHardShadow(controlsFrame, QColor(136, 212, 152), 8, 8);
-    controlsFrame->setMinimumHeight(188);
-    controlsFrame->setMaximumHeight(236);
-    controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    controlsFrame->setMinimumHeight(170);
+    controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto* controls = new QVBoxLayout(controlsFrame);
     controls->setContentsMargins(18, 14, 18, 16);
     controls->setSpacing(12);
@@ -2065,29 +2253,34 @@ void MainWindow::buildUi()
 
     m_slider = new QSlider(Qt::Horizontal, controlsFrame);
     m_slider->setRange(0, 0);
-    m_slider->setMinimumWidth(220);
+    m_slider->setMinimumWidth(80);
+    m_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_frameSpin = new QSpinBox(controlsFrame);
     m_frameSpin->setRange(0, 0);
-    m_frameSpin->setFixedWidth(84);
+    m_frameSpin->setMinimumWidth(72);
+    m_frameSpin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_timeSpin = new QDoubleSpinBox(controlsFrame);
     m_timeSpin->setRange(0.0, 0.0);
     m_timeSpin->setDecimals(3);
     m_timeSpin->setSuffix(QStringLiteral(" s"));
-    m_timeSpin->setFixedWidth(108);
+    m_timeSpin->setMinimumWidth(94);
+    m_timeSpin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_viewModeCombo = new QComboBox(controlsFrame);
-    m_viewModeCombo->addItem(QStringLiteral("原始图像"), QStringLiteral("original"));
-    m_viewModeCombo->addItem(QStringLiteral("二值化图像"), QStringLiteral("binary"));
-    m_viewModeCombo->setFixedWidth(128);
+    m_viewModeCombo->addItem(QStringLiteral("原图"), QStringLiteral("original"));
+    m_viewModeCombo->addItem(QStringLiteral("二值"), QStringLiteral("binary"));
+    m_viewModeCombo->setMinimumWidth(72);
+    m_viewModeCombo->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
     m_speedCombo = new QComboBox(controlsFrame);
-    m_speedCombo->addItem(QStringLiteral("1/8倍速"), 0.125);
-    m_speedCombo->addItem(QStringLiteral("1/4倍速"), 0.25);
-    m_speedCombo->addItem(QStringLiteral("1/2倍速"), 0.5);
-    m_speedCombo->addItem(QStringLiteral("正常1倍速"), 1.0);
-    m_speedCombo->addItem(QStringLiteral("2倍速"), 2.0);
-    m_speedCombo->addItem(QStringLiteral("4倍速"), 4.0);
-    m_speedCombo->addItem(QStringLiteral("8倍速"), 8.0);
+    m_speedCombo->addItem(QStringLiteral("1/8x"), 0.125);
+    m_speedCombo->addItem(QStringLiteral("1/4x"), 0.25);
+    m_speedCombo->addItem(QStringLiteral("1/2x"), 0.5);
+    m_speedCombo->addItem(QStringLiteral("1x"), 1.0);
+    m_speedCombo->addItem(QStringLiteral("2x"), 2.0);
+    m_speedCombo->addItem(QStringLiteral("4x"), 4.0);
+    m_speedCombo->addItem(QStringLiteral("8x"), 8.0);
     m_speedCombo->setCurrentIndex(3);
-    m_speedCombo->setFixedWidth(118);
+    m_speedCombo->setMinimumWidth(66);
+    m_speedCombo->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_autoPauseEnableCheck = new QCheckBox(QStringLiteral("自动暂停"), controlsFrame);
     m_autoPauseJumpCheck = new QCheckBox(QStringLiteral("目标跳变"), controlsFrame);
     m_autoPauseCountCheck = new QCheckBox(QStringLiteral("数量变化"), controlsFrame);
@@ -2096,7 +2289,8 @@ void MainWindow::buildUi()
     m_autoPauseJumpThresholdSpin->setDecimals(1);
     m_autoPauseJumpThresholdSpin->setValue(10.0);
     m_autoPauseJumpThresholdSpin->setSuffix(QStringLiteral(" px"));
-    m_autoPauseJumpThresholdSpin->setFixedWidth(92);
+    m_autoPauseJumpThresholdSpin->setMinimumWidth(82);
+    m_autoPauseJumpThresholdSpin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 
     auto* viewLabel = new QLabel(QStringLiteral("视图"), controlsFrame);
     viewLabel->setObjectName(QStringLiteral("SoftLabel"));
@@ -2114,7 +2308,7 @@ void MainWindow::buildUi()
     transportRow->addWidget(jumpTimeButton);
     transportRow->addStretch(1);
     detailRow->addWidget(viewLabel);
-    detailRow->addWidget(m_viewModeCombo);
+    detailRow->addWidget(m_viewModeCombo, 1);
     detailRow->addWidget(speedLabel);
     detailRow->addWidget(m_speedCombo);
     detailRow->addStretch(1);
@@ -2126,15 +2320,15 @@ void MainWindow::buildUi()
     autoPauseRow->addWidget(m_autoPauseJumpCheck);
     autoPauseRow->addWidget(m_autoPauseJumpThresholdSpin);
     autoPauseRow->addWidget(m_autoPauseCountCheck);
-    autoPauseRow->addStretch(1);
+    autoPauseRow->addWidget(m_slider, 1);
     controls->addLayout(consoleHeader);
     controls->addLayout(transportRow);
     controls->addLayout(detailRow);
     controls->addLayout(autoPauseRow);
-    controls->addWidget(m_slider);
     workspaceLayout->addWidget(controlsFrame, 0);
 
     setCentralWidget(central);
+    updateResponsiveConsole();
 
     connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
     connect(newInstanceRailButton, &QToolButton::clicked, this, &MainWindow::newInstance);
@@ -2594,6 +2788,54 @@ void MainWindow::updatePlayPauseButton()
     {
         m_playPauseButton->setText(QStringLiteral("播放"));
         m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    }
+}
+
+void MainWindow::updateResponsiveConsole()
+{
+    if (m_controlsFrame == nullptr)
+    {
+        return;
+    }
+
+    const int width = m_controlsFrame->width();
+    const QString density = width < 660
+        ? QStringLiteral("tiny")
+        : (width < 920 ? QStringLiteral("compact") : QStringLiteral("normal"));
+
+    setStyleProperty(m_controlsFrame, "consoleDensity", density);
+    const auto consoleWidgets = m_controlsFrame->findChildren<QWidget*>();
+    for (QWidget* widget : consoleWidgets)
+    {
+        setStyleProperty(widget, "consoleDensity", density);
+    }
+
+    const bool tiny = density == QStringLiteral("tiny");
+    const bool compact = density == QStringLiteral("compact");
+    const int marginH = tiny ? 8 : (compact ? 12 : 18);
+    const int marginTop = tiny ? 8 : (compact ? 10 : 14);
+    const int marginBottom = tiny ? 10 : (compact ? 12 : 16);
+    const int spacing = tiny ? 5 : (compact ? 7 : 10);
+
+    if (QLayout* layout = m_controlsFrame->layout())
+    {
+        layout->setContentsMargins(marginH, marginTop, marginH, marginBottom);
+        setLayoutSpacingRecursive(layout, spacing);
+    }
+
+    m_controlsFrame->setMinimumHeight(tiny ? 138 : (compact ? 154 : 170));
+    m_slider->setMinimumWidth(tiny ? 40 : (compact ? 60 : 80));
+    m_frameSpin->setMinimumWidth(tiny ? 56 : (compact ? 64 : 72));
+    m_timeSpin->setMinimumWidth(tiny ? 72 : (compact ? 84 : 94));
+    m_viewModeCombo->setMinimumWidth(tiny ? 52 : (compact ? 62 : 72));
+    m_speedCombo->setMinimumWidth(tiny ? 48 : (compact ? 56 : 66));
+    m_autoPauseJumpThresholdSpin->setMinimumWidth(tiny ? 64 : (compact ? 72 : 82));
+
+    const QSize iconSize = tiny ? QSize(13, 13) : (compact ? QSize(15, 15) : QSize(18, 18));
+    const auto buttons = m_controlsFrame->findChildren<QPushButton*>();
+    for (QPushButton* button : buttons)
+    {
+        button->setIconSize(iconSize);
     }
 }
 
@@ -3805,6 +4047,12 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
     m_currentInstanceId = previousInstanceId;
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    updateResponsiveConsole();
 }
 
 void MainWindow::restoreLastSession()

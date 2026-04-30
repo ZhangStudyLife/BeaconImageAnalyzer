@@ -7,7 +7,6 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
-#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QKeySequence>
@@ -21,7 +20,6 @@
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
-#include <QSplitter>
 #include <QTextEdit>
 #include <QVBoxLayout>
 
@@ -60,8 +58,11 @@ bool isFalsePositiveType(const QString& type)
 AnnotationPanel::AnnotationPanel(QWidget* parent)
     : QWidget(parent)
 {
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+
     m_contextLabel = new QLabel(QStringLiteral("Frame: -"), this);
     m_contextLabel->setObjectName(QStringLiteral("SoftLabel"));
+    m_contextLabel->setWordWrap(true);
 
     m_draftList = new QListWidget(this);
     m_draftList->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -97,7 +98,9 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
 
     m_noteEdit = new QTextEdit(this);
     m_noteEdit->setPlaceholderText(QStringLiteral("描述"));
-    m_noteEdit->setFixedHeight(64);
+    m_noteEdit->setMinimumHeight(54);
+    m_noteEdit->setMaximumHeight(96);
+    m_noteEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     auto* typeGroup = new QGroupBox(QStringLiteral("单条配置"), this);
     auto* typeForm = new QFormLayout(typeGroup);
@@ -112,7 +115,9 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_customTypeNameEdit->setPlaceholderText(QStringLiteral("自定义类型名称"));
     m_customTypeDescriptionEdit = new QTextEdit(this);
     m_customTypeDescriptionEdit->setPlaceholderText(QStringLiteral("配套描述"));
-    m_customTypeDescriptionEdit->setFixedHeight(56);
+    m_customTypeDescriptionEdit->setMinimumHeight(50);
+    m_customTypeDescriptionEdit->setMaximumHeight(96);
+    m_customTypeDescriptionEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto* addTypeButton = new QPushButton(QStringLiteral("新增类型"), this);
 
     auto* customTypeGroup = new QGroupBox(QStringLiteral("自定义错误类型"), this);
@@ -318,7 +323,7 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     auto* autoMatchButton = new QPushButton(QStringLiteral("自动识别匹配帧"), m_batchAutoGroup);
     m_batchApplyAutoButton = new QPushButton(QStringLiteral("全部批量标记"), m_batchAutoGroup);
     m_batchApplyAutoButton->setEnabled(false);
-    auto* autoButtonRow = new QHBoxLayout;
+    auto* autoButtonRow = new QVBoxLayout;
     autoButtonRow->setContentsMargins(0, 0, 0, 0);
     autoButtonRow->setSpacing(6);
     autoButtonRow->addWidget(autoMatchButton);
@@ -336,48 +341,32 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     savedLayout->addWidget(deleteSavedButton);
 
     auto* coreGroup = new QGroupBox(QStringLiteral("核心操作区"), this);
-    auto* coreLayout = new QGridLayout(coreGroup);
+    auto* coreLayout = new QVBoxLayout(coreGroup);
     coreLayout->setContentsMargins(10, 10, 10, 10);
-    coreLayout->setHorizontalSpacing(10);
-    coreLayout->setVerticalSpacing(10);
-    coreLayout->addWidget(entryGroup, 0, 0);
-    coreLayout->addWidget(typeGroup, 0, 1);
-    coreLayout->addWidget(customTypeGroup, 1, 0);
-    coreLayout->addWidget(m_toolGroup, 1, 1);
-    coreLayout->setColumnStretch(0, 1);
-    coreLayout->setColumnStretch(1, 1);
-    coreLayout->setRowStretch(0, 1);
-    coreLayout->setRowStretch(1, 1);
+    coreLayout->setSpacing(10);
+    coreLayout->addWidget(entryGroup);
+    coreLayout->addWidget(typeGroup);
+    coreLayout->addWidget(customTypeGroup);
+    coreLayout->addWidget(m_toolGroup);
 
     auto* managementGroup = new QGroupBox(QStringLiteral("标注管理区"), this);
-    auto* managementLayout = new QGridLayout(managementGroup);
+    auto* managementLayout = new QVBoxLayout(managementGroup);
     managementLayout->setContentsMargins(10, 10, 10, 10);
-    managementLayout->setHorizontalSpacing(10);
-    managementLayout->setVerticalSpacing(10);
-    filterGroup->setMaximumWidth(260);
-    filterGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
-    savedGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_batchGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    managementLayout->addWidget(savedGroup, 0, 0, 1, 2);
-    managementLayout->addWidget(filterGroup, 1, 0);
-    managementLayout->addWidget(m_batchGroup, 1, 1);
-    managementLayout->setColumnStretch(0, 0);
-    managementLayout->setColumnStretch(1, 1);
-    managementLayout->setRowStretch(0, 2);
-    managementLayout->setRowStretch(1, 1);
-
-    auto* splitter = new QSplitter(Qt::Vertical, this);
-    splitter->setChildrenCollapsible(false);
-    splitter->addWidget(coreGroup);
-    splitter->addWidget(managementGroup);
-    splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 1);
+    managementLayout->setSpacing(10);
+    filterGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    savedGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    m_batchGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    managementLayout->addWidget(savedGroup);
+    managementLayout->addWidget(filterGroup);
+    managementLayout->addWidget(m_batchGroup);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(9);
     layout->addWidget(m_contextLabel);
-    layout->addWidget(splitter, 1);
+    layout->addWidget(coreGroup);
+    layout->addWidget(managementGroup);
+    layout->addStretch(1);
 
     connect(addDraftButton, &QPushButton::clicked, this, &AnnotationPanel::addDraftEntry);
     connect(deleteDraftButton, &QPushButton::clicked, this, &AnnotationPanel::deleteDraftEntry);

@@ -15,11 +15,13 @@ class AnnotationPanel;
 class QCheckBox;
 class QCloseEvent;
 class QComboBox;
+class QFrame;
 class QKeyEvent;
 class QGridLayout;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
+class QResizeEvent;
 class QSlider;
 class QSpinBox;
 class QDoubleSpinBox;
@@ -101,6 +103,7 @@ private slots:
 private:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     void buildUi();
     void buildMenus();
     bool loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame);
@@ -151,6 +154,7 @@ private:
     void updateAnnotationList();
     void togglePlayPause();
     void updatePlayPauseButton();
+    void updateResponsiveConsole();
     void setPlaybackSpeed(double speed);
     int playbackIntervalMs() const;
     void resetPlaybackClock();
@@ -202,6 +206,7 @@ private:
     QLabel* m_currentAnnotationsLabel = nullptr;
     QTextEdit* m_resultText = nullptr;
     AnnotationPanel* m_annotationPanel = nullptr;
+    QFrame* m_controlsFrame = nullptr;
     QPushButton* m_playPauseButton = nullptr;
     QSlider* m_slider = nullptr;
     QSpinBox* m_frameSpin = nullptr;
