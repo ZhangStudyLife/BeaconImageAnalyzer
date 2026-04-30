@@ -23,6 +23,7 @@
 #include <QFormLayout>
 #include <QFont>
 #include <QFrame>
+#include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -86,6 +87,20 @@ bool isEditingWidget(QWidget* widget)
         widget = widget->parentWidget();
     }
     return false;
+}
+
+void applyHardShadow(QWidget* widget, const QColor& color, int xOffset, int yOffset)
+{
+    if (widget == nullptr)
+    {
+        return;
+    }
+
+    auto* shadow = new QGraphicsDropShadowEffect(widget);
+    shadow->setBlurRadius(0.0);
+    shadow->setOffset(xOffset, yOffset);
+    shadow->setColor(color);
+    widget->setGraphicsEffect(shadow);
 }
 
 QJsonArray pointsToJson(const QVector<QPointF>& points)
@@ -637,196 +652,320 @@ QString djiStyleSheet()
     return QStringLiteral(R"(
 QMainWindow,
 QWidget#AppRoot {
-    background: #090a0b;
-    color: #eef1f4;
+    background: #0a0a0d;
+    color: #fffdf5;
 }
 
 QWidget {
-    color: #eef1f4;
+    color: #fffdf5;
     font-family: "Microsoft YaHei UI", "Segoe UI", Arial;
     font-size: 12px;
 }
 
 QMenuBar {
-    background: #101214;
-    color: #d8dde2;
-    border-bottom: 1px solid #252a2f;
-    padding: 3px 8px;
+    background: #ffd23f;
+    color: #060608;
+    border: 3px solid #000000;
+    padding: 4px 8px;
+    font-weight: 900;
 }
 
 QMenuBar::item {
-    background: transparent;
-    padding: 6px 10px;
-    border-radius: 4px;
+    background: #ffd23f;
+    border: 2px solid transparent;
+    padding: 6px 12px;
+    margin: 0 3px 3px 0;
 }
 
 QMenuBar::item:selected {
-    background: #24282d;
+    background: #fffdf5;
+    border: 2px solid #000000;
 }
 
 QMenu {
-    background: #171a1d;
-    color: #eef1f4;
-    border: 1px solid #343a40;
+    background: #fffdf5;
+    color: #060608;
+    border: 3px solid #000000;
+    font-weight: 700;
 }
 
 QMenu::item {
-    padding: 7px 24px;
+    padding: 8px 26px;
 }
 
 QMenu::item:selected {
-    background: #2b3036;
+    background: #74b9ff;
+    color: #000000;
 }
 
 QFrame#Rail {
-    background: #151719;
-    border: 1px solid #262b30;
-    border-radius: 8px;
+    background: #ff6b6b;
+    border: 3px solid #000000;
+    border-radius: 0;
+}
+
+QFrame#RailDivider {
+    background: #000000;
+    min-height: 3px;
+    max-height: 3px;
+    border: none;
 }
 
 QLabel#Brand {
-    background: #f2f4f5;
-    border-radius: 8px;
-    padding: 4px;
+    background: #fffdf5;
+    border: 3px solid #000000;
+    border-radius: 0;
+    padding: 5px;
 }
 
 QToolButton#RailButton {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 7px;
+    background: #fffdf5;
+    color: #000000;
+    border: 3px solid #000000;
+    border-radius: 0;
     padding: 7px;
+    margin: 0 4px 4px 0;
 }
 
 QToolButton#RailButton:hover,
 QToolButton#RailButton:checked {
-    background: #292e33;
-    border-color: #3b4249;
+    background: #ffd23f;
+}
+
+QToolButton#RailButton:pressed {
+    margin: 4px 0 0 4px;
+    background: #74b9ff;
+}
+
+QToolButton#RailButton[tone="blue"] {
+    background: #74b9ff;
+}
+
+QToolButton#RailButton[tone="green"] {
+    background: #88d498;
+}
+
+QToolButton#RailButton[tone="pink"] {
+    background: #ff6b6b;
+}
+
+QToolButton#RailButton[tone="yellow"] {
+    background: #ffd23f;
 }
 
 QSplitter::handle {
-    background: #090a0b;
+    background: #000000;
+    border: 2px solid #000000;
 }
 
 QFrame#VideoCard,
 QFrame#ControlConsole,
+QFrame#InstanceStrip,
 QGroupBox {
-    background: #171a1d;
-    border: 1px solid #2a3035;
-    border-radius: 8px;
+    background: #181820;
+    border: 3px solid #000000;
+    border-radius: 0;
 }
 
 QFrame#VideoCard {
-    background: #0e1012;
+    background: #101016;
+}
+
+QFrame#InstanceStrip {
+    background: #242433;
+}
+
+QFrame#ControlConsole {
+    background: #14141b;
+}
+
+QWidget#GridHost {
+    background: #050507;
+    border: 3px solid #000000;
 }
 
 QLabel#FeedTitle,
 QLabel#ConsoleTitle {
-    color: #f4f6f7;
-    font-weight: 800;
-    letter-spacing: 1px;
+    color: #ffd23f;
+    font-size: 22px;
+    font-weight: 900;
+}
+
+QLabel#PanelTitle {
+    color: #fffdf5;
+    font-size: 18px;
+    font-weight: 900;
+}
+
+QLabel#PanelKicker,
+QLabel#ConsoleBadge {
+    background: #74b9ff;
+    color: #000000;
+    border: 3px solid #000000;
+    padding: 5px 9px;
+    font-weight: 900;
 }
 
 QLabel#FeedMeta,
 QLabel#SoftLabel {
-    color: #a7afb7;
+    color: #d7d2c8;
+    font-weight: 700;
 }
 
 QLabel#Pill {
-    background: #24292e;
-    color: #f6d44a;
-    border: 1px solid #3a4148;
-    border-radius: 6px;
+    background: #88d498;
+    color: #000000;
+    border: 3px solid #000000;
+    border-radius: 0;
     padding: 6px 10px;
-    font-weight: 700;
+    font-weight: 900;
+}
+
+QLabel#DangerPill {
+    background: #ff6b6b;
+    color: #000000;
+    border: 3px solid #000000;
+    padding: 6px 10px;
+    font-weight: 900;
 }
 
 QGroupBox {
-    margin-top: 18px;
-    padding-top: 18px;
-    font-weight: 700;
+    margin-top: 24px;
+    padding-top: 24px;
+    font-weight: 900;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 10px;
-    padding: 0 6px;
-    color: #cfd5db;
+    left: 12px;
+    padding: 3px 9px;
+    color: #000000;
+    background: #ffd23f;
+    border: 3px solid #000000;
 }
 
 QPushButton {
-    background: #24292e;
-    border: 1px solid #3a4148;
-    border-radius: 6px;
-    color: #eef1f4;
-    min-height: 28px;
-    padding: 5px 12px;
+    background: #fffdf5;
+    border: 3px solid #000000;
+    border-radius: 0;
+    color: #000000;
+    min-height: 30px;
+    padding: 6px 13px;
+    margin: 0 5px 5px 0;
+    font-weight: 900;
 }
 
 QPushButton:hover {
-    background: #30363d;
-    border-color: #515b64;
+    background: #74b9ff;
 }
 
 QPushButton:pressed {
-    background: #1d2226;
+    background: #88d498;
+    margin: 5px 0 0 5px;
 }
 
 QPushButton[role="primary"] {
-    background: #f6d44a;
-    border-color: #f6d44a;
-    color: #111315;
-    font-weight: 800;
+    background: #ffd23f;
+    color: #000000;
+}
+
+QPushButton[role="accent"] {
+    background: #ff6b6b;
+    color: #000000;
 }
 
 QComboBox,
 QSpinBox,
 QDoubleSpinBox,
+QLineEdit,
 QTextEdit,
 QListWidget {
-    background: #101214;
-    border: 1px solid #343b42;
-    border-radius: 6px;
-    color: #eef1f4;
-    selection-background-color: #f6d44a;
-    selection-color: #111315;
+    background: #fffdf5;
+    border: 3px solid #000000;
+    border-radius: 0;
+    color: #000000;
+    selection-background-color: #ffd23f;
+    selection-color: #000000;
+    font-weight: 700;
 }
 
 QComboBox,
 QSpinBox,
-QDoubleSpinBox {
-    min-height: 28px;
-    padding: 2px 8px;
+QDoubleSpinBox,
+QLineEdit {
+    min-height: 30px;
+    padding: 2px 9px;
 }
 
 QTextEdit,
 QListWidget {
-    padding: 6px;
+    padding: 7px;
+}
+
+QTextEdit#ResultConsole {
+    background: #050507;
+    color: #88d498;
+    font-family: "Consolas", "Cascadia Mono", monospace;
 }
 
 QComboBox::drop-down {
-    border-left: 1px solid #343b42;
-    width: 22px;
+    background: #ffd23f;
+    border-left: 3px solid #000000;
+    width: 26px;
+}
+
+QComboBox QAbstractItemView {
+    background: #fffdf5;
+    color: #000000;
+    border: 3px solid #000000;
+    selection-background-color: #74b9ff;
+}
+
+QListWidget::item {
+    border: 2px solid transparent;
+    padding: 5px;
+}
+
+QListWidget::item:selected {
+    background: #74b9ff;
+    color: #000000;
+    border: 2px solid #000000;
+}
+
+QCheckBox {
+    spacing: 8px;
+    font-weight: 800;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    background: #fffdf5;
+    border: 3px solid #000000;
+}
+
+QCheckBox::indicator:checked {
+    background: #ffd23f;
 }
 
 QSlider::groove:horizontal {
-    height: 4px;
-    background: #30363d;
-    border-radius: 2px;
+    height: 12px;
+    background: #fffdf5;
+    border: 3px solid #000000;
 }
 
 QSlider::sub-page:horizontal {
-    background: #d5d9dd;
-    border-radius: 2px;
+    background: #ffd23f;
+    border: 3px solid #000000;
 }
 
 QSlider::handle:horizontal {
-    background: #f6d44a;
-    border: 2px solid #111315;
-    width: 16px;
-    height: 16px;
-    margin: -7px 0;
-    border-radius: 8px;
+    background: #ff6b6b;
+    border: 3px solid #000000;
+    width: 22px;
+    height: 22px;
+    margin: -8px 0;
 }
 
 QScrollArea,
@@ -836,21 +975,35 @@ QWidget#Workspace {
 }
 
 QScrollBar:vertical {
-    background: #111315;
-    width: 10px;
+    background: #fffdf5;
+    border: 2px solid #000000;
+    width: 14px;
     margin: 0;
 }
 
 QScrollBar::handle:vertical {
-    background: #343b42;
-    border-radius: 5px;
+    background: #74b9ff;
+    border: 2px solid #000000;
     min-height: 28px;
 }
 
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
 QStatusBar {
-    background: #101214;
-    color: #aeb6be;
-    border-top: 1px solid #252a2f;
+    background: #ffd23f;
+    color: #000000;
+    border: 3px solid #000000;
+    font-weight: 900;
+}
+
+QToolTip {
+    background: #fffdf5;
+    color: #000000;
+    border: 3px solid #000000;
+    padding: 6px;
 }
 )");
 }
@@ -887,6 +1040,7 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1120, 680);
     resize(1320, 780);
 
+    m_playTimer.setTimerType(Qt::PreciseTimer);
     m_playTimer.setInterval(playbackIntervalMs());
     connect(&m_playTimer, &QTimer::timeout, this, &MainWindow::advancePlayingInstances);
     qApp->installEventFilter(this);
@@ -1627,7 +1781,25 @@ void MainWindow::advancePlayingInstances()
         updatePlayPauseButton();
         return;
     }
-    showFrame(m_currentFrame + 1);
+
+    if (!m_playbackClock.isValid())
+    {
+        resetPlaybackClock();
+    }
+
+    const double fps = m_usedFps > 0.0 ? m_usedFps : 50.0;
+    const double elapsedSeconds = (double)m_playbackClock.elapsed() / 1000.0;
+    int targetFrame = m_playbackStartFrame + (int)std::floor(elapsedSeconds * fps * m_playbackSpeed);
+    targetFrame = qMax(m_currentFrame + 1, targetFrame);
+    targetFrame = qMin(targetFrame, m_reader.frameCount() - 1);
+
+    showFrame(targetFrame);
+    if (m_globalPlaying && m_currentFrame + 1 >= m_reader.frameCount())
+    {
+        m_globalPlaying = false;
+        m_playTimer.stop();
+        updatePlayPauseButton();
+    }
 }
 
 void MainWindow::buildUi()
@@ -1635,30 +1807,38 @@ void MainWindow::buildUi()
     auto* central = new QWidget(this);
     central->setObjectName(QStringLiteral("AppRoot"));
     auto* root = new QHBoxLayout(central);
-    root->setContentsMargins(6, 8, 8, 8);
-    root->setSpacing(8);
+    root->setContentsMargins(12, 12, 14, 14);
+    root->setSpacing(14);
 
     auto* rail = new QFrame(central);
     rail->setObjectName(QStringLiteral("Rail"));
-    rail->setFixedWidth(56);
+    rail->setFixedWidth(74);
+    applyHardShadow(rail, QColor(0, 0, 0), 7, 7);
     auto* railLayout = new QVBoxLayout(rail);
-    railLayout->setContentsMargins(8, 10, 8, 10);
-    railLayout->setSpacing(10);
+    railLayout->setContentsMargins(10, 12, 10, 12);
+    railLayout->setSpacing(9);
 
     auto* brand = new QLabel(rail);
     brand->setObjectName(QStringLiteral("Brand"));
     brand->setAlignment(Qt::AlignCenter);
-    brand->setFixedSize(40, 40);
-    brand->setPixmap(QPixmap(QStringLiteral(":/img/logo.png")).scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    brand->setFixedSize(50, 50);
+    brand->setPixmap(QPixmap(QStringLiteral(":/img/logo.png")).scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     railLayout->addWidget(brand, 0, Qt::AlignHCenter);
-    railLayout->addSpacing(10);
+    railLayout->addSpacing(6);
+
+    auto makeRailDivider = [](QWidget* parent) {
+        auto* divider = new QFrame(parent);
+        divider->setObjectName(QStringLiteral("RailDivider"));
+        divider->setFixedHeight(3);
+        return divider;
+    };
 
     auto makeRailButton = [this](QWidget* parent, QStyle::StandardPixmap icon, const QString& tooltip) {
         auto* button = new QToolButton(parent);
         button->setObjectName(QStringLiteral("RailButton"));
         button->setIcon(style()->standardIcon(icon));
-        button->setIconSize(QSize(20, 20));
-        button->setFixedSize(40, 40);
+        button->setIconSize(QSize(22, 22));
+        button->setFixedSize(48, 48);
         button->setToolTip(tooltip);
         button->setAutoRaise(false);
         return button;
@@ -1672,34 +1852,41 @@ void MainWindow::buildUi()
     auto* exportAviRailButton = makeRailButton(rail, QStyle::SP_DialogApplyButton, QStringLiteral("导出标注 AVI"));
     auto* exportCsvRailButton = makeRailButton(rail, QStyle::SP_FileIcon, QStringLiteral("导出 CSV"));
     auto* exitRailButton = makeRailButton(rail, QStyle::SP_DialogCloseButton, QStringLiteral("退出"));
+    openRailButton->setProperty("tone", QStringLiteral("yellow"));
+    newInstanceRailButton->setProperty("tone", QStringLiteral("blue"));
+    importAlgorithmRailButton->setProperty("tone", QStringLiteral("green"));
+    exportAviRailButton->setProperty("tone", QStringLiteral("pink"));
+    exportCsvRailButton->setProperty("tone", QStringLiteral("blue"));
     railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(newInstanceRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(importAlgorithmRailButton, 0, Qt::AlignHCenter);
-    railLayout->addSpacing(10);
+    railLayout->addWidget(makeRailDivider(rail));
     railLayout->addWidget(saveRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(loadRailButton, 0, Qt::AlignHCenter);
-    railLayout->addSpacing(10);
+    railLayout->addWidget(makeRailDivider(rail));
     railLayout->addWidget(exportAviRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(exportCsvRailButton, 0, Qt::AlignHCenter);
     railLayout->addStretch(1);
+    railLayout->addWidget(makeRailDivider(rail));
     railLayout->addWidget(exitRailButton, 0, Qt::AlignHCenter);
     root->addWidget(rail);
 
     auto* splitter = new QSplitter(Qt::Horizontal, central);
-    splitter->setHandleWidth(2);
+    splitter->setHandleWidth(8);
     root->addWidget(splitter, 1);
 
     auto* workspace = new QWidget;
     workspace->setObjectName(QStringLiteral("Workspace"));
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
-    workspaceLayout->setSpacing(8);
+    workspaceLayout->setSpacing(16);
 
     auto* videoCard = new QFrame(workspace);
     videoCard->setObjectName(QStringLiteral("VideoCard"));
+    applyHardShadow(videoCard, QColor(116, 185, 255), 8, 8);
     auto* videoLayout = new QVBoxLayout(videoCard);
-    videoLayout->setContentsMargins(8, 8, 8, 10);
-    videoLayout->setSpacing(8);
+    videoLayout->setContentsMargins(18, 16, 18, 18);
+    videoLayout->setSpacing(14);
 
     auto* feedHeader = new QHBoxLayout;
     feedHeader->setSpacing(8);
@@ -1718,20 +1905,26 @@ void MainWindow::buildUi()
 
     videoLayout->addLayout(feedHeader);
 
-    auto* instanceRow = new QHBoxLayout;
+    auto* instanceStrip = new QFrame(videoCard);
+    instanceStrip->setObjectName(QStringLiteral("InstanceStrip"));
+    applyHardShadow(instanceStrip, QColor(0, 0, 0), 5, 5);
+    auto* instanceRow = new QHBoxLayout(instanceStrip);
+    instanceRow->setContentsMargins(10, 10, 10, 10);
     instanceRow->setSpacing(8);
     m_instanceList = new QListWidget(videoCard);
-    m_instanceList->setMaximumHeight(78);
+    m_instanceList->setMaximumHeight(86);
     m_instanceList->setSelectionMode(QAbstractItemView::SingleSelection);
     auto* newInstanceButton = new QPushButton(QStringLiteral("新建实例"), videoCard);
+    newInstanceButton->setProperty("role", QStringLiteral("accent"));
     instanceRow->addWidget(m_instanceList, 1);
     instanceRow->addWidget(newInstanceButton);
-    videoLayout->addLayout(instanceRow);
+    videoLayout->addWidget(instanceStrip);
 
     auto* gridHost = new QWidget(videoCard);
+    gridHost->setObjectName(QStringLiteral("GridHost"));
     m_videoGrid = new QGridLayout(gridHost);
-    m_videoGrid->setContentsMargins(0, 0, 0, 0);
-    m_videoGrid->setSpacing(8);
+    m_videoGrid->setContentsMargins(12, 12, 12, 12);
+    m_videoGrid->setSpacing(12);
     m_splitSlotInstanceIds = QVector<int>(4, -1);
     for (int slot = 0; slot < 4; ++slot)
     {
@@ -1767,15 +1960,28 @@ void MainWindow::buildUi()
     rightScroll->setObjectName(QStringLiteral("RightScroll"));
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setMinimumWidth(500);
-    rightScroll->setMaximumWidth(780);
+    rightScroll->setMinimumWidth(520);
+    rightScroll->setMaximumWidth(860);
 
     auto* rightPanel = new QWidget(rightScroll);
     rightPanel->setObjectName(QStringLiteral("RightPanel"));
-    rightPanel->setMinimumWidth(480);
+    rightPanel->setMinimumWidth(500);
     auto* rightLayout = new QVBoxLayout(rightPanel);
-    rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->setSpacing(12);
+    rightLayout->setContentsMargins(10, 0, 10, 10);
+    rightLayout->setSpacing(16);
+
+    auto* panelHeader = new QHBoxLayout;
+    panelHeader->setContentsMargins(0, 0, 0, 0);
+    panelHeader->setSpacing(10);
+    auto* panelTitle = new QLabel(QStringLiteral("ANNOTATION STACK"), rightPanel);
+    panelTitle->setObjectName(QStringLiteral("PanelTitle"));
+    auto* panelKicker = new QLabel(QStringLiteral("MARK / FIX / EXPORT"), rightPanel);
+    panelKicker->setObjectName(QStringLiteral("PanelKicker"));
+    panelHeader->addWidget(panelTitle);
+    panelHeader->addStretch(1);
+    panelHeader->addWidget(panelKicker);
+    rightLayout->addLayout(panelHeader);
+
     m_frameInfoLabel = new QLabel(QStringLiteral("Frame: -"), rightPanel);
     m_frameInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
     m_frameInfoLabel->setWordWrap(true);
@@ -1788,23 +1994,27 @@ void MainWindow::buildUi()
     m_currentAnnotationsLabel->setWordWrap(true);
     m_currentAnnotationsLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_resultText = new QTextEdit(rightPanel);
+    m_resultText->setObjectName(QStringLiteral("ResultConsole"));
     m_resultText->setReadOnly(true);
     m_resultText->setMinimumHeight(160);
     m_resultText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_annotationPanel = new AnnotationPanel(rightPanel);
 
-    auto* infoGroup = new QGroupBox(QStringLiteral("当前帧信息"), rightPanel);
+    auto* infoGroup = new QGroupBox(QStringLiteral("帧状态 / FRAME BOARD"), rightPanel);
+    applyHardShadow(infoGroup, QColor(255, 210, 63), 6, 6);
     auto* infoLayout = new QVBoxLayout(infoGroup);
-    infoLayout->setContentsMargins(12, 8, 12, 12);
-    infoLayout->setSpacing(8);
+    infoLayout->setContentsMargins(14, 12, 14, 14);
+    infoLayout->setSpacing(10);
     infoLayout->addWidget(m_frameInfoLabel);
     infoLayout->addWidget(m_pixelInfoLabel);
     infoLayout->addWidget(m_currentAnnotationsLabel);
     infoLayout->addWidget(m_resultText, 1);
 
-    auto* annotationGroup = new QGroupBox(QStringLiteral("错误标注"), rightPanel);
+    auto* annotationGroup = new QGroupBox(QStringLiteral("错误标注 / MARKUP COMMANDS"), rightPanel);
+    applyHardShadow(annotationGroup, QColor(255, 107, 107), 6, 6);
     auto* annotationLayout = new QVBoxLayout(annotationGroup);
-    annotationLayout->setContentsMargins(12, 8, 12, 12);
+    annotationLayout->setContentsMargins(14, 12, 14, 14);
+    annotationLayout->setSpacing(10);
     annotationLayout->addWidget(m_annotationPanel);
 
     rightLayout->addWidget(infoGroup);
@@ -1818,16 +2028,31 @@ void MainWindow::buildUi()
 
     auto* controlsFrame = new QFrame(workspace);
     controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
-    controlsFrame->setMinimumHeight(148);
-    controlsFrame->setMaximumHeight(178);
+    applyHardShadow(controlsFrame, QColor(136, 212, 152), 8, 8);
+    controlsFrame->setMinimumHeight(188);
+    controlsFrame->setMaximumHeight(236);
     controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto* controls = new QVBoxLayout(controlsFrame);
-    controls->setContentsMargins(14, 12, 14, 12);
-    controls->setSpacing(10);
+    controls->setContentsMargins(18, 14, 18, 16);
+    controls->setSpacing(12);
     auto* controlsTitle = new QLabel(QStringLiteral("PLAYBACK CONSOLE"), controlsFrame);
     controlsTitle->setObjectName(QStringLiteral("ConsoleTitle"));
-    auto* playbackRow = new QHBoxLayout;
-    playbackRow->setSpacing(8);
+    auto* consoleBadge = new QLabel(QStringLiteral("FRAME ACCURATE"), controlsFrame);
+    consoleBadge->setObjectName(QStringLiteral("ConsoleBadge"));
+
+    auto* consoleHeader = new QHBoxLayout;
+    consoleHeader->setContentsMargins(0, 0, 0, 0);
+    consoleHeader->setSpacing(10);
+    consoleHeader->addWidget(controlsTitle);
+    consoleHeader->addStretch(1);
+    consoleHeader->addWidget(consoleBadge);
+
+    auto* transportRow = new QHBoxLayout;
+    transportRow->setSpacing(10);
+    auto* detailRow = new QHBoxLayout;
+    detailRow->setSpacing(10);
+    auto* autoPauseRow = new QHBoxLayout;
+    autoPauseRow->setSpacing(10);
     m_playPauseButton = new QPushButton(QStringLiteral("播放"), controlsFrame);
     m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
     m_playPauseButton->setProperty("role", QStringLiteral("primary"));
@@ -1882,30 +2107,29 @@ void MainWindow::buildUi()
     auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
     timeLabel->setObjectName(QStringLiteral("SoftLabel"));
 
-    playbackRow->addWidget(m_playPauseButton);
-    playbackRow->addWidget(previousButton);
-    playbackRow->addWidget(nextButton);
-    playbackRow->addSpacing(10);
-    playbackRow->addWidget(viewLabel);
-    playbackRow->addWidget(m_viewModeCombo);
-    playbackRow->addWidget(speedLabel);
-    playbackRow->addWidget(m_speedCombo);
-    playbackRow->addStretch(1);
-    playbackRow->addWidget(frameLabel);
-    playbackRow->addWidget(m_frameSpin);
-    playbackRow->addWidget(jumpFrameButton);
-    playbackRow->addWidget(timeLabel);
-    playbackRow->addWidget(m_timeSpin);
-    playbackRow->addWidget(jumpTimeButton);
-    auto* autoPauseRow = new QHBoxLayout;
-    autoPauseRow->setSpacing(8);
+    transportRow->addWidget(m_playPauseButton);
+    transportRow->addWidget(previousButton);
+    transportRow->addWidget(nextButton);
+    transportRow->addWidget(jumpFrameButton);
+    transportRow->addWidget(jumpTimeButton);
+    transportRow->addStretch(1);
+    detailRow->addWidget(viewLabel);
+    detailRow->addWidget(m_viewModeCombo);
+    detailRow->addWidget(speedLabel);
+    detailRow->addWidget(m_speedCombo);
+    detailRow->addStretch(1);
+    detailRow->addWidget(frameLabel);
+    detailRow->addWidget(m_frameSpin);
+    detailRow->addWidget(timeLabel);
+    detailRow->addWidget(m_timeSpin);
     autoPauseRow->addWidget(m_autoPauseEnableCheck);
     autoPauseRow->addWidget(m_autoPauseJumpCheck);
     autoPauseRow->addWidget(m_autoPauseJumpThresholdSpin);
     autoPauseRow->addWidget(m_autoPauseCountCheck);
     autoPauseRow->addStretch(1);
-    controls->addWidget(controlsTitle);
-    controls->addLayout(playbackRow);
+    controls->addLayout(consoleHeader);
+    controls->addLayout(transportRow);
+    controls->addLayout(detailRow);
     controls->addLayout(autoPauseRow);
     controls->addWidget(m_slider);
     workspaceLayout->addWidget(controlsFrame, 0);
@@ -2151,6 +2375,9 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
 
     m_currentVideoPath = path;
     m_currentFrame = fallbackFrame;
+    const double detectedFps = m_reader.videoFps();
+    m_usedFps = std::isfinite(detectedFps) && detectedFps > 0.0 ? detectedFps : 50.0;
+    resetPlaybackClock();
 
     m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
     m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
@@ -2326,6 +2553,7 @@ void MainWindow::play()
     if (m_reader.isOpen())
     {
         m_globalPlaying = true;
+        resetPlaybackClock();
         m_playTimer.start(playbackIntervalMs());
         updatePlayPauseButton();
     }
@@ -2380,6 +2608,7 @@ void MainWindow::setPlaybackSpeed(double speed)
     m_playbackSpeed = speed;
     if (wasPlaying)
     {
+        resetPlaybackClock();
         m_playTimer.start(playbackIntervalMs());
     }
 }
@@ -2388,6 +2617,12 @@ int MainWindow::playbackIntervalMs() const
 {
     const double fps = m_usedFps > 0.0 ? m_usedFps : 50.0;
     return qMax(1, (int)std::round(1000.0 / (fps * m_playbackSpeed)));
+}
+
+void MainWindow::resetPlaybackClock()
+{
+    m_playbackStartFrame = m_currentFrame;
+    m_playbackClock.restart();
 }
 
 bool MainWindow::validateAnnotationInput(const QStringList& types,

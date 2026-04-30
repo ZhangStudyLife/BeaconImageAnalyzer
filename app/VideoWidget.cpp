@@ -2,6 +2,7 @@
 
 #include <QImage>
 #include <QEvent>
+#include <QGraphicsDropShadowEffect>
 #include <QLineF>
 #include <QMouseEvent>
 #include <QPainter>
@@ -16,7 +17,12 @@ VideoWidget::VideoWidget(QWidget* parent)
     setAlignment(Qt::AlignCenter);
     setMinimumSize(188, 120);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    setStyleSheet(QStringLiteral("background: #090a0b; color: #aeb6be; border: 1px solid #2a3035; border-radius: 8px;"));
+    setStyleSheet(QStringLiteral("background: #050507; color: #fffdf5; border: none;"));
+    auto* shadow = new QGraphicsDropShadowEffect(this);
+    shadow->setBlurRadius(0.0);
+    shadow->setOffset(6.0, 6.0);
+    shadow->setColor(QColor(0, 0, 0));
+    setGraphicsEffect(shadow);
     setText(QStringLiteral("打开 AVI 后显示画面"));
     setMouseTracking(true);
 }
@@ -226,9 +232,9 @@ void VideoWidget::paintEvent(QPaintEvent* event)
     Q_UNUSED(event);
 
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(9, 10, 11));
+    painter.fillRect(rect(), QColor(5, 5, 7));
 
-    QPen gridPen(QColor(255, 255, 255, 24));
+    QPen gridPen(QColor(255, 253, 245, 24));
     gridPen.setWidth(1);
     painter.setPen(gridPen);
     const int columns = 8;
@@ -246,14 +252,18 @@ void VideoWidget::paintEvent(QPaintEvent* event)
 
     if (m_image.isNull())
     {
-        painter.setPen(QColor(174, 182, 190));
+        painter.setPen(QColor(255, 253, 245));
         painter.drawText(rect(), Qt::AlignCenter, text());
+        QPen framePen(QColor(0, 0, 0));
+        framePen.setWidth(5);
+        painter.setPen(framePen);
+        painter.drawRect(rect().adjusted(3, 3, -4, -4));
         if (m_selected)
         {
-            QPen selectedPen(QColor(246, 212, 74));
-            selectedPen.setWidth(4);
+            QPen selectedPen(QColor(255, 210, 63));
+            selectedPen.setWidth(7);
             painter.setPen(selectedPen);
-            painter.drawRect(rect().adjusted(2, 2, -2, -2));
+            painter.drawRect(rect().adjusted(7, 7, -8, -8));
         }
         return;
     }
@@ -261,17 +271,21 @@ void VideoWidget::paintEvent(QPaintEvent* event)
     const QRectF displayRect = imageDisplayRect();
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     painter.drawImage(displayRect, m_image);
-    painter.setPen(QPen(QColor(246, 212, 74, 190), 1));
+    painter.setPen(QPen(QColor(255, 210, 63, 220), 3));
     painter.drawRect(displayRect.adjusted(0.5, 0.5, -0.5, -0.5));
+    QPen outerPen(QColor(0, 0, 0));
+    outerPen.setWidth(5);
+    painter.setPen(outerPen);
+    painter.drawRect(rect().adjusted(3, 3, -4, -4));
 
     if (m_previewPoints.isEmpty())
     {
         if (m_selected)
         {
-            QPen selectedPen(QColor(246, 212, 74));
-            selectedPen.setWidth(4);
+            QPen selectedPen(QColor(255, 210, 63));
+            selectedPen.setWidth(7);
             painter.setPen(selectedPen);
-            painter.drawRect(rect().adjusted(2, 2, -2, -2));
+            painter.drawRect(rect().adjusted(7, 7, -8, -8));
         }
         return;
     }
@@ -298,11 +312,11 @@ void VideoWidget::paintEvent(QPaintEvent* event)
 
     if (m_selected)
     {
-        QPen selectedPen(QColor(246, 212, 74));
-        selectedPen.setWidth(4);
+        QPen selectedPen(QColor(255, 210, 63));
+        selectedPen.setWidth(7);
         painter.setPen(selectedPen);
         painter.setBrush(Qt::NoBrush);
-        painter.drawRect(rect().adjusted(2, 2, -2, -2));
+        painter.drawRect(rect().adjusted(7, 7, -8, -8));
     }
 }
 
@@ -390,9 +404,10 @@ QRectF VideoWidget::imageDisplayRect() const
         return QRectF();
     }
 
-    const QSize scaled = m_image.size().scaled(size(), Qt::KeepAspectRatio);
-    return QRectF((width() - scaled.width()) / 2.0,
-                  (height() - scaled.height()) / 2.0,
+    const QRectF contentRect = QRectF(rect()).adjusted(12.0, 12.0, -12.0, -12.0);
+    const QSize scaled = m_image.size().scaled(contentRect.size().toSize(), Qt::KeepAspectRatio);
+    return QRectF(contentRect.left() + (contentRect.width() - scaled.width()) / 2.0,
+                  contentRect.top() + (contentRect.height() - scaled.height()) / 2.0,
                   scaled.width(),
                   scaled.height());
 }

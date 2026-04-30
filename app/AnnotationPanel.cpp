@@ -1536,7 +1536,7 @@ void AnnotationPanel::refreshTypeFields()
 void AnnotationPanel::updateColorButton()
 {
     m_colorButton->setText(m_lineColor.name(QColor::HexRgb).toUpper());
-    m_colorButton->setStyleSheet(QStringLiteral("background:%1; color:%2;")
+    m_colorButton->setStyleSheet(QStringLiteral("background:%1; color:%2; border:3px solid #000000; border-radius:0; font-weight:900; padding:6px 10px;")
                                      .arg(m_lineColor.name(QColor::HexRgb),
                                           m_lineColor.lightness() > 150 ? QStringLiteral("#111315") : QStringLiteral("#eef1f4")));
 }

@@ -6,6 +6,7 @@
 #include "VideoReader.h"
 #include "beacon_image.h"
 
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPair>
 #include <QTimer>
@@ -152,6 +153,7 @@ private:
     void updatePlayPauseButton();
     void setPlaybackSpeed(double speed);
     int playbackIntervalMs() const;
+    void resetPlaybackClock();
     bool validateAnnotationInput(const QStringList& types,
                                  const QVector<ErrorCircle>& errorCircles,
                                  const QString& actionName) const;
@@ -218,6 +220,8 @@ private:
     bool m_globalPlaying = false;
     double m_globalUsedFps = 50.0;
     double m_globalPlaybackSpeed = 1.0;
+    QElapsedTimer m_playbackClock;
+    int m_playbackStartFrame = 0;
     bool m_updatingControls = false;
     QVector<int> m_splitSlotInstanceIds;
     int m_currentInstanceId = -1;
