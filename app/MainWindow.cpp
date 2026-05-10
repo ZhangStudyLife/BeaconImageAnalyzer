@@ -3,10 +3,12 @@
 #include "AnnotationJson.h"
 #include "AnnotationPanel.h"
 #include "FrameRenderer.h"
+#include "TcpImageWindow.h"
 #include "VideoExporter.h"
 #include "VideoWidget.h"
 
 #include <QAction>
+#include <QAbstractSocket>
 #include <QAbstractItemView>
 #include <QAbstractSpinBox>
 #include <QApplication>
@@ -14,6 +16,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDoubleSpinBox>
 #include <QDir>
@@ -40,6 +43,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QNetworkInterface>
 #include <QPlainTextEdit>
 #include <QPolygonF>
 #include <QProgressDialog>
@@ -432,6 +436,46 @@ void appendConnectedComponentCandidates(const cv::Mat& binary, QVector<MissedTar
         candidate.circularityScore = fillRatio / aspect;
         addCandidateUnique(candidates, candidate);
     }
+}
+
+QString defaultTcpSaveDir()
+{
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("tcp_frames"));
+}
+
+QVector<TcpListenAddress> localTcpListenAddresses()
+{
+    QVector<TcpListenAddress> addresses;
+    addresses.push_back({ QStringLiteral("所有 IPv4 地址 - 0.0.0.0"), QStringLiteral("0.0.0.0") });
+
+    const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface& networkInterface : interfaces)
+    {
+        const QNetworkInterface::InterfaceFlags flags = networkInterface.flags();
+        if (!flags.testFlag(QNetworkInterface::IsUp) || !flags.testFlag(QNetworkInterface::IsRunning))
+        {
+            continue;
+        }
+
+        const QList<QNetworkAddressEntry> entries = networkInterface.addressEntries();
+        for (const QNetworkAddressEntry& entry : entries)
+        {
+            const QHostAddress address = entry.ip();
+            if (address.protocol() != QAbstractSocket::IPv4Protocol || address.isLoopback())
+            {
+                continue;
+            }
+
+            const QString ip = address.toString();
+            const QString label = QStringLiteral("%1 - %2")
+                                      .arg(networkInterface.humanReadableName().isEmpty()
+                                               ? networkInterface.name()
+                                               : networkInterface.humanReadableName(),
+                                           ip);
+            addresses.push_back({ label, ip });
+        }
+    }
+    return addresses;
 }
 
 QVector<MissedTargetCandidate> extractMissedTargetCandidates(const QImage& gray)
@@ -1501,7 +1545,19 @@ void MainWindow::runSingleTargetQuickCorrection(int circleIndex, const QPoint& g
 
 void MainWindow::renderInstance(AnalyzerInstance* instance)
 {
-    if (instance == nullptr || !m_reader.isOpen())
+    if (instance == nullptr)
+    {
+        return;
+    }
+
+    if (m_liveMode && !m_liveFrame.isNull())
+    {
+        const beacon_result_t result = instance->runner.process(m_liveFrame);
+        renderInstance(instance, m_liveFrame, result, m_currentFrame);
+        return;
+    }
+
+    if (!m_reader.isOpen())
     {
         return;
     }
@@ -1548,7 +1604,7 @@ void MainWindow::renderInstance(AnalyzerInstance* instance,
     const int slot = slotForInstance(instance->id);
     if (slot >= 0 && slot < m_videoWidgets.size())
     {
-        m_videoWidgets[slot]->setFrameGeometry(QSize(m_reader.width(), m_reader.height()), 1);
+        m_videoWidgets[slot]->setFrameGeometry(gray.size(), 1);
         m_videoWidgets[slot]->setPixelSourceImage(gray);
         m_videoWidgets[slot]->setImage(rendered);
     }
@@ -1586,6 +1642,65 @@ void MainWindow::renderAllDisplayedInstances(const QImage& gray,
     updateCurrentVideoWidget();
 }
 
+void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QString& peerName)
+{
+    if (gray.isNull())
+    {
+        return;
+    }
+
+    pause();
+    m_liveMode = true;
+    m_liveFrame = gray.convertToFormat(QImage::Format_Grayscale8);
+    m_liveLocalPort = localPort;
+    m_livePeerName = peerName;
+    ++m_liveFrameIndex;
+    m_currentFrame = qMax(0, m_liveFrameIndex);
+
+    QVector<QPair<AnalyzerInstance*, beacon_result_t>> results;
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        if (instance == nullptr)
+        {
+            continue;
+        }
+        const beacon_result_t result = instance->runner.process(m_liveFrame);
+        instance->currentResult = result;
+        results.push_back(qMakePair(instance, result));
+    }
+
+    const beacon_result_t result = m_currentResult;
+    if (m_annotationPanel != nullptr)
+    {
+        m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
+        m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame));
+    }
+    renderAllDisplayedInstances(m_liveFrame, results);
+
+    m_updatingControls = true;
+    m_slider->setRange(0, qMax(m_currentFrame, m_slider->maximum()));
+    m_frameSpin->setRange(0, qMax(m_currentFrame, m_frameSpin->maximum()));
+    m_timeSpin->setRange(0.0, qMax(frameTime(m_currentFrame), m_timeSpin->maximum()));
+    m_slider->setValue(m_currentFrame);
+    m_frameSpin->setValue(m_currentFrame);
+    m_timeSpin->setValue(frameTime(m_currentFrame));
+    m_updatingControls = false;
+
+    m_videoInfoLabel->setText(QStringLiteral("TCP 实时 | 本地端口 %1 | 来源 %2 | %3x%4 | 帧 %5")
+                                  .arg(localPort)
+                                  .arg(peerName)
+                                  .arg(m_liveFrame.width())
+                                  .arg(m_liveFrame.height())
+                                  .arg(m_currentFrame));
+    updateFrameInfo(result);
+    m_frameInfoLabel->setText(QStringLiteral("TCP 实时帧: %1\n本地端口: %2\n来源: %3\n识别圆总数: %4")
+                                  .arg(m_currentFrame)
+                                  .arg(m_liveLocalPort)
+                                  .arg(m_livePeerName)
+                                  .arg(result.count));
+    updateTcpStatusLabel(QStringLiteral("最近收到图像：%1").arg(peerName));
+}
+
 void MainWindow::refreshCurrentInstanceUi()
 {
     AnalyzerInstance* instance = currentInstance();
@@ -1600,6 +1715,10 @@ void MainWindow::refreshCurrentInstanceUi()
         m_timeSpin->setRange(0.0, frameTime(qMax(0, m_reader.frameCount() - 1)));
         m_annotationPanel->setVideoFrameRange(0, qMax(0, m_reader.frameCount() - 1));
         showFrame(m_currentFrame);
+    }
+    else if (m_liveMode && !m_liveFrame.isNull())
+    {
+        renderAllDisplayedInstances();
     }
     else
     {
@@ -1665,16 +1784,16 @@ void MainWindow::buildUi()
     };
 
     auto* openRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("打开 AVI"));
+    auto* tcpRailButton = makeRailButton(rail, QStyle::SP_ComputerIcon, QStringLiteral("TCP 接收"));
     auto* newInstanceRailButton = makeRailButton(rail, QStyle::SP_FileDialogNewFolder, QStringLiteral("新建实例"));
-    auto* importAlgorithmRailButton = makeRailButton(rail, QStyle::SP_FileDialogDetailedView, QStringLiteral("导入 C 文件"));
     auto* saveRailButton = makeRailButton(rail, QStyle::SP_DialogSaveButton, QStringLiteral("保存标注"));
     auto* loadRailButton = makeRailButton(rail, QStyle::SP_FileDialogContentsView, QStringLiteral("读取标注"));
     auto* exportAviRailButton = makeRailButton(rail, QStyle::SP_DialogApplyButton, QStringLiteral("导出标注 AVI"));
     auto* exportCsvRailButton = makeRailButton(rail, QStyle::SP_FileIcon, QStringLiteral("导出 CSV"));
     auto* exitRailButton = makeRailButton(rail, QStyle::SP_DialogCloseButton, QStringLiteral("退出"));
     railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(tcpRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(newInstanceRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(importAlgorithmRailButton, 0, Qt::AlignHCenter);
     railLayout->addSpacing(10);
     railLayout->addWidget(saveRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(loadRailButton, 0, Qt::AlignHCenter);
@@ -1709,11 +1828,17 @@ void MainWindow::buildUi()
     m_videoInfoLabel->setObjectName(QStringLiteral("FeedMeta"));
     m_videoInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_videoInfoLabel->setWordWrap(true);
+    m_tcpStatusLabel = new QLabel(QStringLiteral("TCP 未监听"), videoCard);
+    m_tcpStatusLabel->setObjectName(QStringLiteral("Pill"));
+    m_tcpStatusLabel->setAlignment(Qt::AlignCenter);
+    m_tcpStatusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_tcpStatusLabel->setWordWrap(true);
     auto* feedPill = new QLabel(QStringLiteral("RAW · BINARY · OVERLAY"), videoCard);
     feedPill->setObjectName(QStringLiteral("Pill"));
     feedPill->setAlignment(Qt::AlignCenter);
     feedHeader->addWidget(feedTitle);
     feedHeader->addWidget(m_videoInfoLabel, 1);
+    feedHeader->addWidget(m_tcpStatusLabel);
     feedHeader->addWidget(feedPill);
 
     videoLayout->addLayout(feedHeader);
@@ -1872,7 +1997,6 @@ void MainWindow::buildUi()
     m_autoPauseJumpThresholdSpin->setValue(10.0);
     m_autoPauseJumpThresholdSpin->setSuffix(QStringLiteral(" px"));
     m_autoPauseJumpThresholdSpin->setFixedWidth(92);
-
     auto* viewLabel = new QLabel(QStringLiteral("视图"), controlsFrame);
     viewLabel->setObjectName(QStringLiteral("SoftLabel"));
     auto* speedLabel = new QLabel(QStringLiteral("倍速"), controlsFrame);
@@ -1913,8 +2037,8 @@ void MainWindow::buildUi()
     setCentralWidget(central);
 
     connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
+    connect(tcpRailButton, &QToolButton::clicked, this, &MainWindow::configureTcpReceiver);
     connect(newInstanceRailButton, &QToolButton::clicked, this, &MainWindow::newInstance);
-    connect(importAlgorithmRailButton, &QToolButton::clicked, this, &MainWindow::importAlgorithmFile);
     connect(newInstanceButton, &QPushButton::clicked, this, &MainWindow::newInstance);
     connect(saveRailButton, &QToolButton::clicked, this, &MainWindow::saveAnnotation);
     connect(loadRailButton, &QToolButton::clicked, this, &MainWindow::loadAnnotation);
@@ -1997,9 +2121,9 @@ void MainWindow::buildMenus()
 {
     auto* fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
     fileMenu->addAction(QStringLiteral("新建实例"), this, &MainWindow::newInstance);
-    fileMenu->addAction(QStringLiteral("导入 C 文件"), this, &MainWindow::importAlgorithmFile);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("打开视频"), this, &MainWindow::openVideo);
+    fileMenu->addAction(QStringLiteral("新增 TCP 监视窗口"), this, &MainWindow::configureTcpReceiver);
     fileMenu->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
     fileMenu->addAction(QStringLiteral("读取标注"), this, &MainWindow::loadAnnotation);
     fileMenu->addSeparator();
@@ -2140,6 +2264,45 @@ void MainWindow::openVideo()
     loadVideoFile(path, true, 0);
 }
 
+void MainWindow::configureTcpReceiver()
+{
+    QString instanceError;
+    if (!ensureDefaultInstance(&instanceError))
+    {
+        QMessageBox::critical(this, QStringLiteral("新增 TCP 监视窗口失败"), instanceError);
+        return;
+    }
+
+    QVector<TcpInstanceOption> options;
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        if (instance == nullptr)
+        {
+            continue;
+        }
+        TcpInstanceOption option;
+        option.id = instance->id;
+        option.name = instance->name;
+        option.runner = &instance->runner;
+        option.annotations = &instance->annotations;
+        options.push_back(option);
+    }
+
+    auto* window = new TcpImageWindow;
+    window->setAvailableAddresses(localTcpListenAddresses());
+    window->setInstanceOptions(options);
+    window->setDefaultSaveDirectory(m_liveSaveDir.isEmpty() ? defaultTcpSaveDir() : m_liveSaveDir);
+    window->setSuggestedPort(m_nextTcpPort);
+    window->show();
+    window->raise();
+
+    if (m_nextTcpPort < 65535)
+    {
+        ++m_nextTcpPort;
+    }
+    updateTcpStatusLabel(QStringLiteral("已新增 TCP 监视窗口，可在窗口内选择本机 IP 和端口。"));
+}
+
 bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame)
 {
     QString error;
@@ -2151,6 +2314,7 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
 
     m_currentVideoPath = path;
     m_currentFrame = fallbackFrame;
+    m_liveMode = false;
 
     m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
     m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
@@ -2323,6 +2487,10 @@ void MainWindow::exportCsv()
 
 void MainWindow::play()
 {
+    if (m_liveMode)
+    {
+        return;
+    }
     if (m_reader.isOpen())
     {
         m_globalPlaying = true;
@@ -2367,6 +2535,17 @@ void MainWindow::updatePlayPauseButton()
         m_playPauseButton->setText(QStringLiteral("播放"));
         m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
     }
+}
+
+void MainWindow::updateTcpStatusLabel(const QString& eventMessage)
+{
+    if (m_tcpStatusLabel == nullptr)
+    {
+        return;
+    }
+    m_tcpStatusLabel->setText(eventMessage.isEmpty()
+                                  ? QStringLiteral("TCP：点击左侧 TCP 按钮新增监视窗口")
+                                  : eventMessage);
 }
 
 void MainWindow::setPlaybackSpeed(double speed)
@@ -2415,6 +2594,10 @@ bool MainWindow::validateAnnotationInput(const QStringList& types,
 
 void MainWindow::nextFrame()
 {
+    if (m_liveMode)
+    {
+        return;
+    }
     if (!m_reader.isOpen())
     {
         return;
@@ -2429,6 +2612,10 @@ void MainWindow::nextFrame()
 
 void MainWindow::previousFrame()
 {
+    if (m_liveMode)
+    {
+        return;
+    }
     if (m_reader.isOpen())
     {
         showFrame(qMax(0, m_currentFrame - 1));
@@ -2437,11 +2624,19 @@ void MainWindow::previousFrame()
 
 void MainWindow::jumpToFrame()
 {
+    if (m_liveMode)
+    {
+        return;
+    }
     showFrame(m_frameSpin->value());
 }
 
 void MainWindow::jumpToTime()
 {
+    if (m_liveMode)
+    {
+        return;
+    }
     showFrame(qBound(0, (int)(m_timeSpin->value() * m_usedFps + 0.5), qMax(0, m_reader.frameCount() - 1)));
 }
 
@@ -2449,6 +2644,12 @@ void MainWindow::showFrameFromSlider(int value)
 {
     if (!m_updatingControls)
     {
+        if (m_liveMode)
+        {
+            QSignalBlocker blocker(m_slider);
+            m_slider->setValue(m_currentFrame);
+            return;
+        }
         pause();
         showFrame(value);
     }
@@ -2456,6 +2657,7 @@ void MainWindow::showFrameFromSlider(int value)
 
 void MainWindow::showFrame(int frameIndex)
 {
+    m_liveMode = false;
     if (!m_reader.isOpen())
     {
         return;
@@ -3751,6 +3953,10 @@ QString MainWindow::viewMode() const
 
 QString MainWindow::defaultOutputPath(const QString& suffix) const
 {
+    if (m_liveMode && !m_liveSaveDir.isEmpty())
+    {
+        return QDir(m_liveSaveDir).absoluteFilePath(QStringLiteral("tcp_frame%1%2").arg(qMax(0, m_liveFrameIndex)).arg(suffix));
+    }
     if (m_currentVideoPath.isEmpty())
     {
         return QString();
@@ -3763,3 +3969,4 @@ double MainWindow::frameTime(int frame) const
 {
     return (double)frame / m_usedFps;
 }
+

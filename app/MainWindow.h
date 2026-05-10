@@ -3,6 +3,7 @@
 
 #include "AlgorithmRunner.h"
 #include "AnnotationModel.h"
+#include "TcpImageWindow.h"
 #include "VideoReader.h"
 #include "beacon_image.h"
 
@@ -57,6 +58,7 @@ private slots:
     void newInstance();
     void importAlgorithmFile();
     void openVideo();
+    void configureTcpReceiver();
     void saveAnnotation();
     void loadAnnotation();
     void exportMarkedAvi();
@@ -127,6 +129,7 @@ private:
     void renderAllDisplayedInstances();
     void renderAllDisplayedInstances(const QImage& gray,
                                      const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results);
+    void showLiveFrame(const QImage& gray, quint16 localPort, const QString& peerName);
     int slotForInstance(int instanceId) const;
     int slotAtGlobalPos(const QPoint& globalPos) const;
     void setInstanceVisible(int instanceId, bool visible);
@@ -150,6 +153,7 @@ private:
     void updateAnnotationList();
     void togglePlayPause();
     void updatePlayPauseButton();
+    void updateTcpStatusLabel(const QString& eventMessage = QString());
     void setPlaybackSpeed(double speed);
     int playbackIntervalMs() const;
     bool validateAnnotationInput(const QStringList& types,
@@ -195,6 +199,7 @@ private:
     QGridLayout* m_videoGrid = nullptr;
     QListWidget* m_instanceList = nullptr;
     QLabel* m_videoInfoLabel = nullptr;
+    QLabel* m_tcpStatusLabel = nullptr;
     QLabel* m_frameInfoLabel = nullptr;
     QLabel* m_pixelInfoLabel = nullptr;
     QLabel* m_currentAnnotationsLabel = nullptr;
@@ -218,6 +223,13 @@ private:
     bool m_globalPlaying = false;
     double m_globalUsedFps = 50.0;
     double m_globalPlaybackSpeed = 1.0;
+    QImage m_liveFrame;
+    QString m_livePeerName;
+    QString m_liveSaveDir;
+    quint16 m_liveLocalPort = 0;
+    int m_liveFrameIndex = -1;
+    quint16 m_nextTcpPort = 1346;
+    bool m_liveMode = false;
     bool m_updatingControls = false;
     QVector<int> m_splitSlotInstanceIds;
     int m_currentInstanceId = -1;

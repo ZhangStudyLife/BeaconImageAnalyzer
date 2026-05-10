@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Network Widgets)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
 
 add_library(beacon_algorithm STATIC
@@ -32,6 +32,8 @@ add_executable(BeaconImageAnalyzer
     app/main.cpp
     app/MainWindow.h
     app/MainWindow.cpp
+    app/TcpImageWindow.h
+    app/TcpImageWindow.cpp
     app/VideoWidget.h
     app/VideoWidget.cpp
     app/AnnotationPanel.h
@@ -42,6 +44,8 @@ add_executable(BeaconImageAnalyzer
     core/AlgorithmRunner.cpp
     core/FrameRenderer.h
     core/FrameRenderer.cpp
+    core/SeekfreeImageFrameParser.h
+    core/SeekfreeImageFrameParser.cpp
     core/VideoExporter.h
     core/VideoExporter.cpp
     annotation/AnnotationModel.h
@@ -61,6 +65,7 @@ target_include_directories(BeaconImageAnalyzer PRIVATE
 )
 
 target_link_libraries(BeaconImageAnalyzer PRIVATE
+    Qt6::Network
     Qt6::Widgets
     beacon_algorithm
     ${OpenCV_LIBS}
