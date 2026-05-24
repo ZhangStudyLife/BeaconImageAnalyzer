@@ -67,9 +67,9 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_draftList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_draftList->setMinimumHeight(96);
 
-    auto* addDraftButton = new QPushButton(QStringLiteral("新增纠错条目"), this);
+    auto* addDraftButton = new QPushButton(QStringLiteral("新增纠错"), this);
     addDraftButton->setProperty("role", QStringLiteral("primary"));
-    auto* deleteDraftButton = new QPushButton(QStringLiteral("删除当前条目"), this);
+    auto* deleteDraftButton = new QPushButton(QStringLiteral("删除当前"), this);
     auto* saveDraftButton = new QPushButton(QStringLiteral("保存当前帧纠错"), this);
 
     auto* entryGroup = new QGroupBox(QStringLiteral("纠错条目"), this);
@@ -99,7 +99,7 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_noteEdit->setPlaceholderText(QStringLiteral("描述"));
     m_noteEdit->setFixedHeight(64);
 
-    auto* typeGroup = new QGroupBox(QStringLiteral("单条配置"), this);
+    auto* typeGroup = new QGroupBox(QStringLiteral("条目配置"), this);
     auto* typeForm = new QFormLayout(typeGroup);
     typeForm->setContentsMargins(10, 8, 10, 10);
     typeForm->setVerticalSpacing(7);
@@ -115,7 +115,7 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     m_customTypeDescriptionEdit->setFixedHeight(56);
     auto* addTypeButton = new QPushButton(QStringLiteral("新增类型"), this);
 
-    auto* customTypeGroup = new QGroupBox(QStringLiteral("自定义错误类型"), this);
+    auto* customTypeGroup = new QGroupBox(QStringLiteral("自定义类型"), this);
     auto* customTypeForm = new QFormLayout(customTypeGroup);
     customTypeForm->setContentsMargins(10, 8, 10, 10);
     customTypeForm->setVerticalSpacing(7);
@@ -168,15 +168,10 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     updateColorButton();
     auto* autoIdentifyButton = new QPushButton(QStringLiteral("自动识别"), this);
 
-    m_toolGroup = new QGroupBox(QStringLiteral("纠错工具"), this);
-    auto* toolForm = new QFormLayout(m_toolGroup);
-    toolForm->setContentsMargins(10, 8, 10, 10);
-    toolForm->setVerticalSpacing(7);
-    toolForm->setHorizontalSpacing(8);
-    toolForm->addRow(QStringLiteral("绘制"), m_toolCombo);
-    toolForm->addRow(QStringLiteral("线条颜色"), m_colorButton);
-    toolForm->addRow(QStringLiteral("线条粗细"), m_lineWidthSpin);
-    toolForm->addRow(QString(), autoIdentifyButton);
+    typeForm->addRow(QStringLiteral("绘制"), m_toolCombo);
+    typeForm->addRow(QStringLiteral("线条颜色"), m_colorButton);
+    typeForm->addRow(QStringLiteral("线条粗细"), m_lineWidthSpin);
+    typeForm->addRow(QString(), autoIdentifyButton);
 
     m_savedList = new QListWidget(this);
     m_savedList->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -200,7 +195,7 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     auto* applyFilterButton = new QPushButton(QStringLiteral("应用筛选"), this);
     auto* clearFilterButton = new QPushButton(QStringLiteral("清除筛选"), this);
 
-    auto* filterGroup = new QGroupBox(QStringLiteral("已保存标注筛选"), this);
+    auto* filterGroup = new QGroupBox(QStringLiteral("筛选"), this);
     auto* filterLayout = new QVBoxLayout(filterGroup);
     filterLayout->setContentsMargins(10, 8, 10, 10);
     filterLayout->setSpacing(7);
@@ -229,7 +224,7 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     filterButtonRow->addWidget(clearFilterButton);
     filterLayout->addLayout(filterButtonRow);
 
-    auto* savedGroup = new QGroupBox(QStringLiteral("已保存标注"), this);
+    auto* savedGroup = new QGroupBox(QStringLiteral("标注列表"), this);
     auto* savedLayout = new QVBoxLayout(savedGroup);
     savedLayout->setContentsMargins(10, 8, 10, 10);
     savedLayout->setSpacing(7);
@@ -335,43 +330,49 @@ AnnotationPanel::AnnotationPanel(QWidget* parent)
     savedLayout->addWidget(m_savedList, 1);
     savedLayout->addWidget(deleteSavedButton);
 
-    auto* coreGroup = new QGroupBox(QStringLiteral("核心操作区"), this);
-    auto* coreLayout = new QGridLayout(coreGroup);
-    coreLayout->setContentsMargins(10, 10, 10, 10);
-    coreLayout->setHorizontalSpacing(10);
-    coreLayout->setVerticalSpacing(10);
-    coreLayout->addWidget(entryGroup, 0, 0);
-    coreLayout->addWidget(typeGroup, 0, 1);
-    coreLayout->addWidget(customTypeGroup, 1, 0);
-    coreLayout->addWidget(m_toolGroup, 1, 1);
-    coreLayout->setColumnStretch(0, 1);
-    coreLayout->setColumnStretch(1, 1);
-    coreLayout->setRowStretch(0, 1);
-    coreLayout->setRowStretch(1, 1);
+    auto* currentFrameGroup = new QGroupBox(QStringLiteral("当前帧纠错"), this);
+    auto* currentFrameLayout = new QGridLayout(currentFrameGroup);
+    currentFrameLayout->setContentsMargins(10, 10, 10, 10);
+    currentFrameLayout->setHorizontalSpacing(10);
+    currentFrameLayout->setVerticalSpacing(10);
+    entryGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    typeGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    customTypeGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    currentFrameLayout->addWidget(entryGroup, 0, 0, 2, 1);
+    currentFrameLayout->addWidget(typeGroup, 0, 1);
+    currentFrameLayout->addWidget(customTypeGroup, 1, 1);
+    currentFrameLayout->setColumnStretch(0, 3);
+    currentFrameLayout->setColumnStretch(1, 4);
+    currentFrameLayout->setColumnStretch(2, 0);
+    currentFrameLayout->setRowStretch(0, 1);
+    currentFrameLayout->setRowStretch(1, 0);
+    currentFrameLayout->setRowStretch(2, 0);
 
-    auto* managementGroup = new QGroupBox(QStringLiteral("标注管理区"), this);
-    auto* managementLayout = new QGridLayout(managementGroup);
-    managementLayout->setContentsMargins(10, 10, 10, 10);
-    managementLayout->setHorizontalSpacing(10);
-    managementLayout->setVerticalSpacing(10);
-    filterGroup->setMaximumWidth(260);
+    auto* savedAndFilterWidget = new QWidget(this);
+    auto* savedAndFilterLayout = new QHBoxLayout(savedAndFilterWidget);
+    savedAndFilterLayout->setContentsMargins(10, 10, 10, 10);
+    savedAndFilterLayout->setSpacing(10);
+    filterGroup->setMaximumWidth(240);
     filterGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     savedGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_batchGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    managementLayout->addWidget(savedGroup, 0, 0, 1, 2);
-    managementLayout->addWidget(filterGroup, 1, 0);
-    managementLayout->addWidget(m_batchGroup, 1, 1);
-    managementLayout->setColumnStretch(0, 0);
-    managementLayout->setColumnStretch(1, 1);
-    managementLayout->setRowStretch(0, 2);
-    managementLayout->setRowStretch(1, 1);
+    savedAndFilterLayout->addWidget(savedGroup, 1);
+    savedAndFilterLayout->addWidget(filterGroup);
+
+    auto* managementGroup = new QGroupBox(QStringLiteral("标注管理"), this);
+    auto* managementLayout = new QVBoxLayout(managementGroup);
+    managementLayout->setContentsMargins(10, 10, 10, 10);
+    managementLayout->setSpacing(10);
+    savedAndFilterWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_batchGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    managementLayout->addWidget(savedAndFilterWidget, 1);
+    managementLayout->addWidget(m_batchGroup);
 
     auto* splitter = new QSplitter(Qt::Vertical, this);
     splitter->setChildrenCollapsible(false);
-    splitter->addWidget(coreGroup);
+    splitter->addWidget(currentFrameGroup);
     splitter->addWidget(managementGroup);
-    splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 2);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -1199,6 +1200,14 @@ void AnnotationPanel::addDraftEntry()
     m_draftsDirty = true;
     refreshDraftList();
     m_draftList->setCurrentRow(m_drafts.size() - 1);
+    if (m_toolCombo->currentData().toString() == QStringLiteral("select"))
+    {
+        const int circleTool = m_toolCombo->findData(QStringLiteral("circle"));
+        if (circleTool >= 0)
+        {
+            m_toolCombo->setCurrentIndex(circleTool);
+        }
+    }
     syncWidgetsFromActiveDraft();
 }
 
@@ -1530,7 +1539,7 @@ void AnnotationPanel::refreshTypeFields()
     m_sourceGroup->setVisible(typeRequiresSource(type));
     m_expectedEditorWidget->setVisible(typeRequiresExpectedForSources(type));
     m_missingGroup->setVisible(isMissedType(type));
-    m_noteEdit->setPlaceholderText(isOtherType(type) ? QStringLiteral("其他类型描述，必填") : QStringLiteral("描述"));
+    m_noteEdit->setPlaceholderText(QStringLiteral("描述"));
 }
 
 void AnnotationPanel::updateColorButton()

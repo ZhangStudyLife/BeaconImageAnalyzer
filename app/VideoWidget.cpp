@@ -88,7 +88,7 @@ void VideoWidget::mousePressEvent(QMouseEvent* event)
 {
     updateHoverPixel(event->pos());
 
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton && m_correctionTool == QStringLiteral("select"))
     {
         emit activated();
     }

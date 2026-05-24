@@ -113,7 +113,6 @@ private:
     QLabel* m_missingExpectedLabel = nullptr;
     QSpinBox* m_missingExpectedSpin = nullptr;
     QTextEdit* m_noteEdit = nullptr;
-    QGroupBox* m_toolGroup = nullptr;
     QComboBox* m_toolCombo = nullptr;
     QPushButton* m_colorButton = nullptr;
     QSpinBox* m_lineWidthSpin = nullptr;

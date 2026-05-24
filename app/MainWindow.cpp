@@ -2,6 +2,7 @@
 
 #include "AnnotationJson.h"
 #include "AnnotationPanel.h"
+#include "AiInstanceDialog.h"
 #include "FrameRenderer.h"
 #include "TcpImageWindow.h"
 #include "VideoExporter.h"
@@ -50,6 +51,7 @@
 #include <QPushButton>
 #include <QPixmap>
 #include <QRectF>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QScrollArea>
@@ -290,6 +292,46 @@ bool copyFileIfNeeded(const QString& source, const QString& destination, QString
         return false;
     }
     return true;
+}
+
+bool writeTextFile(const QString& destination, const QString& content, QString* errorMessage)
+{
+    QSaveFile file(destination);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("无法写入文件：%1").arg(destination);
+        }
+        return false;
+    }
+
+    file.write(content.toUtf8());
+    if (!file.commit())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("保存文件失败：%1").arg(destination);
+        }
+        return false;
+    }
+    return true;
+}
+
+QString normalizedSourceForStaticCheck(const QString& source)
+{
+    QString normalized;
+    normalized.reserve(source.size());
+    for (const QChar ch : source)
+    {
+        if (!ch.isSpace())
+        {
+            normalized.append(ch.toLower());
+        }
+    }
+    normalized.replace(QStringLiteral("(float)"), QString());
+    normalized.replace(QStringLiteral("(double)"), QString());
+    return normalized;
 }
 
 bool seedAlgorithmFolder(const QString& rootDir,
@@ -922,13 +964,11 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowIcon(QIcon(QStringLiteral(":/img/logo.png")));
     buildUi();
     buildMenus();
-    QString instanceError;
-    if (!ensureDefaultInstance(&instanceError))
-    {
-        statusBar()->showMessage(instanceError, 5000);
-    }
+    refreshInstanceList();
+    updateSplitLayout();
+    updateAnnotationList();
     setWindowTitle(QStringLiteral("BeaconImageAnalyzer"));
-    setMinimumSize(1120, 680);
+    setMinimumSize(900, 620);
     resize(1320, 780);
 
     m_playTimer.setInterval(playbackIntervalMs());
@@ -955,8 +995,7 @@ AnalyzerInstance* MainWindow::currentInstance()
         m_currentInstanceId = m_instances.first()->id;
         return m_instances.first();
     }
-    ensureDefaultInstance();
-    return m_instances.isEmpty() ? nullptr : m_instances.first();
+    return nullptr;
 }
 
 const AnalyzerInstance* MainWindow::currentInstance() const
@@ -1049,6 +1088,20 @@ bool MainWindow::ensureDefaultInstance(QString* errorMessage)
         return false;
     }
     return createInstance(rootDir, algorithmPath, QStringLiteral("默认实例"), true, errorMessage) != nullptr;
+}
+
+AnalyzerInstance* MainWindow::requireCurrentInstance(const QString& actionName)
+{
+    AnalyzerInstance* instance = currentInstance();
+    if (instance != nullptr)
+    {
+        return instance;
+    }
+
+    QMessageBox::information(this,
+                             actionName,
+                             QStringLiteral("当前没有实例，请先加载或添加实例。"));
+    return nullptr;
 }
 
 int MainWindow::slotForInstance(int instanceId) const
@@ -1170,6 +1223,13 @@ void MainWindow::refreshInstanceList()
         }
         m_instanceList->addItem(item);
     }
+
+    if (m_instances.isEmpty())
+    {
+        auto* item = new QListWidgetItem(QStringLiteral("暂无实例"));
+        item->setFlags(Qt::NoItemFlags);
+        m_instanceList->addItem(item);
+    }
 }
 
 void MainWindow::updateCurrentVideoWidget()
@@ -1220,6 +1280,12 @@ void MainWindow::updateSplitLayout()
         for (int i = 0; i < m_videoWidgets.size(); ++i)
         {
             m_videoWidgets[i]->setVisible(i == slot);
+            if (visibleSlots.isEmpty())
+            {
+                m_videoWidgets[i]->setImage(QImage());
+                m_videoWidgets[i]->setPixelSourceImage(QImage());
+                m_videoWidgets[i]->setText(QStringLiteral("暂无实例"));
+            }
         }
         m_videoGrid->addWidget(m_videoWidgets[slot], 0, 0, 2, 2);
     }
@@ -1785,7 +1851,8 @@ void MainWindow::buildUi()
 
     auto* openRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("打开 AVI"));
     auto* tcpRailButton = makeRailButton(rail, QStyle::SP_ComputerIcon, QStringLiteral("TCP 接收"));
-    auto* newInstanceRailButton = makeRailButton(rail, QStyle::SP_FileDialogNewFolder, QStringLiteral("新建实例"));
+    auto* loadInstanceRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("加载实例"));
+    auto* addInstanceRailButton = makeRailButton(rail, QStyle::SP_FileDialogNewFolder, QStringLiteral("添加实例"));
     auto* saveRailButton = makeRailButton(rail, QStyle::SP_DialogSaveButton, QStringLiteral("保存标注"));
     auto* loadRailButton = makeRailButton(rail, QStyle::SP_FileDialogContentsView, QStringLiteral("读取标注"));
     auto* exportAviRailButton = makeRailButton(rail, QStyle::SP_DialogApplyButton, QStringLiteral("导出标注 AVI"));
@@ -1793,7 +1860,8 @@ void MainWindow::buildUi()
     auto* exitRailButton = makeRailButton(rail, QStyle::SP_DialogCloseButton, QStringLiteral("退出"));
     railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(tcpRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(newInstanceRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(loadInstanceRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(addInstanceRailButton, 0, Qt::AlignHCenter);
     railLayout->addSpacing(10);
     railLayout->addWidget(saveRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(loadRailButton, 0, Qt::AlignHCenter);
@@ -1848,9 +1916,13 @@ void MainWindow::buildUi()
     m_instanceList = new QListWidget(videoCard);
     m_instanceList->setMaximumHeight(78);
     m_instanceList->setSelectionMode(QAbstractItemView::SingleSelection);
-    auto* newInstanceButton = new QPushButton(QStringLiteral("新建实例"), videoCard);
+    auto* loadInstanceButton = new QPushButton(QStringLiteral("加载实例"), videoCard);
+    auto* addInstanceButton = new QPushButton(QStringLiteral("添加实例"), videoCard);
+    auto* deleteInstanceButton = new QPushButton(QStringLiteral("删除实例"), videoCard);
     instanceRow->addWidget(m_instanceList, 1);
-    instanceRow->addWidget(newInstanceButton);
+    instanceRow->addWidget(loadInstanceButton);
+    instanceRow->addWidget(addInstanceButton);
+    instanceRow->addWidget(deleteInstanceButton);
     videoLayout->addLayout(instanceRow);
 
     auto* gridHost = new QWidget(videoCard);
@@ -1892,12 +1964,12 @@ void MainWindow::buildUi()
     rightScroll->setObjectName(QStringLiteral("RightScroll"));
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setMinimumWidth(500);
-    rightScroll->setMaximumWidth(780);
+    rightScroll->setMinimumWidth(360);
+    rightScroll->setMaximumWidth(720);
 
     auto* rightPanel = new QWidget(rightScroll);
     rightPanel->setObjectName(QStringLiteral("RightPanel"));
-    rightPanel->setMinimumWidth(480);
+    rightPanel->setMinimumWidth(340);
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(12);
@@ -1938,14 +2010,16 @@ void MainWindow::buildUi()
     rightScroll->setWidget(rightPanel);
     splitter->addWidget(workspace);
     splitter->addWidget(rightScroll);
-    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(0, 4);
     splitter->setStretchFactor(1, 2);
+    splitter->setCollapsible(0, false);
+    splitter->setCollapsible(1, true);
 
     auto* controlsFrame = new QFrame(workspace);
     controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
-    controlsFrame->setMinimumHeight(148);
-    controlsFrame->setMaximumHeight(178);
-    controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    controlsFrame->setMinimumHeight(156);
+    controlsFrame->setMaximumHeight(220);
+    controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto* controls = new QVBoxLayout(controlsFrame);
     controls->setContentsMargins(14, 12, 14, 12);
     controls->setSpacing(10);
@@ -1965,7 +2039,7 @@ void MainWindow::buildUi()
 
     m_slider = new QSlider(Qt::Horizontal, controlsFrame);
     m_slider->setRange(0, 0);
-    m_slider->setMinimumWidth(220);
+    m_slider->setMinimumWidth(120);
     m_frameSpin = new QSpinBox(controlsFrame);
     m_frameSpin->setRange(0, 0);
     m_frameSpin->setFixedWidth(84);
@@ -2006,21 +2080,30 @@ void MainWindow::buildUi()
     auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
     timeLabel->setObjectName(QStringLiteral("SoftLabel"));
 
-    playbackRow->addWidget(m_playPauseButton);
-    playbackRow->addWidget(previousButton);
-    playbackRow->addWidget(nextButton);
-    playbackRow->addSpacing(10);
-    playbackRow->addWidget(viewLabel);
-    playbackRow->addWidget(m_viewModeCombo);
-    playbackRow->addWidget(speedLabel);
-    playbackRow->addWidget(m_speedCombo);
-    playbackRow->addStretch(1);
-    playbackRow->addWidget(frameLabel);
-    playbackRow->addWidget(m_frameSpin);
-    playbackRow->addWidget(jumpFrameButton);
-    playbackRow->addWidget(timeLabel);
-    playbackRow->addWidget(m_timeSpin);
-    playbackRow->addWidget(jumpTimeButton);
+    auto* transportRow = new QHBoxLayout;
+    transportRow->setSpacing(8);
+    transportRow->addWidget(m_playPauseButton);
+    transportRow->addWidget(previousButton);
+    transportRow->addWidget(nextButton);
+    transportRow->addSpacing(10);
+    transportRow->addWidget(viewLabel);
+    transportRow->addWidget(m_viewModeCombo);
+    transportRow->addWidget(speedLabel);
+    transportRow->addWidget(m_speedCombo);
+    transportRow->addStretch(1);
+
+    auto* jumpRow = new QHBoxLayout;
+    jumpRow->setSpacing(8);
+    jumpRow->addWidget(frameLabel);
+    jumpRow->addWidget(m_frameSpin);
+    jumpRow->addWidget(jumpFrameButton);
+    jumpRow->addWidget(timeLabel);
+    jumpRow->addWidget(m_timeSpin);
+    jumpRow->addWidget(jumpTimeButton);
+    jumpRow->addStretch(1);
+
+    playbackRow->addLayout(transportRow, 1);
+    playbackRow->addLayout(jumpRow, 1);
     auto* autoPauseRow = new QHBoxLayout;
     autoPauseRow->setSpacing(8);
     autoPauseRow->addWidget(m_autoPauseEnableCheck);
@@ -2029,17 +2112,20 @@ void MainWindow::buildUi()
     autoPauseRow->addWidget(m_autoPauseCountCheck);
     autoPauseRow->addStretch(1);
     controls->addWidget(controlsTitle);
+    controls->addWidget(m_slider);
     controls->addLayout(playbackRow);
     controls->addLayout(autoPauseRow);
-    controls->addWidget(m_slider);
     workspaceLayout->addWidget(controlsFrame, 0);
 
     setCentralWidget(central);
 
     connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
     connect(tcpRailButton, &QToolButton::clicked, this, &MainWindow::configureTcpReceiver);
-    connect(newInstanceRailButton, &QToolButton::clicked, this, &MainWindow::newInstance);
-    connect(newInstanceButton, &QPushButton::clicked, this, &MainWindow::newInstance);
+    connect(loadInstanceRailButton, &QToolButton::clicked, this, &MainWindow::loadInstance);
+    connect(addInstanceRailButton, &QToolButton::clicked, this, &MainWindow::addInstance);
+    connect(loadInstanceButton, &QPushButton::clicked, this, &MainWindow::loadInstance);
+    connect(addInstanceButton, &QPushButton::clicked, this, &MainWindow::addInstance);
+    connect(deleteInstanceButton, &QPushButton::clicked, this, &MainWindow::deleteCurrentInstance);
     connect(saveRailButton, &QToolButton::clicked, this, &MainWindow::saveAnnotation);
     connect(loadRailButton, &QToolButton::clicked, this, &MainWindow::loadAnnotation);
     connect(exportAviRailButton, &QToolButton::clicked, this, &MainWindow::exportMarkedAvi);
@@ -2120,7 +2206,8 @@ void MainWindow::buildUi()
 void MainWindow::buildMenus()
 {
     auto* fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
-    fileMenu->addAction(QStringLiteral("新建实例"), this, &MainWindow::newInstance);
+    fileMenu->addAction(QStringLiteral("加载实例"), this, &MainWindow::loadInstance);
+    fileMenu->addAction(QStringLiteral("添加实例"), this, &MainWindow::addInstance);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("打开视频"), this, &MainWindow::openVideo);
     fileMenu->addAction(QStringLiteral("新增 TCP 监视窗口"), this, &MainWindow::configureTcpReceiver);
@@ -2155,7 +2242,7 @@ void MainWindow::buildMenus()
     setStyleSheet(djiStyleSheet());
 }
 
-void MainWindow::newInstance()
+void MainWindow::loadInstance()
 {
     const QString rootDir = QFileDialog::getExistingDirectory(this,
                                                               QStringLiteral("选择新实例文件夹"),
@@ -2192,6 +2279,132 @@ void MainWindow::newInstance()
         return;
     }
     selectInstance(instance->id);
+}
+
+void MainWindow::addInstance()
+{
+    AiInstanceDialog dialog(defaultInstancesRoot(), this);
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    const QString rootDir = dialog.rootDir();
+    const QString algorithmDirPath = QDir(rootDir).absoluteFilePath(QStringLiteral("algorithm"));
+    const QString algorithmPath = QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.c"));
+    const QString headerPath = QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.h"));
+
+    QString error;
+    if (!QDir().mkpath(algorithmDirPath))
+    {
+        QMessageBox::critical(this,
+                              QStringLiteral("添加实例失败"),
+                              QStringLiteral("无法创建实例算法目录：%1").arg(algorithmDirPath));
+        return;
+    }
+
+    if (QFileInfo::exists(algorithmPath))
+    {
+        const int reply = QMessageBox::question(this,
+                                                QStringLiteral("覆盖实例代码"),
+                                                QStringLiteral("目录中已经存在 beacon_image.c，是否覆盖？"),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+        if (reply != QMessageBox::Yes)
+        {
+            return;
+        }
+    }
+
+    const QString source = dialog.generatedSource();
+    const bool hasProcess = source.contains(QStringLiteral("beacon_image_process"));
+    const bool hasHeader = source.contains(QStringLiteral("#include \"beacon_image.h\""));
+    const QString normalizedSource = normalizedSourceForStaticCheck(source);
+    const bool hasCenterX = normalizedSource.contains(QStringLiteral("beacon_image_w*0.5f-")) ||
+                            normalizedSource.contains(QStringLiteral("94.0f-"));
+    const bool hasCenterY = normalizedSource.contains(QStringLiteral("-beacon_image_h*0.5f")) ||
+                            normalizedSource.contains(QStringLiteral("-60.0f"));
+    if (!hasProcess || !hasHeader || !hasCenterX || !hasCenterY)
+    {
+        QMessageBox::critical(this,
+                              QStringLiteral("AI 自检未通过"),
+                              QStringLiteral("生成代码必须包含 beacon_image.h、beacon_image_process，并明确执行图像像素坐标到图像中心坐标的转换。"));
+        return;
+    }
+
+    if (!writeTextFile(headerPath, dialog.generatedHeader(), &error) ||
+        !writeTextFile(algorithmPath, source, &error) ||
+        !copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image.h")),
+                          QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.h")),
+                          &error) ||
+        !copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image_config.h")),
+                          QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image_config.h")),
+                          &error))
+    {
+        QMessageBox::critical(this, QStringLiteral("添加实例失败"), error);
+        return;
+    }
+
+    AnalyzerInstance* instance = createInstance(rootDir,
+                                                algorithmPath,
+                                                dialog.instanceName(),
+                                                true,
+                                                &error);
+    if (instance == nullptr)
+    {
+        QMessageBox::critical(this, QStringLiteral("添加实例失败"), error);
+        return;
+    }
+    selectInstance(instance->id);
+    statusBar()->showMessage(QStringLiteral("AI 实例已生成并加载"), 3000);
+}
+
+void MainWindow::deleteCurrentInstance()
+{
+    AnalyzerInstance* instance = currentInstance();
+    if (instance == nullptr)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("删除实例"),
+                                 QStringLiteral("当前没有可删除的实例。"));
+        return;
+    }
+
+    const int reply = QMessageBox::question(this,
+                                            QStringLiteral("删除实例"),
+                                            QStringLiteral("确定从当前会话移除实例“%1”吗？\n磁盘上的实例文件夹不会被删除。")
+                                                .arg(instance->name),
+                                            QMessageBox::Yes | QMessageBox::No,
+                                            QMessageBox::No);
+    if (reply != QMessageBox::Yes)
+    {
+        return;
+    }
+
+    const int removedId = instance->id;
+    saveProject();
+    m_instances.removeAll(instance);
+    delete instance;
+
+    for (int& instanceId : m_splitSlotInstanceIds)
+    {
+        if (instanceId == removedId)
+        {
+            instanceId = -1;
+        }
+    }
+
+    m_currentInstanceId = m_instances.isEmpty() ? -1 : m_instances.first()->id;
+    if (m_currentInstanceId >= 0)
+    {
+        setInstanceVisible(m_currentInstanceId, true);
+    }
+
+    refreshInstanceList();
+    updateAnnotationList();
+    updateSplitLayout();
+    refreshCurrentInstanceUi();
+    statusBar()->showMessage(QStringLiteral("实例已移除"), 3000);
 }
 
 void MainWindow::importAlgorithmFile()
@@ -2244,10 +2457,8 @@ void MainWindow::importAlgorithmFile()
 
 void MainWindow::openVideo()
 {
-    QString instanceError;
-    if (!ensureDefaultInstance(&instanceError))
+    if (requireCurrentInstance(QStringLiteral("打开视频")) == nullptr)
     {
-        QMessageBox::critical(this, QStringLiteral("打开失败"), instanceError);
         return;
     }
 
@@ -2266,13 +2477,6 @@ void MainWindow::openVideo()
 
 void MainWindow::configureTcpReceiver()
 {
-    QString instanceError;
-    if (!ensureDefaultInstance(&instanceError))
-    {
-        QMessageBox::critical(this, QStringLiteral("新增 TCP 监视窗口失败"), instanceError);
-        return;
-    }
-
     QVector<TcpInstanceOption> options;
     for (AnalyzerInstance* instance : m_instances)
     {
@@ -2354,6 +2558,10 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
 
 void MainWindow::saveAnnotation()
 {
+    if (requireCurrentInstance(QStringLiteral("保存标注")) == nullptr)
+    {
+        return;
+    }
     if (!m_reader.isOpen())
     {
         QMessageBox::warning(this, QStringLiteral("无法保存"), QStringLiteral("请先打开视频"));
@@ -2387,6 +2595,11 @@ void MainWindow::saveAnnotation()
 
 void MainWindow::loadAnnotation()
 {
+    if (requireCurrentInstance(QStringLiteral("读取标注")) == nullptr)
+    {
+        return;
+    }
+
     const QString path = QFileDialog::getOpenFileName(this,
                                                       QStringLiteral("读取标注"),
                                                       QString(),
@@ -2409,6 +2622,10 @@ void MainWindow::loadAnnotation()
 
 void MainWindow::exportMarkedAvi()
 {
+    if (requireCurrentInstance(QStringLiteral("导出标注 AVI")) == nullptr)
+    {
+        return;
+    }
     if (!m_reader.isOpen())
     {
         QMessageBox::warning(this, QStringLiteral("无法导出"), QStringLiteral("请先打开视频"));
@@ -2448,6 +2665,10 @@ void MainWindow::exportMarkedAvi()
 
 void MainWindow::exportCsv()
 {
+    if (requireCurrentInstance(QStringLiteral("导出 CSV")) == nullptr)
+    {
+        return;
+    }
     if (!m_reader.isOpen())
     {
         QMessageBox::warning(this, QStringLiteral("无法导出"), QStringLiteral("请先打开视频"));
@@ -2856,6 +3077,12 @@ void MainWindow::updateCurrentAnnotationInfo()
 {
     if (m_currentAnnotationsLabel == nullptr)
     {
+        return;
+    }
+    const AnalyzerInstance* instance = currentInstance();
+    if (instance == nullptr)
+    {
+        m_currentAnnotationsLabel->setText(QStringLiteral("当前帧标注：无实例"));
         return;
     }
 
@@ -3645,13 +3872,14 @@ void MainWindow::batchAddCorrectionsToFrames(const QVector<int>& correctionRows,
 
 void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
 {
-    if (!m_reader.isOpen() || points.isEmpty())
+    if (!m_reader.isOpen() || points.isEmpty() || currentInstance() == nullptr)
     {
         return;
     }
 
     m_annotationPanel->applyDrawnCorrectionShape(shapeType, points);
-    showFrame(m_currentFrame);
+    renderInstance(currentInstance());
+    updateCurrentAnnotationInfo();
 }
 
 void MainWindow::autoIdentifyCorrectionTargets()
@@ -3701,9 +3929,15 @@ void MainWindow::autoIdentifyCorrectionTargets()
 
 void MainWindow::openAlgorithmLocation()
 {
-    const QString algorithmPath = currentInstance()->algorithmPath.isEmpty()
+    AnalyzerInstance* instance = requireCurrentInstance(QStringLiteral("打开算法位置"));
+    if (instance == nullptr)
+    {
+        return;
+    }
+
+    const QString algorithmPath = instance->algorithmPath.isEmpty()
         ? defaultAlgorithmPath()
-        : currentInstance()->algorithmPath;
+        : instance->algorithmPath;
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(algorithmPath).absolutePath()));
 }
 
@@ -3719,7 +3953,15 @@ void MainWindow::jumpToRecordFrame(int frame)
 
 void MainWindow::updateAnnotationList()
 {
-    m_annotationPanel->setAnnotations(m_annotations.records(), m_annotations.corrections());
+    const AnalyzerInstance* instance = currentInstance();
+    if (instance == nullptr)
+    {
+        m_annotationPanel->setAnnotations({}, {});
+        updateCurrentAnnotationInfo();
+        return;
+    }
+
+    m_annotationPanel->setAnnotations(instance->annotations.records(), instance->annotations.corrections());
     updateCurrentAnnotationInfo();
 }
 
@@ -3776,6 +4018,11 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::restoreLastSession()
 {
+    if (m_instances.isEmpty())
+    {
+        return;
+    }
+
     QSettings settings(QStringLiteral("BeaconImageAnalyzer"), QStringLiteral("BeaconImageAnalyzer"));
     const QString projectPath = settings.value(QStringLiteral("last_project_path")).toString();
     if (projectPath.isEmpty())
@@ -3801,7 +4048,8 @@ void MainWindow::restoreLastSession()
 
 void MainWindow::saveProject()
 {
-    if (!m_reader.isOpen() || m_currentVideoPath.isEmpty())
+    AnalyzerInstance* instance = currentInstance();
+    if (instance == nullptr || !m_reader.isOpen() || m_currentVideoPath.isEmpty())
     {
         return;
     }
@@ -3836,8 +4084,8 @@ void MainWindow::saveProject()
     QJsonObject algorithm;
     algorithm.insert(QStringLiteral("name"), QStringLiteral("beacon_image_process"));
     algorithm.insert(QStringLiteral("version"), QStringLiteral("v1"));
-    algorithm.insert(QStringLiteral("source_path"), currentInstance()->algorithmPath);
-    algorithm.insert(QStringLiteral("instance_name"), currentInstance()->name);
+    algorithm.insert(QStringLiteral("source_path"), instance->algorithmPath);
+    algorithm.insert(QStringLiteral("instance_name"), instance->name);
     algorithm.insert(QStringLiteral("note"), QStringLiteral("simple threshold + connected components"));
     root.insert(QStringLiteral("algorithm"), algorithm);
 

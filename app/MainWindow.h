@@ -55,7 +55,9 @@ public:
     ~MainWindow() override;
 
 private slots:
-    void newInstance();
+    void loadInstance();
+    void addInstance();
+    void deleteCurrentInstance();
     void importAlgorithmFile();
     void openVideo();
     void configureTcpReceiver();
@@ -116,6 +118,7 @@ private:
                                      const QString& name,
                                      bool compileAlgorithm,
                                      QString* errorMessage);
+    AnalyzerInstance* requireCurrentInstance(const QString& actionName);
     bool ensureDefaultInstance(QString* errorMessage = nullptr);
     void selectInstance(int id);
     void refreshInstanceList();

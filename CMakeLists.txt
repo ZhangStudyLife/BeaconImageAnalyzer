@@ -32,6 +32,8 @@ add_executable(BeaconImageAnalyzer
     app/main.cpp
     app/MainWindow.h
     app/MainWindow.cpp
+    app/AiInstanceDialog.h
+    app/AiInstanceDialog.cpp
     app/TcpImageWindow.h
     app/TcpImageWindow.cpp
     app/VideoWidget.h
