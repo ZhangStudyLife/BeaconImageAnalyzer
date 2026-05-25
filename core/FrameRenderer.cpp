@@ -1,5 +1,7 @@
 #include "FrameRenderer.h"
 
+#include "BeaconResultUtils.h"
+
 #include <QFont>
 #include <QLineF>
 #include <QPainter>
@@ -126,6 +128,38 @@ QVector<QPointF> displayPointsForShape(const CorrectionShape& shape, int safeSca
     }
     return points;
 }
+
+void drawTargetCircle(QPainter& painter,
+                      const beacon_circle_t& circle,
+                      const QColor& circleColor,
+                      const QString& label,
+                      int safeScale)
+{
+    const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
+    const QPointF displayPoint(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
+    const qreal displayRadius = qMax(1.0, (double)circle.radius * safeScale);
+
+    QPen circlePen(circleColor);
+    circlePen.setWidth(qMax(1, safeScale / 2));
+    painter.setPen(circlePen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(displayPoint, displayRadius, displayRadius);
+    painter.drawLine(QPointF(displayPoint.x() - safeScale, displayPoint.y()),
+                     QPointF(displayPoint.x() + safeScale, displayPoint.y()));
+    painter.drawLine(QPointF(displayPoint.x(), displayPoint.y() - safeScale),
+                     QPointF(displayPoint.x(), displayPoint.y() + safeScale));
+
+    painter.setPen(QColor(255, 235, 80));
+    painter.drawText(QPointF(displayPoint.x() + 2 * safeScale,
+                             displayPoint.y() - 2 * safeScale),
+                     label);
+}
+
+QPointF displayPointForCircle(const beacon_circle_t& circle, int safeScale)
+{
+    const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
+    return QPointF(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
+}
 }
 
 QPointF FrameRenderer::algorithmToImagePoint(float x, float y)
@@ -159,39 +193,51 @@ QImage FrameRenderer::render(const QImage& grayImage,
     QPainter painter(&base);
     painter.setRenderHint(QPainter::Antialiasing, false);
 
-    QPen circlePen(QColor(0, 255, 80));
-    circlePen.setWidth(qMax(1, safeScale / 2));
-    painter.setPen(circlePen);
-    painter.setBrush(Qt::NoBrush);
-
     QFont font = painter.font();
     font.setPixelSize(safeScale == 1 ? 8 : 12);
     font.setBold(true);
     painter.setFont(font);
 
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    const bool useLegacyBeacons = BeaconResultUtils::usesLegacyBeacons(result);
+    const beacon_circle_t* beacons = useLegacyBeacons ? result.circles : result.beacons;
+    const int beaconCount = useLegacyBeacons
+        ? BeaconResultUtils::boundedCount(result.count, BEACON_MAX_CIRCLE_COUNT)
+        : BeaconResultUtils::boundedCount(result.beacon_count, BEACON_MAX_BEACON_COUNT);
+    for (int i = 0; i < beaconCount; ++i)
     {
-        const beacon_circle_t& circle = result.circles[i];
+        const beacon_circle_t& circle = beacons[i];
         if (circle.valid == 0)
         {
             continue;
         }
 
-        const QPointF imagePoint = algorithmToImagePoint(circle.x, circle.y);
-        const QPointF displayPoint(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
-        const qreal displayRadius = qMax(1.0, (double)circle.radius * safeScale);
+        drawTargetCircle(painter, circle, QColor(0, 255, 80), QStringLiteral("B%1").arg(i), safeScale);
+    }
 
-        painter.setPen(circlePen);
-        painter.drawEllipse(displayPoint, displayRadius, displayRadius);
-        painter.drawLine(QPointF(displayPoint.x() - safeScale, displayPoint.y()),
-                         QPointF(displayPoint.x() + safeScale, displayPoint.y()));
-        painter.drawLine(QPointF(displayPoint.x(), displayPoint.y() - safeScale),
-                         QPointF(displayPoint.x(), displayPoint.y() + safeScale));
+    const int carLampCount = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
+    if (carLampCount >= 2 &&
+        result.car_lamps[0].valid != 0 &&
+        result.car_lamps[1].valid != 0)
+    {
+        QPen linkPen(QColor(255, 215, 0));
+        linkPen.setWidth(qMax(1, safeScale / 2));
+        painter.setPen(linkPen);
+        painter.drawLine(displayPointForCircle(result.car_lamps[0], safeScale),
+                         displayPointForCircle(result.car_lamps[1], safeScale));
+    }
+    for (int i = 0; i < carLampCount; ++i)
+    {
+        const beacon_circle_t& lamp = result.car_lamps[i];
+        if (lamp.valid == 0)
+        {
+            continue;
+        }
 
-        painter.setPen(QColor(255, 235, 80));
-        painter.drawText(QPointF(displayPoint.x() + 2 * safeScale,
-                                 displayPoint.y() - 2 * safeScale),
-                         QStringLiteral("#%1").arg(i));
+        drawTargetCircle(painter,
+                         lamp,
+                         QColor(255, 95, 45),
+                         QStringLiteral("CAR %1").arg(i),
+                         safeScale);
     }
 
     QPen correctionPen;

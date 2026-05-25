@@ -8,6 +8,8 @@ extern "C" {
 #define BEACON_IMAGE_W 188
 #define BEACON_IMAGE_H 120
 #define BEACON_MAX_CIRCLE_COUNT 8
+#define BEACON_MAX_BEACON_COUNT 8
+#define BEACON_MAX_CAR_LAMP_COUNT 2
 
 typedef struct
 {
@@ -21,6 +23,10 @@ typedef struct
 {
     beacon_circle_t circles[BEACON_MAX_CIRCLE_COUNT];
     unsigned char count;
+    beacon_circle_t beacons[BEACON_MAX_BEACON_COUNT];
+    unsigned char beacon_count;
+    beacon_circle_t car_lamps[BEACON_MAX_CAR_LAMP_COUNT];
+    unsigned char car_lamp_count;
 } beacon_result_t;
 
 void beacon_image_init(void);

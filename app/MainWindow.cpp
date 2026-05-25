@@ -3,6 +3,7 @@
 #include "AnnotationJson.h"
 #include "AnnotationPanel.h"
 #include "AiInstanceDialog.h"
+#include "BeaconResultUtils.h"
 #include "FrameRenderer.h"
 #include "TcpImageWindow.h"
 #include "VideoExporter.h"
@@ -220,15 +221,7 @@ CorrectionShape batchCorrectionConfigOnly(const CorrectionShape& correction)
 
 int validCircleCount(const beacon_result_t& result)
 {
-    int count = 0;
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        if (result.circles[i].valid != 0)
-        {
-            ++count;
-        }
-    }
-    return count;
+    return BeaconResultUtils::totalTargetCount(result);
 }
 
 double circleImageDistance(const beacon_circle_t& previous, const beacon_circle_t& current)
@@ -1759,11 +1752,13 @@ void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QStr
                                   .arg(m_liveFrame.height())
                                   .arg(m_currentFrame));
     updateFrameInfo(result);
-    m_frameInfoLabel->setText(QStringLiteral("TCP 实时帧: %1\n本地端口: %2\n来源: %3\n识别圆总数: %4")
+    m_frameInfoLabel->setText(QStringLiteral("TCP 实时帧: %1\n本地端口: %2\n来源: %3\n信标: %4  车灯: %5  总目标: %6")
                                   .arg(m_currentFrame)
                                   .arg(m_liveLocalPort)
                                   .arg(m_livePeerName)
-                                  .arg(result.count));
+                                  .arg(BeaconResultUtils::beaconCount(result))
+                                  .arg(BeaconResultUtils::carLampCount(result))
+                                  .arg(BeaconResultUtils::totalTargetCount(result)));
     updateTcpStatusLabel(QStringLiteral("最近收到图像：%1").arg(peerName));
 }
 
@@ -2319,12 +2314,22 @@ void MainWindow::addInstance()
     const QString source = dialog.generatedSource();
     const bool hasProcess = source.contains(QStringLiteral("beacon_image_process"));
     const bool hasHeader = source.contains(QStringLiteral("#include \"beacon_image.h\""));
+    const QString generatedHeader = dialog.generatedHeader();
+    const bool hasTypedResultChannels =
+        generatedHeader.contains(QStringLiteral("BEACON_MAX_BEACON_COUNT")) &&
+        generatedHeader.contains(QStringLiteral("BEACON_MAX_CAR_LAMP_COUNT")) &&
+        generatedHeader.contains(QStringLiteral("beacons")) &&
+        generatedHeader.contains(QStringLiteral("beacon_count")) &&
+        generatedHeader.contains(QStringLiteral("car_lamps")) &&
+        generatedHeader.contains(QStringLiteral("car_lamp_count")) &&
+        source.contains(QStringLiteral("beacon_count")) &&
+        source.contains(QStringLiteral("beacons"));
     const QString normalizedSource = normalizedSourceForStaticCheck(source);
     const bool hasCenterX = normalizedSource.contains(QStringLiteral("beacon_image_w*0.5f-")) ||
                             normalizedSource.contains(QStringLiteral("94.0f-"));
     const bool hasCenterY = normalizedSource.contains(QStringLiteral("-beacon_image_h*0.5f")) ||
                             normalizedSource.contains(QStringLiteral("-60.0f"));
-    if (!hasProcess || !hasHeader || !hasCenterX || !hasCenterY)
+    if (!hasProcess || !hasHeader || !hasTypedResultChannels || !hasCenterX || !hasCenterY)
     {
         QMessageBox::critical(this,
                               QStringLiteral("AI 自检未通过"),
@@ -2332,7 +2337,7 @@ void MainWindow::addInstance()
         return;
     }
 
-    if (!writeTextFile(headerPath, dialog.generatedHeader(), &error) ||
+    if (!writeTextFile(headerPath, generatedHeader, &error) ||
         !writeTextFile(algorithmPath, source, &error) ||
         !copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image.h")),
                           QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.h")),
@@ -2962,7 +2967,7 @@ bool MainWindow::autoPauseTriggered(int previousFrame,
             if (countEnabled && validCircleCount(previous) != validCircleCount(current))
             {
                 triggered = true;
-                triggerReason = QStringLiteral("自动暂停：%1 相邻帧识别圆数量变化").arg(instance->name);
+                triggerReason = QStringLiteral("自动暂停：%1 相邻帧目标数量变化").arg(instance->name);
                 break;
             }
 
@@ -3016,18 +3021,21 @@ bool MainWindow::autoPauseTriggered(int previousFrame,
 
 void MainWindow::updateFrameInfo(const beacon_result_t& result)
 {
-    int validCircleCount = 0;
     QString text;
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    const bool useLegacyBeacons = BeaconResultUtils::usesLegacyBeacons(result);
+    const beacon_circle_t* beacons = useLegacyBeacons ? result.circles : result.beacons;
+    const int beaconLimit = useLegacyBeacons
+        ? BeaconResultUtils::boundedCount(result.count, BEACON_MAX_CIRCLE_COUNT)
+        : BeaconResultUtils::boundedCount(result.beacon_count, BEACON_MAX_BEACON_COUNT);
+    for (int i = 0; i < beaconLimit; ++i)
     {
-        const beacon_circle_t& circle = result.circles[i];
+        const beacon_circle_t& circle = beacons[i];
         if (circle.valid == 0)
         {
             continue;
         }
-        ++validCircleCount;
         const double area = 3.14159265358979323846 * circle.radius * circle.radius;
-        text += QStringLiteral("#%1  X=%2  Y=%3  R=%4  Area=%5\n")
+        text += QStringLiteral("信标 #%1  X=%2  Y=%3  R=%4  Area=%5\n")
                     .arg(i)
                     .arg(circle.x, 0, 'f', 2)
                     .arg(circle.y, 0, 'f', 2)
@@ -3035,20 +3043,42 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
                     .arg(area, 0, 'f', 2);
     }
 
-    m_frameInfoLabel->setText(QStringLiteral("当前帧: %1 / %2\n播放时间: %3 s / %4 s\n识别圆总数: %5")
+    const int carLampLimit = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
+    for (int i = 0; i < carLampLimit; ++i)
+    {
+        const beacon_circle_t& circle = result.car_lamps[i];
+        if (circle.valid == 0)
+        {
+            continue;
+        }
+        const double area = 3.14159265358979323846 * circle.radius * circle.radius;
+        text += QStringLiteral("车灯 #%1  X=%2  Y=%3  R=%4  Area=%5\n")
+                    .arg(i)
+                    .arg(circle.x, 0, 'f', 2)
+                    .arg(circle.y, 0, 'f', 2)
+                    .arg(circle.radius, 0, 'f', 2)
+                    .arg(area, 0, 'f', 2);
+    }
+
+    m_frameInfoLabel->setText(QStringLiteral("当前帧: %1 / %2\n播放时间: %3 s / %4 s\n信标: %5  车灯: %6  总目标: %7")
                                   .arg(m_currentFrame)
                                   .arg(qMax(0, m_reader.frameCount() - 1))
                                   .arg(frameTime(m_currentFrame), 0, 'f', 3)
                                   .arg(frameTime(qMax(0, m_reader.frameCount() - 1)), 0, 'f', 3)
-                                  .arg(validCircleCount));
+                                  .arg(BeaconResultUtils::beaconCount(result))
+                                  .arg(BeaconResultUtils::carLampCount(result))
+                                  .arg(BeaconResultUtils::totalTargetCount(result)));
 
     if (text.isEmpty())
     {
-        text = QStringLiteral("圆总数: 0\n无有效圆");
+        text = QStringLiteral("总目标: 0\n无有效目标");
     }
     else
     {
-        text.prepend(QStringLiteral("圆总数: %1\n").arg(validCircleCount));
+        text.prepend(QStringLiteral("信标: %1  车灯: %2  总目标: %3\n")
+                         .arg(BeaconResultUtils::beaconCount(result))
+                         .arg(BeaconResultUtils::carLampCount(result))
+                         .arg(BeaconResultUtils::totalTargetCount(result)));
     }
     m_resultText->setPlainText(text);
     updateCurrentAnnotationInfo();

@@ -40,6 +40,14 @@ static void clear_result(beacon_result_t *result)
     {
         result->circles[i].valid = 0;
     }
+    for (i = 0; i < BEACON_MAX_BEACON_COUNT; ++i)
+    {
+        result->beacons[i].valid = 0;
+    }
+    for (i = 0; i < BEACON_MAX_CAR_LAMP_COUNT; ++i)
+    {
+        result->car_lamps[i].valid = 0;
+    }
 }
 
 static unsigned char compute_threshold(const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W])
@@ -263,6 +271,8 @@ void beacon_image_process(
     }
 
     result->count = (unsigned char)component_count;
+    result->beacon_count = (unsigned char)component_count;
+    result->car_lamp_count = 0;
     for (i = 0; i < component_count; ++i)
     {
         const beacon_component_t *component = &g_components[i];
@@ -274,5 +284,6 @@ void beacon_image_process(
         result->circles[i].y = center_y - (float)BEACON_IMAGE_H * 0.5f;
         result->circles[i].radius = radius;
         result->circles[i].valid = 1;
+        result->beacons[i] = result->circles[i];
     }
 }

@@ -44,6 +44,7 @@ add_executable(BeaconImageAnalyzer
     core/VideoReader.cpp
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
+    core/BeaconResultUtils.h
     core/FrameRenderer.h
     core/FrameRenderer.cpp
     core/SeekfreeImageFrameParser.h

@@ -416,6 +416,20 @@ QString AiInstanceDialog::systemPrompt() const
         "否则上位机显示框一定会偏移。\n\n"
         "生成前请自检：JSON 合法性、两个文件都存在、函数名、数组维度、count 上限、valid 字段、"
         "中心坐标转换、用户参数未被修改、空指针保护、无需外部依赖。最终仍然只输出 JSON。");
+    prompt += QStringLiteral(
+        "\n\n新增结果协议要求：\n"
+        "1. beacon_image.h 必须在 beacon_result_t 中保留 legacy 字段 circles[BEACON_MAX_CIRCLE_COUNT] 和 count，"
+        "并追加 beacons[BEACON_MAX_BEACON_COUNT]、beacon_count、car_lamps[BEACON_MAX_CAR_LAMP_COUNT]、car_lamp_count。\n"
+        "2. 必须定义 BEACON_MAX_BEACON_COUNT=8 和 BEACON_MAX_CAR_LAMP_COUNT=2。字段顺序必须先 legacy circles/count，"
+        "再追加 beacons/beacon_count/car_lamps/car_lamp_count，不能重排旧字段。\n"
+        "3. 信标和车灯是并列结果：信标写入 result->beacons[] / result->beacon_count；车灯写入 "
+        "result->car_lamps[] / result->car_lamp_count。禁止把车灯混入 beacons[]。\n"
+        "4. 为兼容旧显示，信标结果也要同步写入 result->circles[] / result->count；车灯不要写入 legacy circles[]。\n"
+        "5. v1 只支持一辆车的一对车灯，所以 car_lamp_count 最大为 2；没有车灯时必须明确保持为 0。\n"
+        "6. 坐标转换同样适用于 beacons[]、car_lamps[] 和 legacy circles[]："
+        "result_x = BEACON_IMAGE_W * 0.5f - pixel_x; result_y = pixel_y - BEACON_IMAGE_H * 0.5f。\n"
+        "7. 生成前自检是否填充 beacon_count 或兼容 legacy count，识别车灯时是否填充 car_lamps[] / car_lamp_count，"
+        "是否保持中心坐标转换，是否没有擅自修改用户算法参数。\n");
     prompt += learnedFailurePrompt();
     return prompt;
 }
@@ -604,6 +618,19 @@ bool AiInstanceDialog::validateGeneratedFiles(const GeneratedFiles& files, QStri
         }
         return false;
     }
+    if (!header.contains(QStringLiteral("BEACON_MAX_BEACON_COUNT")) ||
+        !header.contains(QStringLiteral("BEACON_MAX_CAR_LAMP_COUNT")) ||
+        !header.contains(QStringLiteral("beacons")) ||
+        !header.contains(QStringLiteral("beacon_count")) ||
+        !header.contains(QStringLiteral("car_lamps")) ||
+        !header.contains(QStringLiteral("car_lamp_count")))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("beacon_image.h 必须支持并列结果 beacons[]/beacon_count 和 car_lamps[]/car_lamp_count。");
+        }
+        return false;
+    }
     if (!normalizedSource.contains(QStringLiteral("memset(result,0")) &&
         !normalizedSource.contains(QStringLiteral("result->count=0")))
     {
@@ -618,6 +645,26 @@ bool AiInstanceDialog::validateGeneratedFiles(const GeneratedFiles& files, QStri
         if (errorMessage != nullptr)
         {
             *errorMessage = QStringLiteral("有效目标必须设置 valid=1。");
+        }
+        return false;
+    }
+
+    if (!normalizedSource.contains(QStringLiteral("beacon_count")) ||
+        !normalizedSource.contains(QStringLiteral("beacons[")))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("beacon_image_process 必须填充 beacons[]/beacon_count，不能只写 legacy circles/count。");
+        }
+        return false;
+    }
+    if (source.contains(QStringLiteral("car"), Qt::CaseInsensitive) &&
+        (!normalizedSource.contains(QStringLiteral("car_lamps[")) ||
+         !normalizedSource.contains(QStringLiteral("car_lamp_count"))))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("检测到车灯相关逻辑时，必须填充 car_lamps[]/car_lamp_count。");
         }
         return false;
     }

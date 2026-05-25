@@ -1,5 +1,6 @@
 #include "TcpImageWindow.h"
 
+#include "BeaconResultUtils.h"
 #include "FrameRenderer.h"
 #include "VideoWidget.h"
 
@@ -472,15 +473,6 @@ QString TcpImageWindow::defaultSavePath(const QString& suffix) const
 
 void TcpImageWindow::updateStatus(const beacon_result_t& result)
 {
-    int validCount = 0;
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        if (result.circles[i].valid != 0)
-        {
-            ++validCount;
-        }
-    }
-
     const QString listenText = m_server->isListening()
         ? QStringLiteral("监听 %1:%2").arg(m_server->serverAddress().toString()).arg(m_server->serverPort())
         : QStringLiteral("未监听");
@@ -491,12 +483,14 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
         ? QStringLiteral("实例：%1").arg(m_instanceCombo->currentText())
         : QStringLiteral("实例：未启用");
     const QString recordText = m_recording ? QStringLiteral("录像中") : QStringLiteral("未录像");
-    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | 帧 %4 | 有效目标 %5 | %6")
+    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | 帧 %4 | 信标 %5 | 车灯 %6 | 总目标 %7 | %8")
                                .arg(listenText)
                                .arg(peerText)
                                .arg(instanceText)
                                .arg(qMax(0, m_frameIndex))
-                               .arg(validCount)
+                               .arg(BeaconResultUtils::beaconCount(result))
+                               .arg(BeaconResultUtils::carLampCount(result))
+                               .arg(BeaconResultUtils::totalTargetCount(result))
                                .arg(recordText));
 }
 
