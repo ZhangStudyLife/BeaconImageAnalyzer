@@ -175,7 +175,17 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     m_initFn = reinterpret_cast<InitFn>(m_library.resolve("beacon_image_init"));
     m_processFn = reinterpret_cast<ProcessFn>(m_library.resolve("beacon_image_process"));
     m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
-    if (m_processFn == nullptr)
+    m_imageUpdateFn = reinterpret_cast<ImageUpdateFn>(m_library.resolve("image_update"));
+    m_imageGetCirclesFn = reinterpret_cast<ImageGetCirclesFn>(m_library.resolve("image_get_circles"));
+    m_dynamicFrameBuffer = reinterpret_cast<unsigned char*>(m_library.resolve("mt9v03x_image"));
+    m_dynamicFinishFlag = reinterpret_cast<unsigned char*>(m_library.resolve("mt9v03x_finish_flag"));
+    if (m_initFn == nullptr)
+    {
+        m_initFn = reinterpret_cast<InitFn>(m_library.resolve("image_init"));
+    }
+    if (m_processFn == nullptr &&
+        (m_imageUpdateFn == nullptr || m_imageGetCirclesFn == nullptr ||
+         m_dynamicFrameBuffer == nullptr || m_dynamicFinishFlag == nullptr))
     {
         if (errorMessage != nullptr)
         {
@@ -200,7 +210,7 @@ QString AlgorithmRunner::sourcePath() const
 
 bool AlgorithmRunner::usesDynamicLibrary() const
 {
-    return m_processFn != nullptr;
+    return m_processFn != nullptr || (m_imageUpdateFn != nullptr && m_imageGetCirclesFn != nullptr);
 }
 
 beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
@@ -217,6 +227,22 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
     if (m_processFn != nullptr)
     {
         m_processFn(image, &result);
+    }
+    else if (m_imageUpdateFn != nullptr && m_imageGetCirclesFn != nullptr &&
+             m_dynamicFrameBuffer != nullptr && m_dynamicFinishFlag != nullptr)
+    {
+        const beacon_circle_t* circles = nullptr;
+        const int imageSize = BEACON_IMAGE_H * BEACON_IMAGE_W;
+        memcpy(m_dynamicFrameBuffer, image[0], imageSize);
+        *m_dynamicFinishFlag = 1U;
+        m_imageUpdateFn();
+        result.count = m_imageGetCirclesFn(&circles);
+        if (circles != nullptr)
+        {
+            const int copyCount = qMin((int)result.count, BEACON_MAX_CIRCLE_COUNT);
+            memcpy(result.circles, circles, sizeof(beacon_circle_t) * copyCount);
+            result.count = (unsigned char)copyCount;
+        }
     }
     else
     {
