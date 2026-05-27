@@ -14,6 +14,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
 
 add_library(beacon_algorithm STATIC
     algorithm/beacon_image.c
+    algorithm/beacon_fusion.c
 )
 
 target_include_directories(beacon_algorithm PUBLIC
@@ -40,6 +41,8 @@ add_executable(BeaconImageAnalyzer
     core/VideoReader.cpp
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
+    core/FusionRunner.h
+    core/FusionRunner.cpp
     core/FrameRenderer.h
     core/FrameRenderer.cpp
     core/VideoExporter.h

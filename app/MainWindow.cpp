@@ -6,76 +6,53 @@
 #include "VideoExporter.h"
 #include "VideoWidget.h"
 
-#include <QAction>
-#include <QAbstractItemView>
 #include <QAbstractSpinBox>
+#include <QAction>
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QDesktopServices>
-#include <QDoubleSpinBox>
 #include <QDir>
-#include <QFile>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFont>
 #include <QFrame>
-#include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
-#include <QIcon>
-#include <QInputDialog>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
-#include <QLayout>
-#include <QLayoutItem>
-#include <QLineF>
+#include <QList>
 #include <QLineEdit>
-#include <QListWidget>
-#include <QListWidgetItem>
-#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPlainTextEdit>
 #include <QPolygonF>
 #include <QProgressDialog>
 #include <QPushButton>
-#include <QPixmap>
 #include <QRectF>
-#include <QResizeEvent>
-#include <QSettings>
-#include <QSignalBlocker>
 #include <QScrollArea>
-#include <QSlider>
+#include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QSlider>
 #include <QSpinBox>
-#include <QSplitter>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTextEdit>
-#include <QToolButton>
-#include <QUrl>
-#include <QVariant>
 #include <QVBoxLayout>
-
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
+#include <QLineF>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <functional>
-#include <limits>
 
 namespace
 {
+constexpr double Pi = 3.14159265358979323846;
+
 bool isEditingWidget(QWidget* widget)
 {
     while (widget != nullptr)
@@ -93,181 +70,6 @@ bool isEditingWidget(QWidget* widget)
     return false;
 }
 
-void applyHardShadow(QWidget* widget, const QColor& color, int xOffset, int yOffset)
-{
-    if (widget == nullptr)
-    {
-        return;
-    }
-
-    auto* shadow = new QGraphicsDropShadowEffect(widget);
-    shadow->setBlurRadius(0.0);
-    shadow->setOffset(xOffset, yOffset);
-    shadow->setColor(color);
-    widget->setGraphicsEffect(shadow);
-}
-
-void refreshStyle(QWidget* widget)
-{
-    if (widget == nullptr)
-    {
-        return;
-    }
-
-    widget->style()->unpolish(widget);
-    widget->style()->polish(widget);
-    widget->update();
-}
-
-void setStyleProperty(QWidget* widget, const char* name, const QString& value)
-{
-    if (widget == nullptr || widget->property(name).toString() == value)
-    {
-        return;
-    }
-
-    widget->setProperty(name, value);
-    refreshStyle(widget);
-}
-
-void setLayoutSpacingRecursive(QLayout* layout, int spacing)
-{
-    if (layout == nullptr)
-    {
-        return;
-    }
-
-    layout->setSpacing(spacing);
-    for (int i = 0; i < layout->count(); ++i)
-    {
-        setLayoutSpacingRecursive(layout->itemAt(i)->layout(), spacing);
-    }
-}
-
-QJsonArray pointsToJson(const QVector<QPointF>& points)
-{
-    QJsonArray array;
-    for (const QPointF& point : points)
-    {
-        QJsonObject object;
-        object.insert(QStringLiteral("x"), point.x());
-        object.insert(QStringLiteral("y"), point.y());
-        array.append(object);
-    }
-    return array;
-}
-
-QJsonArray stringListToJson(const QStringList& values)
-{
-    QJsonArray array;
-    for (const QString& value : values)
-    {
-        if (!value.trimmed().isEmpty())
-        {
-            array.append(value);
-        }
-    }
-    return array;
-}
-
-QJsonArray errorCirclesToJson(const QVector<ErrorCircle>& circles)
-{
-    QJsonArray array;
-    for (const ErrorCircle& circle : circles)
-    {
-        QJsonObject object;
-        object.insert(QStringLiteral("circle_index"), circle.circleIndex);
-        object.insert(QStringLiteral("expected_index"), circle.expectedIndex);
-        array.append(object);
-    }
-    return array;
-}
-
-bool typesRequireErrorSource(const QStringList& types)
-{
-    if (types.isEmpty())
-    {
-        return false;
-    }
-    for (const QString& type : types)
-    {
-        if (type != QStringLiteral("missed_detection"))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool isClosedCorrectionShape(const CorrectionShape& shape)
-{
-    return (shape.shapeType == QStringLiteral("circle") && shape.points.size() >= 2) ||
-           (shape.shapeType == QStringLiteral("rect") && shape.points.size() >= 2) ||
-           (shape.shapeType == QStringLiteral("polygon") && shape.points.size() >= 3);
-}
-
-bool shapeContainsPoint(const CorrectionShape& shape, const QPointF& point)
-{
-    if (shape.shapeType == QStringLiteral("circle") && shape.points.size() >= 2)
-    {
-        return QLineF(shape.points[0], point).length() <= QLineF(shape.points[0], shape.points[1]).length();
-    }
-    if (shape.shapeType == QStringLiteral("rect") && shape.points.size() >= 2)
-    {
-        return QRectF(shape.points[0], shape.points[1]).normalized().contains(point);
-    }
-    if (shape.shapeType == QStringLiteral("polygon") && shape.points.size() >= 3)
-    {
-        return QPolygonF(shape.points).containsPoint(point, Qt::OddEvenFill);
-    }
-    return false;
-}
-
-constexpr double Pi = 3.14159265358979323846;
-
-struct MissedTargetCandidate
-{
-    QPointF center;
-    double area = 0.0;
-    double circularityScore = 0.0;
-};
-
-struct MissedBatchTarget
-{
-    CorrectionShape baseCorrection;
-    QPointF previousCenter;
-    QPointF radiusVector;
-    double radius = 0.0;
-    double baseArea = 0.0;
-    double previousArea = 0.0;
-};
-
-bool isMissedCorrectionType(const QString& type)
-{
-    return type == QStringLiteral("missed_detection");
-}
-
-CorrectionShape batchCorrectionConfigOnly(const CorrectionShape& correction)
-{
-    CorrectionShape sanitized = correction;
-    sanitized.lineColor = QColor();
-    sanitized.lineWidth = 1;
-
-    if (isMissedCorrectionType(sanitized.errorType) &&
-        sanitized.shapeType == QStringLiteral("circle") &&
-        sanitized.points.size() >= 2)
-    {
-        sanitized.points = QVector<QPointF>{ sanitized.points[0], sanitized.points[1] };
-    }
-    else
-    {
-        sanitized.shapeType.clear();
-        sanitized.points.clear();
-    }
-
-    return sanitized;
-}
-
 int validCircleCount(const beacon_result_t& result)
 {
     int count = 0;
@@ -281,2488 +83,1515 @@ int validCircleCount(const beacon_result_t& result)
     return count;
 }
 
-double circleImageDistance(const beacon_circle_t& previous, const beacon_circle_t& current)
+double circleArea(const beacon_circle_t& circle)
 {
-    return QLineF(FrameRenderer::algorithmToImagePoint(previous.x, previous.y),
-                  FrameRenderer::algorithmToImagePoint(current.x, current.y)).length();
+    return Pi * (double)circle.radius * (double)circle.radius;
 }
 
-QVector<int> normalizedRows(QVector<int> rows)
+QString cameraBuildDir(const QString& name)
 {
-    std::sort(rows.begin(), rows.end());
-    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-    return rows;
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("imported_algorithms/%1").arg(name));
+}
 }
 
-QString framesText(const QVector<int>& frames)
+class RadarWidget : public QWidget
 {
-    QStringList parts;
-    for (int frame : frames)
+public:
+    explicit RadarWidget(QWidget* parent = nullptr)
+        : QWidget(parent)
     {
-        parts.push_back(QString::number(frame));
-    }
-    return parts.join(QStringLiteral(", "));
-}
-
-QString defaultAlgorithmPath()
-{
-#ifdef BEACON_SOURCE_DIR
-    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(QStringLiteral("algorithm/beacon_image.c"));
-#else
-    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../algorithm/beacon_image.c"));
-#endif
-}
-
-QString defaultAlgorithmHeaderPath(const QString& fileName)
-{
-#ifdef BEACON_SOURCE_DIR
-    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(QStringLiteral("algorithm/%1").arg(fileName));
-#else
-    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../algorithm/%1").arg(fileName));
-#endif
-}
-
-QString defaultInstancesRoot()
-{
-    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("instances"));
-}
-
-bool copyFileIfNeeded(const QString& source, const QString& destination, QString* errorMessage)
-{
-    if (QFileInfo::exists(destination))
-    {
-        return true;
-    }
-    if (!QFile::copy(source, destination))
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("复制文件失败：%1 -> %2").arg(source, destination);
-        }
-        return false;
-    }
-    return true;
-}
-
-bool seedAlgorithmFolder(const QString& rootDir,
-                         const QString& sourceCFile,
-                         QString* algorithmPath,
-                         QString* errorMessage)
-{
-    const QString algorithmDirPath = QDir(rootDir).absoluteFilePath(QStringLiteral("algorithm"));
-    if (!QDir().mkpath(algorithmDirPath))
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("无法创建实例算法目录：%1").arg(algorithmDirPath);
-        }
-        return false;
+        setMinimumSize(300, 260);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
 
-    const QString targetCPath = QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.c"));
-    if (QFileInfo::exists(targetCPath))
+    void setResult(const beacon_fusion_result_t& result)
     {
-        if (algorithmPath != nullptr)
-        {
-            *algorithmPath = targetCPath;
-        }
-        return true;
-    }
-    if (!QFile::copy(sourceCFile, targetCPath))
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("复制 C 文件失败：%1 -> %2").arg(sourceCFile, targetCPath);
-        }
-        return false;
+        m_result = result;
+        update();
     }
 
-    copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image.h")),
-                     QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image.h")),
-                     nullptr);
-    copyFileIfNeeded(defaultAlgorithmHeaderPath(QStringLiteral("beacon_image_config.h")),
-                     QDir(algorithmDirPath).absoluteFilePath(QStringLiteral("beacon_image_config.h")),
-                     nullptr);
-
-    if (algorithmPath != nullptr)
+protected:
+    void paintEvent(QPaintEvent*) override
     {
-        *algorithmPath = targetCPath;
-    }
-    return true;
-}
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.fillRect(rect(), QColor(8, 10, 13));
 
-double correctionCircleRadius(const CorrectionShape& correction)
-{
-    if (correction.shapeType != QStringLiteral("circle") || correction.points.size() < 2)
-    {
-        return 0.0;
-    }
-    return QLineF(correction.points[0], correction.points[1]).length();
-}
-
-CorrectionShape correctionWithCenter(const CorrectionShape& correction,
-                                     const QPointF& center,
-                                     const QPointF& radiusVector)
-{
-    CorrectionShape updated = correction;
-    if (updated.points.size() < 2)
-    {
-        return updated;
-    }
-
-    QPointF safeRadiusVector = radiusVector;
-    if (QLineF(QPointF(0.0, 0.0), safeRadiusVector).length() <= 0.0)
-    {
-        safeRadiusVector = QPointF(correctionCircleRadius(correction), 0.0);
-    }
-    updated.points[0] = center;
-    updated.points[1] = center + safeRadiusVector;
-    return updated;
-}
-
-cv::Mat qImageToGrayMat(const QImage& image)
-{
-    const QImage gray = image.format() == QImage::Format_Grayscale8
-        ? image
-        : image.convertToFormat(QImage::Format_Grayscale8);
-    cv::Mat mat(gray.height(), gray.width(), CV_8UC1);
-    for (int y = 0; y < gray.height(); ++y)
-    {
-        memcpy(mat.ptr(y), gray.constScanLine(y), gray.width());
-    }
-    return mat;
-}
-
-void addCandidateUnique(QVector<MissedTargetCandidate>* candidates, const MissedTargetCandidate& candidate)
-{
-    if (candidates == nullptr)
-    {
-        return;
-    }
-
-    for (MissedTargetCandidate& existing : *candidates)
-    {
-        if (QLineF(existing.center, candidate.center).length() <= 1.25)
-        {
-            if (candidate.circularityScore > existing.circularityScore)
-            {
-                existing = candidate;
-            }
-            return;
-        }
-    }
-    candidates->push_back(candidate);
-}
-
-void appendConnectedComponentCandidates(const cv::Mat& binary, QVector<MissedTargetCandidate>* candidates)
-{
-    if (binary.empty() || candidates == nullptr)
-    {
-        return;
-    }
-
-    cv::Mat labels;
-    cv::Mat stats;
-    cv::Mat centroids;
-    const int componentCount = cv::connectedComponentsWithStats(binary, labels, stats, centroids, 8, CV_32S);
-    for (int label = 1; label < componentCount; ++label)
-    {
-        const int area = stats.at<int>(label, cv::CC_STAT_AREA);
-        const int width = stats.at<int>(label, cv::CC_STAT_WIDTH);
-        const int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-        if (area < 2 || width <= 0 || height <= 0)
-        {
-            continue;
-        }
-
-        const double aspect = (double)qMax(width, height) / (double)qMax(1, qMin(width, height));
-        const double fillRatio = (double)area / (double)(width * height);
-        if (aspect > 2.6 || fillRatio < 0.22)
-        {
-            continue;
-        }
-
-        MissedTargetCandidate candidate;
-        candidate.center = QPointF(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
-        candidate.area = (double)area;
-        candidate.circularityScore = fillRatio / aspect;
-        addCandidateUnique(candidates, candidate);
-    }
-}
-
-QVector<MissedTargetCandidate> extractMissedTargetCandidates(const QImage& gray)
-{
-    QVector<MissedTargetCandidate> candidates;
-    const cv::Mat mat = qImageToGrayMat(gray);
-    if (mat.empty())
-    {
-        return candidates;
-    }
-
-    cv::Mat binary;
-    cv::threshold(mat, binary, 0.0, 255.0, cv::THRESH_BINARY | cv::THRESH_OTSU);
-    appendConnectedComponentCandidates(binary, &candidates);
-
-    const int minDimension = qMin(mat.cols, mat.rows);
-    const int blockSizes[] = { 9, 15, 21, 31 };
-    const int constants[] = { -8, -4, 0, 4, 8 };
-    for (int blockSize : blockSizes)
-    {
-        if (blockSize >= minDimension || blockSize % 2 == 0)
-        {
-            continue;
-        }
-        for (int constant : constants)
-        {
-            cv::adaptiveThreshold(mat,
-                                  binary,
-                                  255.0,
-                                  cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                                  cv::THRESH_BINARY,
-                                  blockSize,
-                                  (double)constant);
-            appendConnectedComponentCandidates(binary, &candidates);
-        }
-    }
-
-    return candidates;
-}
-
-double circleOverlapPixelCount(const QPointF& first, const QPointF& second, double radius)
-{
-    if (radius <= 0.0)
-    {
-        return 0.0;
-    }
-
-    const int minX = qMax(0, (int)std::floor(qMax(first.x() - radius, second.x() - radius)));
-    const int maxX = qMin(BEACON_IMAGE_W - 1, (int)std::ceil(qMin(first.x() + radius, second.x() + radius)));
-    const int minY = qMax(0, (int)std::floor(qMax(first.y() - radius, second.y() - radius)));
-    const int maxY = qMin(BEACON_IMAGE_H - 1, (int)std::ceil(qMin(first.y() + radius, second.y() + radius)));
-    if (minX > maxX || minY > maxY)
-    {
-        return 0.0;
-    }
-
-    const double radiusSquared = radius * radius;
-    int overlap = 0;
-    for (int y = minY; y <= maxY; ++y)
-    {
-        for (int x = minX; x <= maxX; ++x)
-        {
-            const double pixelX = (double)x + 0.5;
-            const double pixelY = (double)y + 0.5;
-            const double firstDx = pixelX - first.x();
-            const double firstDy = pixelY - first.y();
-            const double secondDx = pixelX - second.x();
-            const double secondDy = pixelY - second.y();
-            if (firstDx * firstDx + firstDy * firstDy <= radiusSquared &&
-                secondDx * secondDx + secondDy * secondDy <= radiusSquared)
-            {
-                ++overlap;
-            }
-        }
-    }
-    return (double)overlap;
-}
-
-bool prepareMissedBatchTargets(const QVector<CorrectionShape>& corrections,
-                               QVector<MissedBatchTarget>* targets,
-                               QString* errorMessage)
-{
-    if (targets == nullptr)
-    {
-        return false;
-    }
-    targets->clear();
-
-    for (const CorrectionShape& correction : corrections)
-    {
-        if (!isMissedCorrectionType(correction.errorType) ||
-            correction.shapeType != QStringLiteral("circle") ||
-            correction.points.size() < 2)
-        {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("漏检批量要求选中的每个条目都是已绘制圆形的漏检纠错。");
-            }
-            return false;
-        }
-
-        const double radius = correctionCircleRadius(correction);
+        const QRectF area = QRectF(rect()).adjusted(18.0, 18.0, -18.0, -18.0);
+        const QPointF center = area.center();
+        const double radius = qMin(area.width(), area.height()) * 0.46;
         if (radius <= 0.0)
         {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("漏检批量要求基准漏检圆半径大于 0。");
-            }
-            return false;
+            return;
         }
 
-        MissedBatchTarget target;
-        target.baseCorrection = correction;
-        target.previousCenter = correction.points[0];
-        target.radiusVector = correction.points[1] - correction.points[0];
-        target.radius = radius;
-        target.baseArea = Pi * radius * radius;
-        target.previousArea = target.baseArea;
-        targets->push_back(target);
-    }
-
-    return !targets->isEmpty();
-}
-
-bool matchMissedTargetsInImage(const QImage& gray,
-                               const QVector<MissedBatchTarget>& previousTargets,
-                               double overlapPixelThreshold,
-                               QVector<MissedBatchTarget>* nextTargets,
-                               QVector<CorrectionShape>* corrections)
-{
-    if (nextTargets == nullptr || corrections == nullptr)
-    {
-        return false;
-    }
-    nextTargets->clear();
-    corrections->clear();
-
-    const QVector<MissedTargetCandidate> candidates = extractMissedTargetCandidates(gray);
-    if (candidates.isEmpty())
-    {
-        return false;
-    }
-
-    QVector<bool> used(candidates.size(), false);
-    for (const MissedBatchTarget& target : previousTargets)
-    {
-        int bestIndex = -1;
-        double bestScore = std::numeric_limits<double>::max();
-        for (int i = 0; i < candidates.size(); ++i)
+        double maxDistance = 10.0;
+        for (int i = 0; i < m_result.count && i < BEACON_MAX_FUSION_TARGET_COUNT; ++i)
         {
-            if (used[i])
+            const beacon_fusion_target_t& target = m_result.targets[i];
+            if (target.valid != 0 && std::isfinite(target.distance))
             {
-                continue;
-            }
-
-            const MissedTargetCandidate& candidate = candidates[i];
-            if (candidate.area < target.baseArea * 0.12 || candidate.area > target.baseArea * 6.0)
-            {
-                continue;
-            }
-
-            const double overlapPixels = circleOverlapPixelCount(target.previousCenter,
-                                                                 candidate.center,
-                                                                 target.radius);
-            if (overlapPixels + 1.0e-6 < overlapPixelThreshold)
-            {
-                continue;
-            }
-
-            const double centerDistance = QLineF(target.previousCenter, candidate.center).length();
-            const double areaDelta = std::abs(candidate.area - target.previousArea) / qMax(1.0, target.previousArea);
-            const double score = centerDistance +
-                                 areaDelta * qMax(1.0, target.radius) -
-                                 candidate.circularityScore;
-            if (score < bestScore)
-            {
-                bestScore = score;
-                bestIndex = i;
+                maxDistance = qMax(maxDistance, (double)target.distance);
             }
         }
 
-        if (bestIndex < 0)
+        QPen gridPen(QColor(125, 150, 170, 90));
+        gridPen.setWidth(1);
+        painter.setPen(gridPen);
+        painter.setBrush(Qt::NoBrush);
+        for (int ring = 1; ring <= 4; ++ring)
         {
-            return false;
+            const double ringRadius = radius * (double)ring / 4.0;
+            painter.drawEllipse(center, ringRadius, ringRadius);
         }
 
-        used[bestIndex] = true;
-        const MissedTargetCandidate& candidate = candidates[bestIndex];
-        MissedBatchTarget nextTarget = target;
-        nextTarget.previousCenter = candidate.center;
-        nextTarget.previousArea = candidate.area;
-        nextTargets->push_back(nextTarget);
-        corrections->push_back(correctionWithCenter(target.baseCorrection,
-                                                    candidate.center,
-                                                    target.radiusVector));
+        for (int degree = 0; degree < 360; degree += 30)
+        {
+            const double radians = (double)degree * Pi / 180.0;
+            const QPointF end(center.x() + std::sin(radians) * radius,
+                              center.y() - std::cos(radians) * radius);
+            painter.drawLine(center, end);
+        }
+
+        QFont font = painter.font();
+        font.setPixelSize(11);
+        painter.setFont(font);
+        painter.setPen(QColor(225, 232, 238));
+        painter.drawText(QRectF(center.x() - 18.0, center.y() - radius - 17.0, 36.0, 16.0),
+                         Qt::AlignCenter,
+                         QStringLiteral("0"));
+        painter.drawText(QRectF(center.x() + radius + 2.0, center.y() - 8.0, 34.0, 16.0),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         QStringLiteral("90"));
+        painter.drawText(QRectF(center.x() - 22.0, center.y() + radius + 1.0, 44.0, 16.0),
+                         Qt::AlignCenter,
+                         QStringLiteral("180"));
+        painter.drawText(QRectF(center.x() - radius - 38.0, center.y() - 8.0, 34.0, 16.0),
+                         Qt::AlignRight | Qt::AlignVCenter,
+                         QStringLiteral("270"));
+
+        const QColor colors[BEACON_CAMERA_COUNT] = {
+            QColor(64, 211, 255),
+            QColor(255, 196, 70),
+            QColor(120, 235, 126)
+        };
+        for (int i = 0; i < m_result.count && i < BEACON_MAX_FUSION_TARGET_COUNT; ++i)
+        {
+            const beacon_fusion_target_t& target = m_result.targets[i];
+            if (target.valid == 0 || !std::isfinite(target.angle_deg) || !std::isfinite(target.distance))
+            {
+                continue;
+            }
+
+            const double clampedDistance = qBound(0.0, (double)target.distance, maxDistance);
+            const double normalizedDistance = clampedDistance / maxDistance;
+            const double radians = (double)target.angle_deg * Pi / 180.0;
+            const QPointF point(center.x() + std::sin(radians) * radius * normalizedDistance,
+                                center.y() - std::cos(radians) * radius * normalizedDistance);
+            const QColor color = colors[qBound(0, (int)target.camera_index, BEACON_CAMERA_COUNT - 1)];
+
+            painter.setPen(QPen(color, 2));
+            painter.setBrush(color);
+            painter.drawEllipse(point, 5.0, 5.0);
+            painter.drawText(point + QPointF(7.0, -7.0),
+                             QStringLiteral("C%1-%2").arg((int)target.camera_index + 1).arg((int)target.source_index));
+        }
+
+        painter.setPen(QColor(225, 232, 238));
+        painter.drawText(area.adjusted(4.0, 4.0, -4.0, -4.0),
+                         Qt::AlignLeft | Qt::AlignTop,
+                         QStringLiteral("360度雷达图  最大距离 %1").arg(maxDistance, 0, 'f', 2));
     }
 
-    return true;
-}
-
-QString djiStyleSheet()
-{
-    return QStringLiteral(R"(
-QMainWindow,
-QWidget#AppRoot {
-    background: #0a0a0d;
-    color: #fffdf5;
-}
-
-QWidget {
-    color: #fffdf5;
-    font-family: "Microsoft YaHei UI", "Segoe UI", Arial;
-    font-size: 12px;
-}
-
-QMenuBar {
-    background: #ffd23f;
-    color: #060608;
-    border: 3px solid #000000;
-    padding: 4px 8px;
-    font-weight: 900;
-}
-
-QMenuBar::item {
-    background: #ffd23f;
-    border: 2px solid transparent;
-    padding: 6px 12px;
-    margin: 0 3px 3px 0;
-}
-
-QMenuBar::item:selected {
-    background: #fffdf5;
-    border: 2px solid #000000;
-}
-
-QMenu {
-    background: #fffdf5;
-    color: #060608;
-    border: 3px solid #000000;
-    font-weight: 700;
-}
-
-QMenu::item {
-    padding: 8px 26px;
-}
-
-QMenu::item:selected {
-    background: #74b9ff;
-    color: #000000;
-}
-
-QFrame#Rail {
-    background: #ff6b6b;
-    border: 3px solid #000000;
-    border-radius: 0;
-}
-
-QFrame#RailDivider {
-    background: #000000;
-    min-height: 3px;
-    max-height: 3px;
-    border: none;
-}
-
-QLabel#Brand {
-    background: #fffdf5;
-    border: 3px solid #000000;
-    border-radius: 0;
-    padding: 5px;
-}
-
-QToolButton#RailButton {
-    background: #fffdf5;
-    color: #000000;
-    border: 3px solid #000000;
-    border-radius: 0;
-    padding: 7px;
-    margin: 0 4px 4px 0;
-}
-
-QToolButton#RailButton:hover,
-QToolButton#RailButton:checked {
-    background: #ffd23f;
-}
-
-QToolButton#RailButton:pressed {
-    margin: 4px 0 0 4px;
-    background: #74b9ff;
-}
-
-QToolButton#RailButton[tone="blue"] {
-    background: #74b9ff;
-}
-
-QToolButton#RailButton[tone="green"] {
-    background: #88d498;
-}
-
-QToolButton#RailButton[tone="pink"] {
-    background: #ff6b6b;
-}
-
-QToolButton#RailButton[tone="yellow"] {
-    background: #ffd23f;
-}
-
-QSplitter::handle {
-    background: #000000;
-    border: 2px solid #000000;
-}
-
-QFrame#VideoCard,
-QFrame#ControlConsole,
-QFrame#InstanceStrip,
-QGroupBox {
-    background: #181820;
-    border: 3px solid #000000;
-    border-radius: 0;
-}
-
-QFrame#VideoCard {
-    background: #101016;
-}
-
-QFrame#InstanceStrip {
-    background: #242433;
-}
-
-QFrame#ControlConsole {
-    background: #14141b;
-}
-
-QWidget#GridHost {
-    background: #050507;
-    border: 3px solid #000000;
-}
-
-QLabel#FeedTitle,
-QLabel#ConsoleTitle {
-    color: #ffd23f;
-    font-size: 22px;
-    font-weight: 900;
-}
-
-QLabel#PanelTitle {
-    color: #fffdf5;
-    font-size: 18px;
-    font-weight: 900;
-}
-
-QLabel#PanelKicker,
-QLabel#ConsoleBadge {
-    background: #74b9ff;
-    color: #000000;
-    border: 3px solid #000000;
-    padding: 5px 9px;
-    font-weight: 900;
-}
-
-QLabel#FeedMeta,
-QLabel#SoftLabel {
-    color: #d7d2c8;
-    font-weight: 700;
-}
-
-QLabel#Pill {
-    background: #88d498;
-    color: #000000;
-    border: 3px solid #000000;
-    border-radius: 0;
-    padding: 6px 10px;
-    font-weight: 900;
-}
-
-QLabel#DangerPill {
-    background: #ff6b6b;
-    color: #000000;
-    border: 3px solid #000000;
-    padding: 6px 10px;
-    font-weight: 900;
-}
-
-QGroupBox {
-    margin-top: 24px;
-    padding-top: 24px;
-    font-weight: 900;
-}
-
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 12px;
-    padding: 3px 9px;
-    color: #000000;
-    background: #ffd23f;
-    border: 3px solid #000000;
-}
-
-QPushButton {
-    background: #fffdf5;
-    border: 3px solid #000000;
-    border-radius: 0;
-    color: #000000;
-    min-height: 30px;
-    padding: 6px 13px;
-    margin: 0 5px 5px 0;
-    font-weight: 900;
-}
-
-QPushButton:hover {
-    background: #74b9ff;
-}
-
-QPushButton:pressed {
-    background: #88d498;
-    margin: 5px 0 0 5px;
-}
-
-QPushButton[role="primary"] {
-    background: #ffd23f;
-    color: #000000;
-}
-
-QPushButton[role="accent"] {
-    background: #ff6b6b;
-    color: #000000;
-}
-
-QComboBox,
-QSpinBox,
-QDoubleSpinBox,
-QLineEdit,
-QTextEdit,
-QListWidget {
-    background: #fffdf5;
-    border: 3px solid #000000;
-    border-radius: 0;
-    color: #000000;
-    selection-background-color: #ffd23f;
-    selection-color: #000000;
-    font-weight: 700;
-}
-
-QComboBox,
-QSpinBox,
-QDoubleSpinBox,
-QLineEdit {
-    min-height: 30px;
-    padding: 2px 9px;
-}
-
-QTextEdit,
-QListWidget {
-    padding: 7px;
-}
-
-QTextEdit#ResultConsole {
-    background: #050507;
-    color: #88d498;
-    font-family: "Consolas", "Cascadia Mono", monospace;
-}
-
-QComboBox::drop-down {
-    background: #ffd23f;
-    border-left: 3px solid #000000;
-    width: 26px;
-}
-
-QComboBox QAbstractItemView {
-    background: #fffdf5;
-    color: #000000;
-    border: 3px solid #000000;
-    selection-background-color: #74b9ff;
-}
-
-QListWidget::item {
-    border: 2px solid transparent;
-    padding: 5px;
-}
-
-QListWidget::item:selected {
-    background: #74b9ff;
-    color: #000000;
-    border: 2px solid #000000;
-}
-
-QCheckBox {
-    spacing: 8px;
-    font-weight: 800;
-}
-
-QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    background: #fffdf5;
-    border: 3px solid #000000;
-}
-
-QCheckBox::indicator:checked {
-    background: #ffd23f;
-}
-
-QSlider::groove:horizontal {
-    height: 12px;
-    background: #fffdf5;
-    border: 3px solid #000000;
-}
-
-QSlider::sub-page:horizontal {
-    background: #ffd23f;
-    border: 3px solid #000000;
-}
-
-QSlider::handle:horizontal {
-    background: #ff6b6b;
-    border: 3px solid #000000;
-    width: 22px;
-    height: 22px;
-    margin: -8px 0;
-}
-
-QLabel#ConsoleTitle[consoleDensity="compact"] {
-    font-size: 17px;
-}
-
-QLabel#ConsoleTitle[consoleDensity="tiny"] {
-    font-size: 14px;
-}
-
-QLabel#ConsoleBadge[consoleDensity="compact"],
-QLabel#PanelKicker[consoleDensity="compact"] {
-    font-size: 11px;
-    padding: 3px 7px;
-    border: 2px solid #000000;
-}
-
-QLabel#ConsoleBadge[consoleDensity="tiny"],
-QLabel#PanelKicker[consoleDensity="tiny"] {
-    font-size: 10px;
-    padding: 2px 5px;
-    border: 2px solid #000000;
-}
-
-QLabel#SoftLabel[consoleDensity="compact"],
-QCheckBox[consoleDensity="compact"] {
-    font-size: 11px;
-}
-
-QLabel#SoftLabel[consoleDensity="tiny"],
-QCheckBox[consoleDensity="tiny"] {
-    font-size: 10px;
-}
-
-QPushButton[consoleDensity="compact"] {
-    font-size: 11px;
-    min-height: 24px;
-    padding: 3px 7px;
-    margin: 0 3px 3px 0;
-    border: 2px solid #000000;
-}
-
-QPushButton[consoleDensity="normal"] {
-    margin: 0 3px 3px 0;
-}
-
-QPushButton[consoleDensity="tiny"] {
-    font-size: 10px;
-    min-height: 22px;
-    padding: 2px 5px;
-    margin: 0 2px 2px 0;
-    border: 2px solid #000000;
-}
-
-QPushButton[consoleDensity="normal"]:pressed,
-QPushButton[consoleDensity="compact"]:pressed,
-QPushButton[consoleDensity="tiny"]:pressed {
-    margin: 2px 0 0 2px;
-}
-
-QComboBox[consoleDensity="compact"],
-QSpinBox[consoleDensity="compact"],
-QDoubleSpinBox[consoleDensity="compact"] {
-    font-size: 11px;
-    min-height: 24px;
-    padding: 1px 5px;
-    border: 2px solid #000000;
-}
-
-QComboBox[consoleDensity="tiny"],
-QSpinBox[consoleDensity="tiny"],
-QDoubleSpinBox[consoleDensity="tiny"] {
-    font-size: 10px;
-    min-height: 22px;
-    padding: 1px 4px;
-    border: 2px solid #000000;
-}
-
-QComboBox[consoleDensity="compact"]::drop-down {
-    width: 20px;
-    border-left: 2px solid #000000;
-}
-
-QComboBox[consoleDensity="tiny"]::drop-down {
-    width: 16px;
-    border-left: 2px solid #000000;
-}
-
-QCheckBox[consoleDensity="compact"] {
-    spacing: 5px;
-}
-
-QCheckBox[consoleDensity="tiny"] {
-    spacing: 4px;
-}
-
-QCheckBox[consoleDensity="compact"]::indicator {
-    width: 14px;
-    height: 14px;
-    border: 2px solid #000000;
-}
-
-QCheckBox[consoleDensity="tiny"]::indicator {
-    width: 12px;
-    height: 12px;
-    border: 2px solid #000000;
-}
-
-QSlider[consoleDensity="compact"]::groove:horizontal {
-    height: 9px;
-    border: 2px solid #000000;
-}
-
-QSlider[consoleDensity="tiny"]::groove:horizontal {
-    height: 7px;
-    border: 2px solid #000000;
-}
-
-QSlider[consoleDensity="compact"]::sub-page:horizontal,
-QSlider[consoleDensity="tiny"]::sub-page:horizontal {
-    border: 2px solid #000000;
-}
-
-QSlider[consoleDensity="compact"]::handle:horizontal {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #000000;
-    margin: -6px 0;
-}
-
-QSlider[consoleDensity="tiny"]::handle:horizontal {
-    width: 13px;
-    height: 13px;
-    border: 2px solid #000000;
-    margin: -5px 0;
-}
-
-QScrollArea,
-QWidget#RightPanel,
-QWidget#Workspace {
-    background: transparent;
-}
-
-QScrollBar:vertical {
-    background: #fffdf5;
-    border: 2px solid #000000;
-    width: 14px;
-    margin: 0;
-}
-
-QScrollBar::handle:vertical {
-    background: #74b9ff;
-    border: 2px solid #000000;
-    min-height: 28px;
-}
-
-QScrollBar::add-line:vertical,
-QScrollBar::sub-line:vertical {
-    height: 0;
-}
-
-QStatusBar {
-    background: #ffd23f;
-    color: #000000;
-    border: 3px solid #000000;
-    font-weight: 900;
-}
-
-QToolTip {
-    background: #fffdf5;
-    color: #000000;
-    border: 3px solid #000000;
-    padding: 6px;
-}
-)");
-}
-
-}
-
-#define m_reader m_globalReader
-#define m_runner (currentInstance()->runner)
-#define m_annotations (currentInstance()->annotations)
-#define m_currentVideoPath m_globalVideoPath
-#define m_currentFrame m_globalCurrentFrame
-#define m_zoom m_globalZoom
-#define m_showOverlay m_globalShowOverlay
-#define m_usedFps m_globalUsedFps
-#define m_playbackSpeed m_globalPlaybackSpeed
-#define m_segmentStartFrame (currentInstance()->segmentStartFrame)
-#define m_segmentEndFrame (currentInstance()->segmentEndFrame)
-#define m_currentResult (currentInstance()->currentResult)
-#define m_pendingAutoBatchRows (currentInstance()->pendingAutoBatchRows)
-#define m_pendingAutoMatchedCorrections (currentInstance()->pendingAutoMatchedCorrections)
+private:
+    beacon_fusion_result_t m_result = {};
+};
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    setWindowIcon(QIcon(QStringLiteral(":/img/logo.png")));
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        m_cameras[i].index = i;
+        m_cameras[i].name = QStringLiteral("摄像头 %1").arg(i + 1);
+        std::memset(&m_cameras[i].currentResult, 0, sizeof(m_cameras[i].currentResult));
+    }
+
+    setWindowTitle(QStringLiteral("BeaconImageAnalyzer - 三摄像头融合版"));
+    resize(1480, 900);
     buildUi();
     buildMenus();
-    QString instanceError;
-    if (!ensureDefaultInstance(&instanceError))
-    {
-        statusBar()->showMessage(instanceError, 5000);
-    }
-    setWindowTitle(QStringLiteral("BeaconImageAnalyzer"));
-    setMinimumSize(960, 600);
-    resize(1320, 780);
-
-    m_playTimer.setTimerType(Qt::PreciseTimer);
-    m_playTimer.setInterval(playbackIntervalMs());
-    connect(&m_playTimer, &QTimer::timeout, this, &MainWindow::advancePlayingInstances);
     qApp->installEventFilter(this);
-    QTimer::singleShot(0, this, &MainWindow::restoreLastSession);
-}
 
-MainWindow::~MainWindow()
-{
-    qDeleteAll(m_instances);
-    m_instances.clear();
-}
-
-AnalyzerInstance* MainWindow::currentInstance()
-{
-    AnalyzerInstance* instance = instanceById(m_currentInstanceId);
-    if (instance != nullptr)
-    {
-        return instance;
-    }
-    if (!m_instances.isEmpty())
-    {
-        m_currentInstanceId = m_instances.first()->id;
-        return m_instances.first();
-    }
-    ensureDefaultInstance();
-    return m_instances.isEmpty() ? nullptr : m_instances.first();
-}
-
-const AnalyzerInstance* MainWindow::currentInstance() const
-{
-    for (const AnalyzerInstance* instance : m_instances)
-    {
-        if (instance != nullptr && instance->id == m_currentInstanceId)
-        {
-            return instance;
-        }
-    }
-    return m_instances.isEmpty() ? nullptr : m_instances.first();
-}
-
-AnalyzerInstance* MainWindow::instanceById(int id)
-{
-    for (AnalyzerInstance* instance : m_instances)
-    {
-        if (instance != nullptr && instance->id == id)
-        {
-            return instance;
-        }
-    }
-    return nullptr;
-}
-
-const AnalyzerInstance* MainWindow::instanceById(int id) const
-{
-    for (const AnalyzerInstance* instance : m_instances)
-    {
-        if (instance != nullptr && instance->id == id)
-        {
-            return instance;
-        }
-    }
-    return nullptr;
-}
-
-AnalyzerInstance* MainWindow::createInstance(const QString& rootDir,
-                                             const QString& algorithmPath,
-                                             const QString& name,
-                                             bool compileAlgorithm,
-                                             QString* errorMessage)
-{
-    auto* instance = new AnalyzerInstance;
-    instance->id = m_nextInstanceId++;
-    instance->rootDir = QFileInfo(rootDir).absoluteFilePath();
-    instance->algorithmPath = QFileInfo(algorithmPath).absoluteFilePath();
-    instance->name = name.trimmed().isEmpty()
-        ? QStringLiteral("实例 %1").arg(instance->id)
-        : name.trimmed();
-
-    if (compileAlgorithm)
-    {
-        QString compileError;
-        const QString buildDir = QDir(instance->rootDir).absoluteFilePath(QStringLiteral("build"));
-        if (!instance->runner.loadSourceFile(instance->algorithmPath, buildDir, &compileError))
-        {
-            delete instance;
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = compileError;
-            }
-            return nullptr;
-        }
-    }
-
-    m_instances.push_back(instance);
-    if (m_currentInstanceId < 0)
-    {
-        m_currentInstanceId = instance->id;
-    }
-    setInstanceVisible(instance->id, true);
-    refreshInstanceList();
-    updateSplitLayout();
-    return instance;
-}
-
-bool MainWindow::ensureDefaultInstance(QString* errorMessage)
-{
-    if (!m_instances.isEmpty())
-    {
-        return true;
-    }
-
-    const QString rootDir = QDir(defaultInstancesRoot()).absoluteFilePath(QStringLiteral("default"));
-    QString algorithmPath;
-    if (!seedAlgorithmFolder(rootDir, defaultAlgorithmPath(), &algorithmPath, errorMessage))
-    {
-        return false;
-    }
-    return createInstance(rootDir, algorithmPath, QStringLiteral("默认实例"), true, errorMessage) != nullptr;
-}
-
-int MainWindow::slotForInstance(int instanceId) const
-{
-    for (int i = 0; i < m_splitSlotInstanceIds.size(); ++i)
-    {
-        if (m_splitSlotInstanceIds[i] == instanceId)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int MainWindow::slotAtGlobalPos(const QPoint& globalPos) const
-{
-    for (int i = 0; i < m_videoWidgets.size(); ++i)
-    {
-        const VideoWidget* widget = m_videoWidgets[i];
-        if (widget != nullptr && widget->isVisible() && widget->rect().contains(widget->mapFromGlobal(globalPos)))
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-void MainWindow::setInstanceVisible(int instanceId, bool visible)
-{
-    if (m_splitSlotInstanceIds.size() != 4)
-    {
-        m_splitSlotInstanceIds = QVector<int>(4, -1);
-    }
-
-    const int existingSlot = slotForInstance(instanceId);
-    if (!visible)
-    {
-        if (instanceId == m_currentInstanceId)
+    connect(&m_playTimer, &QTimer::timeout, this, [this]() {
+        if (!m_playing || !hasAnyVideo())
         {
             return;
         }
-        if (existingSlot >= 0)
-        {
-            m_splitSlotInstanceIds[existingSlot] = -1;
-        }
-        return;
-    }
-    if (existingSlot >= 0)
-    {
-        return;
-    }
 
-    int visibleCount = 0;
-    for (int id : m_splitSlotInstanceIds)
-    {
-        if (id >= 0)
+        const int maxFrame = timelineMaxFrame();
+        if (m_timelineFrame >= maxFrame)
         {
-            ++visibleCount;
-        }
-    }
-    if (visibleCount >= 4)
-    {
-        QMessageBox::warning(this, QStringLiteral("分屏显示"), QStringLiteral("最多同时勾选 4 个实例。"));
-        return;
-    }
-
-    for (int i = 0; i < m_splitSlotInstanceIds.size(); ++i)
-    {
-        if (m_splitSlotInstanceIds[i] < 0)
-        {
-            m_splitSlotInstanceIds[i] = instanceId;
+            pause();
             return;
         }
-    }
-}
 
-void MainWindow::selectInstance(int id)
-{
-    if (instanceById(id) == nullptr)
-    {
-        return;
-    }
-    m_currentInstanceId = id;
-    setInstanceVisible(id, true);
-    AnalyzerInstance* instance = instanceById(id);
-    if (instance != nullptr)
-    {
-        m_annotationPanel->setCurrentFrameCorrections(instance->annotations.correctionsForFrame(m_currentFrame), true);
-    }
-    refreshInstanceList();
-    updateSplitLayout();
-    refreshCurrentInstanceUi();
-}
-
-void MainWindow::refreshInstanceList()
-{
-    if (m_instanceList == nullptr)
-    {
-        return;
-    }
-
-    QSignalBlocker blocker(m_instanceList);
-    m_instanceList->clear();
-    for (const AnalyzerInstance* instance : m_instances)
-    {
-        if (instance == nullptr)
+        const double fps = currentCamera() != nullptr && currentCamera()->usedFps > 0.0
+            ? currentCamera()->usedFps
+            : 50.0;
+        int targetFrame = m_playbackStartFrame +
+                          (int)std::floor((double)m_playbackClock.elapsed() * fps * m_playbackSpeed / 1000.0);
+        targetFrame = qMax(m_timelineFrame + 1, targetFrame);
+        targetFrame = qMin(targetFrame, maxFrame);
+        showFrame(targetFrame);
+        if (m_timelineFrame >= maxFrame)
         {
-            continue;
+            pause();
         }
-        auto* item = new QListWidgetItem(instance->name);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(slotForInstance(instance->id) >= 0 ? Qt::Checked : Qt::Unchecked);
-        item->setData(Qt::UserRole, instance->id);
-        if (instance->id == m_currentInstanceId)
-        {
-            QFont font = item->font();
-            font.setBold(true);
-            item->setFont(font);
-        }
-        m_instanceList->addItem(item);
-    }
+    });
+
+    selectCamera(0);
+    showFrame(0);
 }
 
-void MainWindow::updateCurrentVideoWidget()
-{
-    const int slot = slotForInstance(m_currentInstanceId);
-    m_videoWidget = slot >= 0 && slot < m_videoWidgets.size() ? m_videoWidgets[slot] : nullptr;
-    for (int i = 0; i < m_videoWidgets.size(); ++i)
-    {
-        m_videoWidgets[i]->setSelected(i == slot && m_splitSlotInstanceIds.value(i, -1) >= 0);
-    }
-}
-
-void MainWindow::updateSplitLayout()
-{
-    if (m_videoGrid == nullptr || m_videoWidgets.size() != 4)
-    {
-        return;
-    }
-
-    while (QLayoutItem* item = m_videoGrid->takeAt(0))
-    {
-        delete item;
-    }
-
-    QVector<int> visibleSlots;
-    for (int i = 0; i < m_splitSlotInstanceIds.size(); ++i)
-    {
-        if (m_splitSlotInstanceIds[i] >= 0)
-        {
-            visibleSlots.push_back(i);
-        }
-    }
-
-    for (int row = 0; row < 2; ++row)
-    {
-        m_videoGrid->setRowMinimumHeight(row, 0);
-        m_videoGrid->setRowStretch(row, 1);
-    }
-    for (int column = 0; column < 2; ++column)
-    {
-        m_videoGrid->setColumnMinimumWidth(column, 0);
-        m_videoGrid->setColumnStretch(column, 1);
-    }
-
-    if (visibleSlots.size() <= 1)
-    {
-        const int slot = visibleSlots.isEmpty() ? 0 : visibleSlots.first();
-        for (int i = 0; i < m_videoWidgets.size(); ++i)
-        {
-            m_videoWidgets[i]->setVisible(i == slot);
-        }
-        m_videoGrid->addWidget(m_videoWidgets[slot], 0, 0, 2, 2);
-    }
-    else if (visibleSlots.size() == 2)
-    {
-        for (int i = 0; i < m_videoWidgets.size(); ++i)
-        {
-            m_videoWidgets[i]->setVisible(false);
-        }
-        for (int column = 0; column < visibleSlots.size(); ++column)
-        {
-            const int slot = visibleSlots[column];
-            m_videoWidgets[slot]->setVisible(true);
-            m_videoGrid->addWidget(m_videoWidgets[slot], 0, column);
-        }
-    }
-    else if (visibleSlots.size() == 3)
-    {
-        for (int i = 0; i < m_videoWidgets.size(); ++i)
-        {
-            m_videoWidgets[i]->setVisible(false);
-        }
-        for (int index = 0; index < visibleSlots.size(); ++index)
-        {
-            const int slot = visibleSlots[index];
-            m_videoWidgets[slot]->setVisible(true);
-            if (index < 2)
-            {
-                m_videoGrid->addWidget(m_videoWidgets[slot], 0, index);
-            }
-            else
-            {
-                m_videoGrid->addWidget(m_videoWidgets[slot], 1, 0, 1, 2);
-            }
-        }
-    }
-    else
-    {
-        for (int i = 0; i < m_videoWidgets.size(); ++i)
-        {
-            m_videoWidgets[i]->setVisible(true);
-            m_videoGrid->addWidget(m_videoWidgets[i], i / 2, i % 2);
-        }
-    }
-
-    updateCurrentVideoWidget();
-    renderAllDisplayedInstances();
-}
-
-void MainWindow::handleSlotActivated(int slot)
-{
-    if (slot < 0 || slot >= m_splitSlotInstanceIds.size())
-    {
-        return;
-    }
-    const int instanceId = m_splitSlotInstanceIds[slot];
-    if (instanceId >= 0)
-    {
-        selectInstance(instanceId);
-    }
-}
-
-void MainWindow::handleSlotMiddleDragStarted(int slot)
-{
-    int visibleCount = 0;
-    for (int id : m_splitSlotInstanceIds)
-    {
-        if (id >= 0)
-        {
-            ++visibleCount;
-        }
-    }
-    m_dragSourceSlot = visibleCount >= 2 ? slot : -1;
-}
-
-void MainWindow::handleSlotMiddleDragReleased(int slot, const QPoint& globalPos)
-{
-    Q_UNUSED(slot);
-    if (m_dragSourceSlot < 0 || m_dragSourceSlot >= m_splitSlotInstanceIds.size())
-    {
-        return;
-    }
-    const int targetSlot = slotAtGlobalPos(globalPos);
-    if (targetSlot >= 0 && targetSlot < m_splitSlotInstanceIds.size() && targetSlot != m_dragSourceSlot)
-    {
-        std::swap(m_splitSlotInstanceIds[m_dragSourceSlot], m_splitSlotInstanceIds[targetSlot]);
-        updateSplitLayout();
-    }
-    m_dragSourceSlot = -1;
-}
-
-void MainWindow::handleSlotContextCorrection(int slot, const QPointF& imagePoint, const QPoint& globalPos)
-{
-    if (slot < 0 || slot >= m_splitSlotInstanceIds.size() ||
-        m_splitSlotInstanceIds[slot] != m_currentInstanceId ||
-        !m_reader.isOpen())
-    {
-        return;
-    }
-
-    const QVector<int> targetIndices = targetIndicesNearPoint(imagePoint, 10.0);
-    if (targetIndices.isEmpty())
-    {
-        QMenu menu(this);
-        QAction* missedAction = menu.addAction(QStringLiteral("漏检"));
-        QAction* otherAction = menu.addAction(QStringLiteral("其他"));
-        QAction* selected = menu.exec(globalPos);
-        if (selected == missedAction)
-        {
-            CorrectionShape correction;
-            if (promptMissedCircle(imagePoint, &correction))
-            {
-                addQuickCorrection(correction);
-            }
-        }
-        else if (selected == otherAction)
-        {
-            QString description;
-            if (promptDescription(QStringLiteral("其他"), &description))
-            {
-                CorrectionShape correction;
-                correction.name = annotationTypeDisplayName(QStringLiteral("other"));
-                correction.frame = m_currentFrame;
-                correction.errorType = QStringLiteral("other");
-                correction.errorTypes = QStringList{ correction.errorType };
-                correction.description = description;
-                addQuickCorrection(correction);
-            }
-        }
-        return;
-    }
-
-    if (targetIndices.size() == 1)
-    {
-        runSingleTargetQuickCorrection(targetIndices.first(), globalPos);
-        return;
-    }
-
-    QMenu targetMenu(this);
-    for (int index : targetIndices)
-    {
-        QAction* action = targetMenu.addAction(QStringLiteral("目标 #%1").arg(index));
-        action->setData(index);
-    }
-    QAction* selectedTarget = targetMenu.exec(globalPos);
-    if (selectedTarget != nullptr)
-    {
-        runSingleTargetQuickCorrection(selectedTarget->data().toInt(), globalPos);
-    }
-}
-
-QVector<int> MainWindow::targetIndicesNearPoint(const QPointF& imagePoint, double radiusPixels) const
-{
-    QVector<int> indices;
-    const beacon_result_t& result = m_currentResult;
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        const beacon_circle_t& circle = result.circles[i];
-        if (circle.valid == 0)
-        {
-            continue;
-        }
-
-        const QPointF circlePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
-        if (QLineF(circlePoint, imagePoint).length() <= circle.radius + radiusPixels)
-        {
-            indices.push_back(i);
-        }
-    }
-    return indices;
-}
-
-bool MainWindow::promptExpectedIndex(const QString& title, int* expectedIndex)
-{
-    if (expectedIndex == nullptr)
-    {
-        return false;
-    }
-    bool ok = false;
-    const int value = QInputDialog::getInt(this,
-                                           title,
-                                           QStringLiteral("正确序号"),
-                                           0,
-                                           0,
-                                           BEACON_MAX_CIRCLE_COUNT - 1,
-                                           1,
-                                           &ok);
-    if (!ok)
-    {
-        return false;
-    }
-    *expectedIndex = value;
-    return true;
-}
-
-bool MainWindow::promptDescription(const QString& title, QString* description)
-{
-    if (description == nullptr)
-    {
-        return false;
-    }
-    bool ok = false;
-    const QString text = QInputDialog::getMultiLineText(this,
-                                                        title,
-                                                        QStringLiteral("描述"),
-                                                        QString(),
-                                                        &ok).trimmed();
-    if (!ok || text.isEmpty())
-    {
-        return false;
-    }
-    *description = text;
-    return true;
-}
-
-bool MainWindow::promptMissedCircle(const QPointF& center, CorrectionShape* correction)
-{
-    if (correction == nullptr)
-    {
-        return false;
-    }
-
-    int expectedIndex = -1;
-    if (!promptExpectedIndex(QStringLiteral("漏检"), &expectedIndex))
-    {
-        return false;
-    }
-
-    bool ok = false;
-    const double radius = QInputDialog::getDouble(this,
-                                                  QStringLiteral("漏检"),
-                                                  QStringLiteral("目标圆半径"),
-                                                  5.0,
-                                                  1.0,
-                                                  100.0,
-                                                  1,
-                                                  &ok);
-    if (!ok)
-    {
-        return false;
-    }
-
-    correction->name = annotationTypeDisplayName(QStringLiteral("missed_detection"));
-    correction->frame = m_currentFrame;
-    correction->errorType = QStringLiteral("missed_detection");
-    correction->errorTypes = QStringList{ correction->errorType };
-    correction->expectedIndex = expectedIndex;
-    correction->errorCircles = QVector<ErrorCircle>{ ErrorCircle{ -1, expectedIndex } };
-    correction->shapeType = QStringLiteral("circle");
-    correction->points = QVector<QPointF>{ center, center + QPointF(radius, 0.0) };
-    return true;
-}
-
-void MainWindow::addQuickCorrection(const CorrectionShape& correction)
-{
-    CorrectionShape saved = correction;
-    if (saved.name.trimmed().isEmpty())
-    {
-        saved.name = annotationTypeDisplayName(saved.errorType);
-    }
-    m_annotations.addCorrection(saved);
-    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
-    updateAnnotationList();
-    showFrame(m_currentFrame);
-}
-
-void MainWindow::runSingleTargetQuickCorrection(int circleIndex, const QPoint& globalPos)
-{
-    QMenu menu(this);
-    QAction* falsePositiveAction = menu.addAction(QStringLiteral("误检"));
-    QAction* wrongOrderAction = menu.addAction(QStringLiteral("排序错误"));
-    QAction* targetJumpAction = menu.addAction(QStringLiteral("目标跳变"));
-    QAction* otherAction = menu.addAction(QStringLiteral("其他"));
-    QAction* selected = menu.exec(globalPos);
-    if (selected == nullptr)
-    {
-        return;
-    }
-
-    CorrectionShape correction;
-    correction.frame = m_currentFrame;
-    correction.lineWidth = 1;
-
-    if (selected == falsePositiveAction)
-    {
-        correction.errorType = QStringLiteral("false_positive");
-        correction.errorTypes = QStringList{ correction.errorType };
-        correction.errorCircles = QVector<ErrorCircle>{ ErrorCircle{ circleIndex, -1 } };
-    }
-    else if (selected == wrongOrderAction || selected == targetJumpAction)
-    {
-        int expectedIndex = -1;
-        if (!promptExpectedIndex(selected == wrongOrderAction
-                                     ? QStringLiteral("排序错误")
-                                     : QStringLiteral("目标跳变"),
-                                 &expectedIndex))
-        {
-            return;
-        }
-        correction.errorType = selected == wrongOrderAction
-            ? QStringLiteral("wrong_order")
-            : QStringLiteral("target_jump");
-        correction.errorTypes = QStringList{ correction.errorType };
-        correction.expectedIndex = expectedIndex;
-        correction.errorCircles = QVector<ErrorCircle>{ ErrorCircle{ circleIndex, expectedIndex } };
-    }
-    else if (selected == otherAction)
-    {
-        QString description;
-        if (!promptDescription(QStringLiteral("其他"), &description))
-        {
-            return;
-        }
-        correction.errorType = QStringLiteral("other");
-        correction.errorTypes = QStringList{ correction.errorType };
-        correction.description = description;
-        correction.errorCircles = QVector<ErrorCircle>{ ErrorCircle{ circleIndex, -1 } };
-    }
-
-    correction.name = annotationTypeDisplayName(correction.errorType);
-    addQuickCorrection(correction);
-}
-
-void MainWindow::renderInstance(AnalyzerInstance* instance)
-{
-    if (instance == nullptr || !m_reader.isOpen())
-    {
-        return;
-    }
-
-    QImage gray;
-    QString error;
-    const int frameIndex = qBound(0, m_currentFrame, qMax(0, m_reader.frameCount() - 1));
-    if (!m_reader.readFrame(frameIndex, &gray, &error))
-    {
-        return;
-    }
-    const beacon_result_t result = instance->runner.process(gray);
-    renderInstance(instance, gray, result, frameIndex);
-}
-
-void MainWindow::renderInstance(AnalyzerInstance* instance,
-                                const QImage& gray,
-                                const beacon_result_t& result,
-                                int frameIndex)
-{
-    if (instance == nullptr || gray.isNull())
-    {
-        return;
-    }
-
-    instance->currentResult = result;
-    const QVector<CorrectionShape> corrections = instance->annotations.correctionsForFrame(frameIndex);
-    QImage displayImage = gray;
-    if (viewMode() == QStringLiteral("binary"))
-    {
-        const QImage binary = instance->runner.binaryImage(gray);
-        if (!binary.isNull())
-        {
-            displayImage = binary;
-        }
-    }
-    QVector<CorrectionShape> visibleCorrections = corrections;
-    if (instance->id == m_currentInstanceId && m_annotationPanel != nullptr)
-    {
-        visibleCorrections = m_annotationPanel->draftCorrections();
-    }
-    const QImage rendered = FrameRenderer::render(displayImage, result, visibleCorrections, 1, m_showOverlay);
-
-    const int slot = slotForInstance(instance->id);
-    if (slot >= 0 && slot < m_videoWidgets.size())
-    {
-        m_videoWidgets[slot]->setFrameGeometry(QSize(m_reader.width(), m_reader.height()), 1);
-        m_videoWidgets[slot]->setPixelSourceImage(gray);
-        m_videoWidgets[slot]->setImage(rendered);
-    }
-}
-
-void MainWindow::renderAllDisplayedInstances()
-{
-    for (int instanceId : m_splitSlotInstanceIds)
-    {
-        renderInstance(instanceById(instanceId));
-    }
-    updateCurrentVideoWidget();
-}
-
-void MainWindow::renderAllDisplayedInstances(const QImage& gray,
-                                             const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results)
-{
-    for (int instanceId : m_splitSlotInstanceIds)
-    {
-        AnalyzerInstance* instance = instanceById(instanceId);
-        if (instance == nullptr)
-        {
-            continue;
-        }
-
-        for (const auto& item : results)
-        {
-            if (item.first == instance)
-            {
-                renderInstance(instance, gray, item.second, m_currentFrame);
-                break;
-            }
-        }
-    }
-    updateCurrentVideoWidget();
-}
-
-void MainWindow::refreshCurrentInstanceUi()
-{
-    AnalyzerInstance* instance = currentInstance();
-    if (instance == nullptr)
-    {
-        return;
-    }
-    if (m_reader.isOpen())
-    {
-        m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
-        m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
-        m_timeSpin->setRange(0.0, frameTime(qMax(0, m_reader.frameCount() - 1)));
-        m_annotationPanel->setVideoFrameRange(0, qMax(0, m_reader.frameCount() - 1));
-        showFrame(m_currentFrame);
-    }
-    else
-    {
-        m_videoInfoLabel->setText(QStringLiteral("未打开视频"));
-        m_frameInfoLabel->setText(QStringLiteral("Frame: -"));
-        m_resultText->clear();
-        m_annotationPanel->setAnnotations(instance->annotations.records(), instance->annotations.corrections());
-        m_annotationPanel->setCurrentFrameCorrections(QVector<CorrectionShape>(), true);
-    }
-    updatePlayPauseButton();
-}
-
-void MainWindow::advancePlayingInstances()
-{
-    if (!m_globalPlaying || !m_reader.isOpen())
-    {
-        m_playTimer.stop();
-        updatePlayPauseButton();
-        return;
-    }
-    if (m_currentFrame + 1 >= m_reader.frameCount())
-    {
-        m_globalPlaying = false;
-        m_playTimer.stop();
-        updatePlayPauseButton();
-        return;
-    }
-
-    if (!m_playbackClock.isValid())
-    {
-        resetPlaybackClock();
-    }
-
-    const double fps = m_usedFps > 0.0 ? m_usedFps : 50.0;
-    const double elapsedSeconds = (double)m_playbackClock.elapsed() / 1000.0;
-    int targetFrame = m_playbackStartFrame + (int)std::floor(elapsedSeconds * fps * m_playbackSpeed);
-    targetFrame = qMax(m_currentFrame + 1, targetFrame);
-    targetFrame = qMin(targetFrame, m_reader.frameCount() - 1);
-
-    showFrame(targetFrame);
-    if (m_globalPlaying && m_currentFrame + 1 >= m_reader.frameCount())
-    {
-        m_globalPlaying = false;
-        m_playTimer.stop();
-        updatePlayPauseButton();
-    }
-}
+MainWindow::~MainWindow() = default;
 
 void MainWindow::buildUi()
 {
     auto* central = new QWidget(this);
-    central->setObjectName(QStringLiteral("AppRoot"));
+    setCentralWidget(central);
+
     auto* root = new QHBoxLayout(central);
-    root->setContentsMargins(12, 12, 14, 14);
-    root->setSpacing(14);
+    root->setContentsMargins(10, 10, 10, 10);
+    root->setSpacing(10);
 
-    auto* rail = new QFrame(central);
-    rail->setObjectName(QStringLiteral("Rail"));
-    rail->setFixedWidth(74);
-    applyHardShadow(rail, QColor(0, 0, 0), 7, 7);
-    auto* railLayout = new QVBoxLayout(rail);
-    railLayout->setContentsMargins(10, 12, 10, 12);
-    railLayout->setSpacing(9);
-
-    auto* brand = new QLabel(rail);
-    brand->setObjectName(QStringLiteral("Brand"));
-    brand->setAlignment(Qt::AlignCenter);
-    brand->setFixedSize(50, 50);
-    brand->setPixmap(QPixmap(QStringLiteral(":/img/logo.png")).scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    railLayout->addWidget(brand, 0, Qt::AlignHCenter);
-    railLayout->addSpacing(6);
-
-    auto makeRailDivider = [](QWidget* parent) {
-        auto* divider = new QFrame(parent);
-        divider->setObjectName(QStringLiteral("RailDivider"));
-        divider->setFixedHeight(3);
-        return divider;
-    };
-
-    auto makeRailButton = [this](QWidget* parent, QStyle::StandardPixmap icon, const QString& tooltip) {
-        auto* button = new QToolButton(parent);
-        button->setObjectName(QStringLiteral("RailButton"));
-        button->setIcon(style()->standardIcon(icon));
-        button->setIconSize(QSize(22, 22));
-        button->setFixedSize(48, 48);
-        button->setToolTip(tooltip);
-        button->setAutoRaise(false);
-        return button;
-    };
-
-    auto* openRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("打开 AVI"));
-    auto* newInstanceRailButton = makeRailButton(rail, QStyle::SP_FileDialogNewFolder, QStringLiteral("新建实例"));
-    auto* importAlgorithmRailButton = makeRailButton(rail, QStyle::SP_FileDialogDetailedView, QStringLiteral("导入 C 文件"));
-    auto* saveRailButton = makeRailButton(rail, QStyle::SP_DialogSaveButton, QStringLiteral("保存标注"));
-    auto* loadRailButton = makeRailButton(rail, QStyle::SP_FileDialogContentsView, QStringLiteral("读取标注"));
-    auto* exportAviRailButton = makeRailButton(rail, QStyle::SP_DialogApplyButton, QStringLiteral("导出标注 AVI"));
-    auto* exportCsvRailButton = makeRailButton(rail, QStyle::SP_FileIcon, QStringLiteral("导出 CSV"));
-    auto* exitRailButton = makeRailButton(rail, QStyle::SP_DialogCloseButton, QStringLiteral("退出"));
-    openRailButton->setProperty("tone", QStringLiteral("yellow"));
-    newInstanceRailButton->setProperty("tone", QStringLiteral("blue"));
-    importAlgorithmRailButton->setProperty("tone", QStringLiteral("green"));
-    exportAviRailButton->setProperty("tone", QStringLiteral("pink"));
-    exportCsvRailButton->setProperty("tone", QStringLiteral("blue"));
-    railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(newInstanceRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(importAlgorithmRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(makeRailDivider(rail));
-    railLayout->addWidget(saveRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(loadRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(makeRailDivider(rail));
-    railLayout->addWidget(exportAviRailButton, 0, Qt::AlignHCenter);
-    railLayout->addWidget(exportCsvRailButton, 0, Qt::AlignHCenter);
-    railLayout->addStretch(1);
-    railLayout->addWidget(makeRailDivider(rail));
-    railLayout->addWidget(exitRailButton, 0, Qt::AlignHCenter);
-    root->addWidget(rail);
-
-    auto* splitter = new QSplitter(Qt::Horizontal, central);
-    splitter->setHandleWidth(8);
-    splitter->setChildrenCollapsible(false);
-    root->addWidget(splitter, 1);
-
-    auto* workspace = new QWidget;
-    workspace->setObjectName(QStringLiteral("Workspace"));
-    workspace->setMinimumWidth(480);
+    auto* workspace = new QWidget(central);
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
-    workspaceLayout->setSpacing(16);
+    workspaceLayout->setSpacing(10);
 
-    auto* videoCard = new QFrame(workspace);
-    videoCard->setObjectName(QStringLiteral("VideoCard"));
-    videoCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    applyHardShadow(videoCard, QColor(116, 185, 255), 8, 8);
-    auto* videoLayout = new QVBoxLayout(videoCard);
-    videoLayout->setContentsMargins(18, 16, 18, 18);
-    videoLayout->setSpacing(14);
-
-    auto* feedHeader = new QHBoxLayout;
-    feedHeader->setSpacing(8);
-    auto* feedTitle = new QLabel(QStringLiteral("IR BEACON FEED"), videoCard);
-    feedTitle->setObjectName(QStringLiteral("FeedTitle"));
-    m_videoInfoLabel = new QLabel(QStringLiteral("未打开视频"), videoCard);
-    m_videoInfoLabel->setObjectName(QStringLiteral("FeedMeta"));
-    m_videoInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_videoInfoLabel->setWordWrap(true);
-    auto* feedPill = new QLabel(QStringLiteral("RAW · BINARY · OVERLAY"), videoCard);
-    feedPill->setObjectName(QStringLiteral("Pill"));
-    feedPill->setAlignment(Qt::AlignCenter);
-    feedHeader->addWidget(feedTitle);
-    feedHeader->addWidget(m_videoInfoLabel, 1);
-    feedHeader->addWidget(feedPill);
-
-    videoLayout->addLayout(feedHeader);
-
-    auto* instanceStrip = new QFrame(videoCard);
-    instanceStrip->setObjectName(QStringLiteral("InstanceStrip"));
-    applyHardShadow(instanceStrip, QColor(0, 0, 0), 5, 5);
-    auto* instanceRow = new QHBoxLayout(instanceStrip);
-    instanceRow->setContentsMargins(10, 10, 10, 10);
-    instanceRow->setSpacing(8);
-    m_instanceList = new QListWidget(videoCard);
-    m_instanceList->setMaximumHeight(86);
-    m_instanceList->setSelectionMode(QAbstractItemView::SingleSelection);
-    auto* newInstanceButton = new QPushButton(QStringLiteral("新建实例"), videoCard);
-    newInstanceButton->setProperty("role", QStringLiteral("accent"));
-    instanceRow->addWidget(m_instanceList, 1);
-    instanceRow->addWidget(newInstanceButton);
-    videoLayout->addWidget(instanceStrip);
-
-    auto* gridHost = new QWidget(videoCard);
-    gridHost->setObjectName(QStringLiteral("GridHost"));
-    gridHost->setMinimumSize(240, 160);
-    gridHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_videoGrid = new QGridLayout(gridHost);
-    m_videoGrid->setContentsMargins(12, 12, 12, 12);
-    m_videoGrid->setSpacing(12);
-    m_splitSlotInstanceIds = QVector<int>(4, -1);
-    for (int slot = 0; slot < 4; ++slot)
+    auto* cameraGroup = new QGroupBox(QStringLiteral("三路视频"), workspace);
+    auto* cameraGrid = new QGridLayout(cameraGroup);
+    cameraGrid->setContentsMargins(10, 10, 10, 10);
+    cameraGrid->setHorizontalSpacing(10);
+    cameraGrid->setVerticalSpacing(10);
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
     {
-        auto* widget = new VideoWidget(gridHost);
-        widget->setText(QStringLiteral("空分屏"));
-        m_videoWidgets.push_back(widget);
-        connect(widget, &VideoWidget::activated, this, [this, slot]() {
-            handleSlotActivated(slot);
-        });
-        connect(widget, &VideoWidget::middleDragStarted, this, [this, slot]() {
-            handleSlotMiddleDragStarted(slot);
-        });
-        connect(widget, &VideoWidget::middleDragReleased, this, [this, slot](const QPoint& globalPos) {
-            handleSlotMiddleDragReleased(slot, globalPos);
-        });
-        connect(widget, &VideoWidget::contextCorrectionRequested, this, [this, slot](const QPointF& imagePoint, const QPoint& globalPos) {
-            handleSlotContextCorrection(slot, imagePoint, globalPos);
-        });
-        connect(widget, &VideoWidget::correctionShapeFinished, this, &MainWindow::addCorrectionShape);
-        connect(widget, &VideoWidget::hoverPixelChanged, this, [this, slot](int x, int y, int gray, bool valid) {
-            if (slot >= 0 && slot < m_splitSlotInstanceIds.size() &&
-                m_splitSlotInstanceIds[slot] == m_currentInstanceId)
-            {
-                updateHoverPixelInfo(x, y, gray, valid);
-            }
-        });
+        buildCameraPanel(cameraGrid, i, i);
     }
-    m_videoWidget = m_videoWidgets.first();
-    videoLayout->addWidget(gridHost, 1);
-    workspaceLayout->addWidget(videoCard, 1);
+    workspaceLayout->addWidget(cameraGroup, 5);
 
-    auto* rightScroll = new QScrollArea;
-    rightScroll->setObjectName(QStringLiteral("RightScroll"));
-    rightScroll->setWidgetResizable(true);
-    rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    rightScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    rightScroll->setMinimumWidth(360);
-    rightScroll->setMaximumWidth(860);
-    rightScroll->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    auto* fusionGroup = new QGroupBox(QStringLiteral("融合结果"), workspace);
+    auto* fusionLayout = new QHBoxLayout(fusionGroup);
+    fusionLayout->setContentsMargins(10, 10, 10, 10);
+    fusionLayout->setSpacing(10);
 
-    auto* rightPanel = new QWidget(rightScroll);
-    rightPanel->setObjectName(QStringLiteral("RightPanel"));
-    rightPanel->setMinimumWidth(340);
-    rightPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    auto* rightLayout = new QVBoxLayout(rightPanel);
-    rightLayout->setContentsMargins(10, 0, 10, 10);
-    rightLayout->setSpacing(16);
+    m_fusionText = new QTextEdit(fusionGroup);
+    m_fusionText->setReadOnly(true);
+    m_fusionText->setMinimumHeight(180);
+    m_fusionText->setText(QStringLiteral("等待导入视频。"));
+    m_radarWidget = new RadarWidget(fusionGroup);
+    fusionLayout->addWidget(m_fusionText, 2);
+    fusionLayout->addWidget(m_radarWidget, 3);
+    workspaceLayout->addWidget(fusionGroup, 2);
 
-    auto* panelHeader = new QHBoxLayout;
-    panelHeader->setContentsMargins(0, 0, 0, 0);
-    panelHeader->setSpacing(10);
-    auto* panelTitle = new QLabel(QStringLiteral("ANNOTATION STACK"), rightPanel);
-    panelTitle->setObjectName(QStringLiteral("PanelTitle"));
-    auto* panelKicker = new QLabel(QStringLiteral("MARK / FIX / EXPORT"), rightPanel);
-    panelKicker->setObjectName(QStringLiteral("PanelKicker"));
-    panelHeader->addWidget(panelTitle);
-    panelHeader->addStretch(1);
-    panelHeader->addWidget(panelKicker);
-    rightLayout->addLayout(panelHeader);
+    auto* controls = new QFrame(workspace);
+    controls->setFrameShape(QFrame::StyledPanel);
+    auto* controlsLayout = new QHBoxLayout(controls);
+    controlsLayout->setContentsMargins(10, 8, 10, 8);
+    controlsLayout->setSpacing(8);
 
-    m_frameInfoLabel = new QLabel(QStringLiteral("Frame: -"), rightPanel);
-    m_frameInfoLabel->setObjectName(QStringLiteral("SoftLabel"));
-    m_frameInfoLabel->setWordWrap(true);
-    m_pixelInfoLabel = new QLabel(QStringLiteral("鼠标: -"), rightPanel);
-    m_pixelInfoLabel->setObjectName(QStringLiteral("Pill"));
-    m_pixelInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_pixelInfoLabel->setWordWrap(true);
-    m_currentAnnotationsLabel = new QLabel(QStringLiteral("当前帧标注: -"), rightPanel);
-    m_currentAnnotationsLabel->setObjectName(QStringLiteral("SoftLabel"));
-    m_currentAnnotationsLabel->setWordWrap(true);
-    m_currentAnnotationsLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_resultText = new QTextEdit(rightPanel);
-    m_resultText->setObjectName(QStringLiteral("ResultConsole"));
-    m_resultText->setReadOnly(true);
-    m_resultText->setMinimumHeight(112);
-    m_resultText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_annotationPanel = new AnnotationPanel(rightPanel);
+    auto* previousButton = new QPushButton(style()->standardIcon(QStyle::SP_MediaSkipBackward), QString(), controls);
+    previousButton->setToolTip(QStringLiteral("上一帧"));
+    m_playPauseButton = new QPushButton(style()->standardIcon(QStyle::SP_MediaPlay), QString(), controls);
+    m_playPauseButton->setToolTip(QStringLiteral("播放/暂停"));
+    auto* nextButton = new QPushButton(style()->standardIcon(QStyle::SP_MediaSkipForward), QString(), controls);
+    nextButton->setToolTip(QStringLiteral("下一帧"));
 
-    auto* infoGroup = new QGroupBox(QStringLiteral("帧状态 / FRAME BOARD"), rightPanel);
-    infoGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    applyHardShadow(infoGroup, QColor(255, 210, 63), 6, 6);
-    auto* infoLayout = new QVBoxLayout(infoGroup);
-    infoLayout->setContentsMargins(14, 12, 14, 14);
-    infoLayout->setSpacing(10);
-    infoLayout->addWidget(m_frameInfoLabel);
-    infoLayout->addWidget(m_pixelInfoLabel);
-    infoLayout->addWidget(m_currentAnnotationsLabel);
-    infoLayout->addWidget(m_resultText, 1);
-
-    auto* annotationGroup = new QGroupBox(QStringLiteral("错误标注 / MARKUP COMMANDS"), rightPanel);
-    annotationGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    applyHardShadow(annotationGroup, QColor(255, 107, 107), 6, 6);
-    auto* annotationLayout = new QVBoxLayout(annotationGroup);
-    annotationLayout->setContentsMargins(14, 12, 14, 14);
-    annotationLayout->setSpacing(10);
-    annotationLayout->addWidget(m_annotationPanel);
-
-    rightLayout->addWidget(infoGroup);
-    rightLayout->addWidget(annotationGroup);
-    rightLayout->addStretch(1);
-
-    rightScroll->setWidget(rightPanel);
-    splitter->addWidget(workspace);
-    splitter->addWidget(rightScroll);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
-
-    m_controlsFrame = new QFrame(workspace);
-    auto* controlsFrame = m_controlsFrame;
-    controlsFrame->setObjectName(QStringLiteral("ControlConsole"));
-    applyHardShadow(controlsFrame, QColor(136, 212, 152), 8, 8);
-    controlsFrame->setMinimumHeight(170);
-    controlsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
-    auto* controls = new QVBoxLayout(controlsFrame);
-    controls->setContentsMargins(18, 14, 18, 16);
-    controls->setSpacing(12);
-    auto* controlsTitle = new QLabel(QStringLiteral("PLAYBACK CONSOLE"), controlsFrame);
-    controlsTitle->setObjectName(QStringLiteral("ConsoleTitle"));
-    auto* consoleBadge = new QLabel(QStringLiteral("FRAME ACCURATE"), controlsFrame);
-    consoleBadge->setObjectName(QStringLiteral("ConsoleBadge"));
-
-    auto* consoleHeader = new QHBoxLayout;
-    consoleHeader->setContentsMargins(0, 0, 0, 0);
-    consoleHeader->setSpacing(10);
-    consoleHeader->addWidget(controlsTitle);
-    consoleHeader->addStretch(1);
-    consoleHeader->addWidget(consoleBadge);
-
-    auto* transportRow = new QHBoxLayout;
-    transportRow->setSpacing(10);
-    auto* detailRow = new QHBoxLayout;
-    detailRow->setSpacing(10);
-    auto* autoPauseRow = new QHBoxLayout;
-    autoPauseRow->setSpacing(10);
-    m_playPauseButton = new QPushButton(QStringLiteral("播放"), controlsFrame);
-    m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-    m_playPauseButton->setProperty("role", QStringLiteral("primary"));
-    auto* previousButton = new QPushButton(QStringLiteral("上一帧"), controlsFrame);
-    previousButton->setIcon(style()->standardIcon(QStyle::SP_MediaSeekBackward));
-    auto* nextButton = new QPushButton(QStringLiteral("下一帧"), controlsFrame);
-    nextButton->setIcon(style()->standardIcon(QStyle::SP_MediaSeekForward));
-    auto* jumpFrameButton = new QPushButton(QStringLiteral("跳转帧"), controlsFrame);
-    auto* jumpTimeButton = new QPushButton(QStringLiteral("跳转时间"), controlsFrame);
-
-    m_slider = new QSlider(Qt::Horizontal, controlsFrame);
+    m_slider = new QSlider(Qt::Horizontal, controls);
     m_slider->setRange(0, 0);
-    m_slider->setMinimumWidth(80);
-    m_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_frameSpin = new QSpinBox(controlsFrame);
+
+    m_frameSpin = new QSpinBox(controls);
     m_frameSpin->setRange(0, 0);
-    m_frameSpin->setMinimumWidth(72);
-    m_frameSpin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-    m_timeSpin = new QDoubleSpinBox(controlsFrame);
+    m_frameSpin->setPrefix(QStringLiteral("同步帧 "));
+
+    m_timeSpin = new QDoubleSpinBox(controls);
     m_timeSpin->setRange(0.0, 0.0);
     m_timeSpin->setDecimals(3);
     m_timeSpin->setSuffix(QStringLiteral(" s"));
-    m_timeSpin->setMinimumWidth(94);
-    m_timeSpin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-    m_viewModeCombo = new QComboBox(controlsFrame);
+
+    m_viewModeCombo = new QComboBox(controls);
     m_viewModeCombo->addItem(QStringLiteral("原图"), QStringLiteral("original"));
-    m_viewModeCombo->addItem(QStringLiteral("二值"), QStringLiteral("binary"));
-    m_viewModeCombo->setMinimumWidth(72);
-    m_viewModeCombo->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
-    m_speedCombo = new QComboBox(controlsFrame);
-    m_speedCombo->addItem(QStringLiteral("1/8x"), 0.125);
-    m_speedCombo->addItem(QStringLiteral("1/4x"), 0.25);
-    m_speedCombo->addItem(QStringLiteral("1/2x"), 0.5);
-    m_speedCombo->addItem(QStringLiteral("1x"), 1.0);
-    m_speedCombo->addItem(QStringLiteral("2x"), 2.0);
-    m_speedCombo->addItem(QStringLiteral("4x"), 4.0);
-    m_speedCombo->addItem(QStringLiteral("8x"), 8.0);
+    m_viewModeCombo->addItem(QStringLiteral("二值图"), QStringLiteral("binary"));
+
+    m_speedCombo = new QComboBox(controls);
+    const QList<QPair<QString, double>> speeds = {
+        { QStringLiteral("1/8x"), 0.125 },
+        { QStringLiteral("1/4x"), 0.25 },
+        { QStringLiteral("1/2x"), 0.5 },
+        { QStringLiteral("1x"), 1.0 },
+        { QStringLiteral("2x"), 2.0 },
+        { QStringLiteral("4x"), 4.0 },
+        { QStringLiteral("8x"), 8.0 }
+    };
+    for (const auto& item : speeds)
+    {
+        m_speedCombo->addItem(item.first, item.second);
+    }
     m_speedCombo->setCurrentIndex(3);
-    m_speedCombo->setMinimumWidth(66);
-    m_speedCombo->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-    m_autoPauseEnableCheck = new QCheckBox(QStringLiteral("自动暂停"), controlsFrame);
-    m_autoPauseJumpCheck = new QCheckBox(QStringLiteral("目标跳变"), controlsFrame);
-    m_autoPauseCountCheck = new QCheckBox(QStringLiteral("数量变化"), controlsFrame);
-    m_autoPauseJumpThresholdSpin = new QDoubleSpinBox(controlsFrame);
-    m_autoPauseJumpThresholdSpin->setRange(0.0, 1000.0);
-    m_autoPauseJumpThresholdSpin->setDecimals(1);
-    m_autoPauseJumpThresholdSpin->setValue(10.0);
-    m_autoPauseJumpThresholdSpin->setSuffix(QStringLiteral(" px"));
-    m_autoPauseJumpThresholdSpin->setMinimumWidth(82);
-    m_autoPauseJumpThresholdSpin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 
-    auto* viewLabel = new QLabel(QStringLiteral("视图"), controlsFrame);
-    viewLabel->setObjectName(QStringLiteral("SoftLabel"));
-    auto* speedLabel = new QLabel(QStringLiteral("倍速"), controlsFrame);
-    speedLabel->setObjectName(QStringLiteral("SoftLabel"));
-    auto* frameLabel = new QLabel(QStringLiteral("Frame"), controlsFrame);
-    frameLabel->setObjectName(QStringLiteral("SoftLabel"));
-    auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
-    timeLabel->setObjectName(QStringLiteral("SoftLabel"));
+    m_showOverlayCheck = new QCheckBox(QStringLiteral("标注层"), controls);
+    m_showOverlayCheck->setChecked(true);
 
-    transportRow->addWidget(m_playPauseButton);
-    transportRow->addWidget(previousButton);
-    transportRow->addWidget(nextButton);
-    transportRow->addWidget(jumpFrameButton);
-    transportRow->addWidget(jumpTimeButton);
-    transportRow->addStretch(1);
-    detailRow->addWidget(viewLabel);
-    detailRow->addWidget(m_viewModeCombo, 1);
-    detailRow->addWidget(speedLabel);
-    detailRow->addWidget(m_speedCombo);
-    detailRow->addStretch(1);
-    detailRow->addWidget(frameLabel);
-    detailRow->addWidget(m_frameSpin);
-    detailRow->addWidget(timeLabel);
-    detailRow->addWidget(m_timeSpin);
-    autoPauseRow->addWidget(m_autoPauseEnableCheck);
-    autoPauseRow->addWidget(m_autoPauseJumpCheck);
-    autoPauseRow->addWidget(m_autoPauseJumpThresholdSpin);
-    autoPauseRow->addWidget(m_autoPauseCountCheck);
-    autoPauseRow->addWidget(m_slider, 1);
-    controls->addLayout(consoleHeader);
-    controls->addLayout(transportRow);
-    controls->addLayout(detailRow);
-    controls->addLayout(autoPauseRow);
-    workspaceLayout->addWidget(controlsFrame, 0);
+    controlsLayout->addWidget(previousButton);
+    controlsLayout->addWidget(m_playPauseButton);
+    controlsLayout->addWidget(nextButton);
+    controlsLayout->addWidget(m_slider, 1);
+    controlsLayout->addWidget(m_frameSpin);
+    controlsLayout->addWidget(m_timeSpin);
+    controlsLayout->addWidget(m_viewModeCombo);
+    controlsLayout->addWidget(m_speedCombo);
+    controlsLayout->addWidget(m_showOverlayCheck);
+    workspaceLayout->addWidget(controls);
 
-    setCentralWidget(central);
-    updateResponsiveConsole();
+    m_videoInfoLabel = new QLabel(QStringLiteral("未导入视频"), workspace);
+    m_videoInfoLabel->setWordWrap(true);
+    m_frameInfoLabel = new QLabel(workspace);
+    m_frameInfoLabel->setWordWrap(true);
+    m_pixelInfoLabel = new QLabel(QStringLiteral("像素：-"), workspace);
+    m_pixelInfoLabel->setWordWrap(true);
+    workspaceLayout->addWidget(m_videoInfoLabel);
+    workspaceLayout->addWidget(m_frameInfoLabel);
+    workspaceLayout->addWidget(m_pixelInfoLabel);
 
-    connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
-    connect(newInstanceRailButton, &QToolButton::clicked, this, &MainWindow::newInstance);
-    connect(importAlgorithmRailButton, &QToolButton::clicked, this, &MainWindow::importAlgorithmFile);
-    connect(newInstanceButton, &QPushButton::clicked, this, &MainWindow::newInstance);
-    connect(saveRailButton, &QToolButton::clicked, this, &MainWindow::saveAnnotation);
-    connect(loadRailButton, &QToolButton::clicked, this, &MainWindow::loadAnnotation);
-    connect(exportAviRailButton, &QToolButton::clicked, this, &MainWindow::exportMarkedAvi);
-    connect(exportCsvRailButton, &QToolButton::clicked, this, &MainWindow::exportCsv);
-    connect(exitRailButton, &QToolButton::clicked, this, &QWidget::close);
-    connect(m_playPauseButton, &QPushButton::clicked, this, &MainWindow::togglePlayPause);
+    m_annotationPanel = new AnnotationPanel(central);
+    auto* annotationScroll = new QScrollArea(central);
+    annotationScroll->setWidgetResizable(true);
+    annotationScroll->setMinimumWidth(360);
+    annotationScroll->setWidget(m_annotationPanel);
+
+    root->addWidget(workspace, 1);
+    root->addWidget(annotationScroll);
+
     connect(previousButton, &QPushButton::clicked, this, &MainWindow::previousFrame);
+    connect(m_playPauseButton, &QPushButton::clicked, this, &MainWindow::togglePlayPause);
     connect(nextButton, &QPushButton::clicked, this, &MainWindow::nextFrame);
-    connect(jumpFrameButton, &QPushButton::clicked, this, &MainWindow::jumpToFrame);
-    connect(jumpTimeButton, &QPushButton::clicked, this, &MainWindow::jumpToTime);
-    connect(m_slider, &QSlider::sliderPressed, this, &MainWindow::pause);
-    connect(m_slider, &QSlider::sliderMoved, this, [this](int value) {
-        pause();
-        showFrame(value);
+    connect(m_slider, &QSlider::sliderMoved, this, &MainWindow::showFrameFromSlider);
+    connect(m_frameSpin, &QSpinBox::editingFinished, this, &MainWindow::jumpToFrame);
+    connect(m_timeSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        if (!m_updatingControls && m_timeSpin->hasFocus())
+        {
+            jumpToTime();
+        }
     });
-    connect(m_slider, &QSlider::valueChanged, this, &MainWindow::showFrameFromSlider);
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-        renderAllDisplayedInstances();
-        refreshCurrentInstanceUi();
+        showFrame(m_timelineFrame);
     });
     connect(m_speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         setPlaybackSpeed(m_speedCombo->currentData().toDouble());
     });
-    connect(m_autoPauseEnableCheck, &QCheckBox::toggled, this, [this]() {
-        for (AnalyzerInstance* instance : m_instances)
-        {
-            if (instance != nullptr)
-            {
-                instance->hasPreviousAutoPauseResult = false;
-            }
-        }
+    connect(m_showOverlayCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        m_showOverlay = checked;
+        showFrame(m_timelineFrame);
     });
-    connect(m_annotationPanel, &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
-            this, &MainWindow::saveCurrentFrameCorrections);
-    connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationsRequested,
-            this, &MainWindow::deleteAnnotations);
-    connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionsRequested,
-            this, &MainWindow::deleteCorrections);
-    connect(m_annotationPanel, &AnnotationPanel::batchAddCorrectionsRequested,
-            this, &MainWindow::batchAddCorrections);
-    connect(m_annotationPanel, &AnnotationPanel::autoMatchCorrectionFramesRequested,
-            this, &MainWindow::autoMatchCorrectionFrames);
-    connect(m_annotationPanel, &AnnotationPanel::batchAddCorrectionsToFramesRequested,
-            this, &MainWindow::batchAddCorrectionsToFrames);
-    connect(m_instanceList, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
-        if (item != nullptr)
-        {
-            selectInstance(item->data(Qt::UserRole).toInt());
-        }
-    });
-    connect(m_instanceList, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
-        if (item == nullptr)
-        {
-            return;
-        }
-        setInstanceVisible(item->data(Qt::UserRole).toInt(), item->checkState() == Qt::Checked);
-        updateSplitLayout();
-        refreshInstanceList();
-    });
+
+    connect(m_annotationPanel,
+            &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
+            this,
+            &MainWindow::saveCurrentFrameCorrections);
+    connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationsRequested, this, &MainWindow::deleteAnnotations);
+    connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionsRequested, this, &MainWindow::deleteCorrections);
+    connect(m_annotationPanel,
+            &AnnotationPanel::batchAddCorrectionsRequested,
+            this,
+            &MainWindow::batchAddCorrections);
+    connect(m_annotationPanel,
+            &AnnotationPanel::autoMatchCorrectionFramesRequested,
+            this,
+            &MainWindow::autoMatchCorrectionFrames);
+    connect(m_annotationPanel,
+            &AnnotationPanel::batchAddCorrectionsToFramesRequested,
+            this,
+            &MainWindow::batchAddCorrectionsToFrames);
     connect(m_annotationPanel, &AnnotationPanel::correctionToolChanged, this, [this](const QString& tool) {
         for (VideoWidget* widget : m_videoWidgets)
         {
-            widget->setCorrectionTool(tool);
+            if (widget != nullptr)
+            {
+                widget->setCorrectionTool(tool);
+            }
         }
     });
-    connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged, this, [this](const QColor& color, int lineWidth) {
+    connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged, this, [this](const QColor& color, int width) {
         for (VideoWidget* widget : m_videoWidgets)
         {
-            widget->setCorrectionStyle(color, lineWidth);
+            if (widget != nullptr)
+            {
+                widget->setCorrectionStyle(color, width);
+            }
         }
     });
-    connect(m_annotationPanel, &AnnotationPanel::autoIdentifyRequested,
-            this, &MainWindow::autoIdentifyCorrectionTargets);
-    connect(m_annotationPanel, &AnnotationPanel::recordActivated,
-            this, &MainWindow::jumpToRecordFrame);
+    connect(m_annotationPanel, &AnnotationPanel::autoIdentifyRequested, this, &MainWindow::autoIdentifyCorrectionTargets);
+    connect(m_annotationPanel, &AnnotationPanel::recordActivated, this, &MainWindow::jumpToRecordFrame);
+
+    setStyleSheet(QStringLiteral(
+        "QMainWindow { background:#101318; color:#e7edf3; }"
+        "QWidget { color:#e7edf3; font-size:13px; }"
+        "QGroupBox { border:1px solid #3a4350; border-radius:6px; margin-top:12px; padding-top:8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left:10px; padding:0 4px; }"
+        "QPushButton { background:#263241; border:1px solid #506070; border-radius:4px; padding:6px 10px; }"
+        "QPushButton:checked { background:#1e6f9f; border-color:#4bd1ff; }"
+        "QPushButton:hover { background:#334255; }"
+        "QTextEdit, QListWidget, QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {"
+        " background:#151b23; border:1px solid #3a4350; border-radius:4px; padding:3px; }"
+        "QLabel { color:#d6dee8; }"));
+}
+
+void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int column)
+{
+    if (layout == nullptr || !isValidCameraIndex(cameraIndex))
+    {
+        return;
+    }
+
+    auto* panel = new QWidget(layout->parentWidget());
+    auto* panelLayout = new QVBoxLayout(panel);
+    panelLayout->setContentsMargins(0, 0, 0, 0);
+    panelLayout->setSpacing(6);
+
+    auto* header = new QHBoxLayout();
+    header->setContentsMargins(0, 0, 0, 0);
+    header->setSpacing(6);
+
+    auto* selectButton = new QPushButton(QStringLiteral("摄像头 %1").arg(cameraIndex + 1), panel);
+    selectButton->setCheckable(true);
+    auto* videoButton = new QPushButton(QStringLiteral("导入视频"), panel);
+    auto* algorithmButton = new QPushButton(QStringLiteral("导入处理代码"), panel);
+    auto* syncSpin = new QSpinBox(panel);
+    syncSpin->setRange(0, 0);
+    syncSpin->setEnabled(false);
+    syncSpin->setPrefix(QStringLiteral("同步帧 "));
+
+    header->addWidget(selectButton);
+    header->addWidget(videoButton);
+    header->addWidget(algorithmButton);
+    header->addWidget(syncSpin);
+    panelLayout->addLayout(header);
+
+    auto* videoWidget = new VideoWidget(panel);
+    videoWidget->setText(QStringLiteral("导入摄像头 %1 视频").arg(cameraIndex + 1));
+    auto* infoLabel = new QLabel(QStringLiteral("未导入视频"), panel);
+    infoLabel->setWordWrap(true);
+    infoLabel->setMinimumHeight(86);
+
+    panelLayout->addWidget(videoWidget, 1);
+    panelLayout->addWidget(infoLabel);
+    layout->addWidget(panel, 0, column);
+
+    m_videoWidgets[cameraIndex] = videoWidget;
+    m_cameraInfoLabels[cameraIndex] = infoLabel;
+    m_syncFrameSpins[cameraIndex] = syncSpin;
+    m_cameraSelectButtons[cameraIndex] = selectButton;
+
+    connect(selectButton, &QPushButton::clicked, this, [this, cameraIndex]() {
+        selectCamera(cameraIndex);
+    });
+    connect(videoButton, &QPushButton::clicked, this, [this, cameraIndex]() {
+        importCameraVideo(cameraIndex);
+    });
+    connect(algorithmButton, &QPushButton::clicked, this, [this, cameraIndex]() {
+        importCameraAlgorithm(cameraIndex);
+    });
+    connect(syncSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this, cameraIndex](int value) {
+        if (!isValidCameraIndex(cameraIndex))
+        {
+            return;
+        }
+        m_cameras[cameraIndex].syncFrame = value;
+        const int minFrame = timelineMinFrame();
+        const int maxFrame = timelineMaxFrame();
+        m_timelineFrame = qBound(minFrame, m_timelineFrame, maxFrame);
+        showFrame(m_timelineFrame);
+    });
+    connect(videoWidget, &VideoWidget::activated, this, [this, cameraIndex]() {
+        selectCamera(cameraIndex);
+    });
+    connect(videoWidget,
+            &VideoWidget::correctionShapeFinished,
+            this,
+            [this, cameraIndex](const QString& shapeType, const QVector<QPointF>& points) {
+                selectCamera(cameraIndex);
+                addCorrectionShape(shapeType, points);
+            });
+    connect(videoWidget, &VideoWidget::hoverPixelChanged, this, &MainWindow::updateHoverPixelInfo);
 }
 
 void MainWindow::buildMenus()
 {
-    auto* fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
-    fileMenu->addAction(QStringLiteral("新建实例"), this, &MainWindow::newInstance);
-    fileMenu->addAction(QStringLiteral("导入 C 文件"), this, &MainWindow::importAlgorithmFile);
+    QMenu* fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
+    fileMenu->addAction(QStringLiteral("同时导入三路视频"), this, &MainWindow::importAllCameraVideos);
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        fileMenu->addAction(QStringLiteral("导入摄像头 %1 视频").arg(i + 1), this, [this, i]() {
+            importCameraVideo(i);
+        });
+    }
     fileMenu->addSeparator();
-    fileMenu->addAction(QStringLiteral("打开视频"), this, &MainWindow::openVideo);
-    fileMenu->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
-    fileMenu->addAction(QStringLiteral("读取标注"), this, &MainWindow::loadAnnotation);
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        fileMenu->addAction(QStringLiteral("导入摄像头 %1 处理代码").arg(i + 1), this, [this, i]() {
+            importCameraAlgorithm(i);
+        });
+    }
+    fileMenu->addAction(QStringLiteral("导入三路融合分析代码"), this, &MainWindow::importFusionAlgorithm);
     fileMenu->addSeparator();
-    fileMenu->addAction(QStringLiteral("导出标注 AVI"), this, &MainWindow::exportMarkedAvi);
-    fileMenu->addAction(QStringLiteral("导出 CSV"), this, &MainWindow::exportCsv);
+    fileMenu->addAction(QStringLiteral("保存当前摄像头标注"), this, &MainWindow::saveAnnotation);
+    fileMenu->addAction(QStringLiteral("加载当前摄像头标注"), this, &MainWindow::loadAnnotation);
     fileMenu->addSeparator();
-    fileMenu->addAction(QStringLiteral("退出"), this, &QWidget::close);
+    fileMenu->addAction(QStringLiteral("导出当前摄像头标注视频"), this, &MainWindow::exportMarkedAvi);
+    fileMenu->addAction(QStringLiteral("导出当前摄像头检测 CSV"), this, &MainWindow::exportCsv);
 
-    auto* viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
-    auto* fitAction = viewMenu->addAction(QStringLiteral("自适应窗口 / 保持比例"));
-    fitAction->setCheckable(true);
-    fitAction->setChecked(true);
-    fitAction->setEnabled(false);
-    auto* overlayAction = viewMenu->addAction(QStringLiteral("显示检测覆盖"));
+    QMenu* playbackMenu = menuBar()->addMenu(QStringLiteral("播放"));
+    playbackMenu->addAction(QStringLiteral("播放"), this, &MainWindow::play);
+    playbackMenu->addAction(QStringLiteral("暂停"), this, &MainWindow::pause);
+    playbackMenu->addAction(QStringLiteral("上一帧"), this, &MainWindow::previousFrame);
+    playbackMenu->addAction(QStringLiteral("下一帧"), this, &MainWindow::nextFrame);
+
+    QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
+    QAction* overlayAction = viewMenu->addAction(QStringLiteral("显示检测标注层"));
     overlayAction->setCheckable(true);
     overlayAction->setChecked(true);
     connect(overlayAction, &QAction::toggled, this, [this](bool checked) {
-        m_showOverlay = checked;
-        showFrame(m_currentFrame);
+        m_showOverlayCheck->setChecked(checked);
     });
-
-    auto* helpMenu = menuBar()->addMenu(QStringLiteral("帮助"));
-    helpMenu->addAction(QStringLiteral("关于"), this, [this]() {
-        QMessageBox::about(this,
-                           QStringLiteral("关于 BeaconImageAnalyzer"),
-                           QStringLiteral("离线红外信标图像分析、标注和导出工具。"));
-    });
-
-    setStyleSheet(djiStyleSheet());
+    connect(m_showOverlayCheck, &QCheckBox::toggled, overlayAction, &QAction::setChecked);
 }
 
-void MainWindow::newInstance()
+void MainWindow::importAllCameraVideos()
 {
-    const QString rootDir = QFileDialog::getExistingDirectory(this,
-                                                              QStringLiteral("选择新实例文件夹"),
-                                                              defaultInstancesRoot());
-    if (rootDir.isEmpty())
-    {
-        return;
-    }
-
-    QString algorithmPath;
-    QString error;
-    if (!seedAlgorithmFolder(rootDir, defaultAlgorithmPath(), &algorithmPath, &error))
-    {
-        QMessageBox::critical(this, QStringLiteral("新建实例失败"), error);
-        return;
-    }
-
-    const QString defaultName = QFileInfo(rootDir).fileName().trimmed().isEmpty()
-        ? QStringLiteral("实例 %1").arg(m_nextInstanceId)
-        : QFileInfo(rootDir).fileName();
-    const QString name = QInputDialog::getText(this,
-                                               QStringLiteral("实例名称"),
-                                               QStringLiteral("名称"),
-                                               QLineEdit::Normal,
-                                               defaultName);
-    AnalyzerInstance* instance = createInstance(rootDir,
-                                                algorithmPath,
-                                                name.isEmpty() ? defaultName : name,
-                                                true,
-                                                &error);
-    if (instance == nullptr)
-    {
-        QMessageBox::critical(this, QStringLiteral("新建实例失败"), error);
-        return;
-    }
-    selectInstance(instance->id);
-}
-
-void MainWindow::importAlgorithmFile()
-{
-    const QString sourcePath = QFileDialog::getOpenFileName(this,
-                                                            QStringLiteral("导入 C 文件"),
+    const QStringList paths = QFileDialog::getOpenFileNames(this,
+                                                            QStringLiteral("按摄像头 1/2/3 顺序选择三路视频"),
                                                             QString(),
-                                                            QStringLiteral("C Source (*.c)"));
-    if (sourcePath.isEmpty())
+                                                            QStringLiteral("视频文件 (*.avi *.mp4 *.mov *.mkv);;所有文件 (*)"));
+    if (paths.isEmpty())
     {
+        return;
+    }
+    if (paths.size() != BEACON_CAMERA_COUNT)
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("导入三路视频"),
+                             QStringLiteral("请一次选择 3 个视频文件，选择顺序对应摄像头 1、2、3。"));
         return;
     }
 
-    const QString rootDir = QFileDialog::getExistingDirectory(this,
-                                                              QStringLiteral("选择实例文件夹"),
-                                                              defaultInstancesRoot());
-    if (rootDir.isEmpty())
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
     {
-        return;
+        if (!loadCameraVideo(i, paths[i]))
+        {
+            return;
+        }
     }
-
-    QString algorithmPath;
-    QString error;
-    if (!seedAlgorithmFolder(rootDir, sourcePath, &algorithmPath, &error))
-    {
-        QMessageBox::critical(this, QStringLiteral("导入 C 文件失败"), error);
-        return;
-    }
-
-    const QString defaultName = QFileInfo(rootDir).fileName().trimmed().isEmpty()
-        ? QFileInfo(sourcePath).completeBaseName()
-        : QFileInfo(rootDir).fileName();
-    const QString name = QInputDialog::getText(this,
-                                               QStringLiteral("实例名称"),
-                                               QStringLiteral("名称"),
-                                               QLineEdit::Normal,
-                                               defaultName);
-    AnalyzerInstance* instance = createInstance(rootDir,
-                                                algorithmPath,
-                                                name.isEmpty() ? defaultName : name,
-                                                true,
-                                                &error);
-    if (instance == nullptr)
-    {
-        QMessageBox::critical(this, QStringLiteral("导入 C 文件失败"), error);
-        return;
-    }
-    selectInstance(instance->id);
+    showFrame(0);
 }
 
-void MainWindow::openVideo()
+bool MainWindow::isValidCameraIndex(int cameraIndex) const
 {
-    QString instanceError;
-    if (!ensureDefaultInstance(&instanceError))
+    return cameraIndex >= 0 && cameraIndex < BEACON_CAMERA_COUNT;
+}
+
+CameraChannel* MainWindow::currentCamera()
+{
+    return isValidCameraIndex(m_currentCameraIndex) ? &m_cameras[m_currentCameraIndex] : nullptr;
+}
+
+const CameraChannel* MainWindow::currentCamera() const
+{
+    return isValidCameraIndex(m_currentCameraIndex) ? &m_cameras[m_currentCameraIndex] : nullptr;
+}
+
+void MainWindow::importCameraVideo(int cameraIndex)
+{
+    if (!isValidCameraIndex(cameraIndex))
     {
-        QMessageBox::critical(this, QStringLiteral("打开失败"), instanceError);
         return;
     }
 
     const QString path = QFileDialog::getOpenFileName(this,
-                                                      QStringLiteral("打开 AVI"),
+                                                      QStringLiteral("导入摄像头 %1 视频").arg(cameraIndex + 1),
                                                       QString(),
-                                                      QStringLiteral("AVI Video (*.avi)"));
+                                                      QStringLiteral("视频文件 (*.avi *.mp4 *.mov *.mkv);;所有文件 (*)"));
     if (path.isEmpty())
     {
         return;
     }
 
-    saveProject();
-    loadVideoFile(path, true, 0);
+    loadCameraVideo(cameraIndex, path);
 }
 
-bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame)
+bool MainWindow::loadCameraVideo(int cameraIndex, const QString& path)
 {
-    QString error;
-    if (!m_reader.open(path, &error))
+    if (!isValidCameraIndex(cameraIndex))
     {
-        QMessageBox::critical(this, QStringLiteral("打开失败"), error);
         return false;
     }
 
-    m_currentVideoPath = path;
-    m_currentFrame = fallbackFrame;
-    const double detectedFps = m_reader.videoFps();
-    m_usedFps = std::isfinite(detectedFps) && detectedFps > 0.0 ? detectedFps : 50.0;
-    resetPlaybackClock();
+    CameraChannel& camera = m_cameras[cameraIndex];
+    QString error;
+    if (!camera.reader.open(path, &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("导入视频失败"), error);
+        return false;
+    }
 
-    m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
-    m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
-    m_timeSpin->setRange(0.0, frameTime(qMax(0, m_reader.frameCount() - 1)));
-    m_annotationPanel->setVideoFrameRange(0, qMax(0, m_reader.frameCount() - 1));
+    camera.videoPath = QFileInfo(path).absoluteFilePath();
+    camera.usedFps = camera.reader.videoFps() > 0.0 ? camera.reader.videoFps() : 50.0;
+    camera.syncFrame = 0;
+    camera.loaded = true;
+    camera.annotations.clear();
+    std::memset(&camera.currentResult, 0, sizeof(camera.currentResult));
+    camera.currentGray = QImage();
 
-    m_videoInfoLabel->setText(QStringLiteral("%1 | %2x%3 | %4帧\nFPS: %5 / 使用 %6 | %7 | %8 %9-bit")
-                                  .arg(QFileInfo(path).fileName())
-                                  .arg(m_reader.width())
-                                  .arg(m_reader.height())
-                                  .arg(m_reader.frameCount())
-                                  .arg(m_reader.videoFps(), 0, 'f', 3)
-                                  .arg(m_usedFps, 0, 'f', 3)
-                                  .arg(m_reader.backendName())
-                                  .arg(m_reader.codecName().trimmed())
-                                  .arg(m_reader.bitCount()));
+    QSpinBox* syncSpin = m_syncFrameSpins[cameraIndex];
+    if (syncSpin != nullptr)
+    {
+        const QSignalBlocker blocker(syncSpin);
+        syncSpin->setEnabled(true);
+        syncSpin->setRange(0, qMax(0, camera.reader.frameCount() - 1));
+        syncSpin->setValue(0);
+    }
 
-    if (m_reader.width() != BEACON_IMAGE_W || m_reader.height() != BEACON_IMAGE_H)
+    if (camera.reader.width() != BEACON_IMAGE_W || camera.reader.height() != BEACON_IMAGE_H)
     {
         QMessageBox::warning(this,
-                             QStringLiteral("尺寸提醒"),
-                             QStringLiteral("当前算法只处理 188x120，视频尺寸不匹配时检测结果会为空。"));
+                             QStringLiteral("视频尺寸不匹配"),
+                             QStringLiteral("摄像头 %1 视频尺寸为 %2x%3，算法输入要求 %4x%5。仍会显示视频，但检测结果可能为空。")
+                                 .arg(cameraIndex + 1)
+                                 .arg(camera.reader.width())
+                                 .arg(camera.reader.height())
+                                 .arg(BEACON_IMAGE_W)
+                                 .arg(BEACON_IMAGE_H));
     }
 
-    if (restoreProject)
-    {
-        loadProject();
-    }
-
-    updateAnnotationList();
-    renderAllDisplayedInstances();
-    showFrame(qBound(0, m_currentFrame, qMax(0, m_reader.frameCount() - 1)));
-    refreshInstanceList();
-    statusBar()->showMessage(QStringLiteral("视频已打开"), 3000);
+    selectCamera(cameraIndex);
+    m_timelineFrame = qBound(timelineMinFrame(), m_timelineFrame, timelineMaxFrame());
+    showFrame(m_timelineFrame);
+    statusBar()->showMessage(QStringLiteral("已导入摄像头 %1 视频：%2").arg(cameraIndex + 1).arg(camera.videoPath), 3000);
     return true;
+}
+
+void MainWindow::importCameraAlgorithm(int cameraIndex)
+{
+    if (!isValidCameraIndex(cameraIndex))
+    {
+        return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      QStringLiteral("导入摄像头 %1 图像处理 C 文件").arg(cameraIndex + 1),
+                                                      QString(),
+                                                      QStringLiteral("C 文件 (*.c);;所有文件 (*)"));
+    if (path.isEmpty())
+    {
+        return;
+    }
+
+    loadCameraAlgorithm(cameraIndex, path);
+}
+
+bool MainWindow::loadCameraAlgorithm(int cameraIndex, const QString& path)
+{
+    if (!isValidCameraIndex(cameraIndex))
+    {
+        return false;
+    }
+
+    CameraChannel& camera = m_cameras[cameraIndex];
+    QString error;
+    if (!camera.runner.loadSourceFile(path, cameraBuildDir(QStringLiteral("camera_%1").arg(cameraIndex + 1)), &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("导入处理代码失败"), error);
+        return false;
+    }
+
+    camera.algorithmPath = camera.runner.sourcePath();
+    showFrame(m_timelineFrame);
+    statusBar()->showMessage(QStringLiteral("已导入摄像头 %1 处理代码").arg(cameraIndex + 1), 3000);
+    return true;
+}
+
+void MainWindow::importFusionAlgorithm()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      QStringLiteral("导入三摄像头融合分析 C 文件"),
+                                                      QString(),
+                                                      QStringLiteral("C 文件 (*.c);;所有文件 (*)"));
+    if (path.isEmpty())
+    {
+        return;
+    }
+
+    QString error;
+    if (!m_fusionRunner.loadSourceFile(path, cameraBuildDir(QStringLiteral("fusion")), &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("导入融合分析代码失败"), error);
+        return;
+    }
+
+    updateFusion();
+    statusBar()->showMessage(QStringLiteral("已导入三路融合分析代码"), 3000);
+}
+
+bool MainWindow::hasAnyVideo() const
+{
+    return std::any_of(m_cameras.begin(), m_cameras.end(), [](const CameraChannel& camera) {
+        return camera.loaded && camera.reader.isOpen();
+    });
+}
+
+bool MainWindow::hasAllVideos() const
+{
+    return std::all_of(m_cameras.begin(), m_cameras.end(), [](const CameraChannel& camera) {
+        return camera.loaded && camera.reader.isOpen();
+    });
+}
+
+int MainWindow::timelineMinFrame() const
+{
+    bool found = false;
+    int minFrame = 0;
+    for (const CameraChannel& camera : m_cameras)
+    {
+        if (!camera.loaded || !camera.reader.isOpen())
+        {
+            continue;
+        }
+
+        const int cameraMin = -camera.syncFrame;
+        minFrame = found ? qMax(minFrame, cameraMin) : cameraMin;
+        found = true;
+    }
+    return found ? minFrame : 0;
+}
+
+int MainWindow::timelineMaxFrame() const
+{
+    bool found = false;
+    int maxFrame = 0;
+    for (const CameraChannel& camera : m_cameras)
+    {
+        if (!camera.loaded || !camera.reader.isOpen())
+        {
+            continue;
+        }
+
+        const int cameraMax = camera.reader.frameCount() - 1 - camera.syncFrame;
+        maxFrame = found ? qMin(maxFrame, cameraMax) : cameraMax;
+        found = true;
+    }
+    return found ? qMax(timelineMinFrame(), maxFrame) : 0;
+}
+
+int MainWindow::timelineFrameCount() const
+{
+    return timelineMaxFrame() - timelineMinFrame() + 1;
+}
+
+int MainWindow::cameraFrameForTimeline(const CameraChannel& camera, int timelineFrame) const
+{
+    return camera.syncFrame + timelineFrame;
+}
+
+void MainWindow::showFrame(int frameIndex)
+{
+    if (!hasAnyVideo())
+    {
+        updateFrameInfo();
+        updateAllCameraInfo();
+        updateFusion();
+        return;
+    }
+
+    const int minFrame = timelineMinFrame();
+    const int maxFrame = timelineMaxFrame();
+    m_timelineFrame = qBound(minFrame, frameIndex, maxFrame);
+
+    for (CameraChannel& camera : m_cameras)
+    {
+        if (!camera.loaded || !camera.reader.isOpen())
+        {
+            continue;
+        }
+
+        const int cameraFrame = cameraFrameForTimeline(camera, m_timelineFrame);
+        if (cameraFrame < 0 || cameraFrame >= camera.reader.frameCount())
+        {
+            camera.currentGray = QImage();
+            std::memset(&camera.currentResult, 0, sizeof(camera.currentResult));
+            continue;
+        }
+
+        QImage gray;
+        QString error;
+        if (!camera.reader.readFrame(cameraFrame, &gray, &error))
+        {
+            statusBar()->showMessage(QStringLiteral("%1 读取帧失败：%2").arg(camera.name, error), 3000);
+            camera.currentGray = QImage();
+            std::memset(&camera.currentResult, 0, sizeof(camera.currentResult));
+            continue;
+        }
+
+        camera.currentGray = gray;
+        camera.currentResult = camera.runner.process(gray);
+    }
+
+    refreshCurrentCameraUi();
+    for (CameraChannel& camera : m_cameras)
+    {
+        renderCamera(&camera);
+    }
+    updateFusion();
+    updateAllCameraInfo();
+    updateFrameInfo();
+
+    m_updatingControls = true;
+    m_slider->setRange(minFrame, maxFrame);
+    m_slider->setValue(m_timelineFrame);
+    m_frameSpin->setRange(minFrame, maxFrame);
+    m_frameSpin->setValue(m_timelineFrame);
+    m_timeSpin->setRange(frameTime(minFrame), frameTime(maxFrame));
+    m_timeSpin->setValue(frameTime(m_timelineFrame));
+    m_updatingControls = false;
+}
+
+void MainWindow::renderCamera(CameraChannel* camera)
+{
+    if (camera == nullptr || !isValidCameraIndex(camera->index))
+    {
+        return;
+    }
+
+    VideoWidget* widget = m_videoWidgets[camera->index];
+    if (widget == nullptr)
+    {
+        return;
+    }
+
+    if (!camera->loaded || camera->currentGray.isNull())
+    {
+        widget->setImage(QImage());
+        widget->setPixelSourceImage(QImage());
+        return;
+    }
+
+    QImage displayImage = camera->currentGray;
+    if (viewMode() == QStringLiteral("binary"))
+    {
+        const QImage binary = camera->runner.binaryImage(camera->currentGray);
+        if (!binary.isNull())
+        {
+            displayImage = binary;
+        }
+    }
+
+    QVector<CorrectionShape> corrections =
+        camera->annotations.correctionsForFrame(cameraFrameForTimeline(*camera, m_timelineFrame));
+    if (camera->index == m_currentCameraIndex && m_annotationPanel != nullptr)
+    {
+        corrections = m_annotationPanel->draftCorrections();
+    }
+
+    const QImage rendered = FrameRenderer::render(displayImage,
+                                                  camera->currentResult,
+                                                  corrections,
+                                                  1,
+                                                  m_showOverlay);
+    widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1);
+    widget->setPixelSourceImage(camera->currentGray);
+    widget->setImage(rendered);
+    widget->setSelected(camera->index == m_currentCameraIndex);
+}
+
+void MainWindow::updateFusion()
+{
+    beacon_result_t cameraResults[BEACON_CAMERA_COUNT];
+    std::memset(cameraResults, 0, sizeof(cameraResults));
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        if (m_cameras[i].loaded)
+        {
+            cameraResults[i] = m_cameras[i].currentResult;
+        }
+    }
+
+    m_fusionResult = m_fusionRunner.analyze(cameraResults);
+    if (m_radarWidget != nullptr)
+    {
+        m_radarWidget->setResult(m_fusionResult);
+    }
+
+    if (m_fusionText == nullptr)
+    {
+        return;
+    }
+
+    QStringList lines;
+    lines << QStringLiteral("融合后信标灯总数：%1").arg((int)m_fusionResult.count);
+    if (!hasAllVideos())
+    {
+        lines << QStringLiteral("提示：尚未导入全部三路视频，融合结果只使用已导入摄像头的当前帧。");
+    }
+    if (!m_fusionRunner.usesDynamicLibrary())
+    {
+        lines << QStringLiteral("融合代码：使用内置默认分析逻辑");
+    }
+    else
+    {
+        lines << QStringLiteral("融合代码：%1").arg(m_fusionRunner.sourcePath());
+    }
+    lines << QString();
+    lines << QStringLiteral("index,camera,source,angle_deg,distance,x,y");
+    for (int i = 0; i < m_fusionResult.count && i < BEACON_MAX_FUSION_TARGET_COUNT; ++i)
+    {
+        const beacon_fusion_target_t& target = m_fusionResult.targets[i];
+        if (target.valid == 0)
+        {
+            continue;
+        }
+        lines << QStringLiteral("%1,C%2,#%3,%4,%5,%6,%7")
+                     .arg(i)
+                     .arg((int)target.camera_index + 1)
+                     .arg((int)target.source_index)
+                     .arg(target.angle_deg, 0, 'f', 2)
+                     .arg(target.distance, 0, 'f', 2)
+                     .arg(target.x, 0, 'f', 2)
+                     .arg(target.y, 0, 'f', 2);
+    }
+
+    m_fusionText->setPlainText(lines.join(QLatin1Char('\n')));
+}
+
+void MainWindow::updateCameraInfo(const CameraChannel& camera)
+{
+    if (!isValidCameraIndex(camera.index) || m_cameraInfoLabels[camera.index] == nullptr)
+    {
+        return;
+    }
+
+    QLabel* label = m_cameraInfoLabels[camera.index];
+    if (!camera.loaded || !camera.reader.isOpen())
+    {
+        label->setText(QStringLiteral("未导入视频"));
+        return;
+    }
+
+    const int frame = cameraFrameForTimeline(camera, m_timelineFrame);
+    if (frame < 0 || frame >= camera.reader.frameCount())
+    {
+        label->setText(QStringLiteral("帧：%1 超出视频范围 0-%2\n当前同步设置下无可显示帧")
+                           .arg(frame)
+                           .arg(qMax(0, camera.reader.frameCount() - 1)));
+        return;
+    }
+
+    QStringList lines;
+    lines << QStringLiteral("帧：%1 / %2").arg(frame).arg(qMax(0, camera.reader.frameCount() - 1));
+    lines << QStringLiteral("识别数量：%1").arg(validCircleCount(camera.currentResult));
+    for (int i = 0; i < camera.currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    {
+        const beacon_circle_t& circle = camera.currentResult.circles[i];
+        if (circle.valid == 0)
+        {
+            continue;
+        }
+        lines << QStringLiteral("#%1  X=%2  Y=%3  面积=%4")
+                     .arg(i)
+                     .arg(circle.x, 0, 'f', 2)
+                     .arg(circle.y, 0, 'f', 2)
+                     .arg(circleArea(circle), 0, 'f', 2);
+    }
+    if (camera.currentResult.count == 0)
+    {
+        lines << QStringLiteral("当前帧无有效信标灯");
+    }
+    label->setText(lines.join(QLatin1Char('\n')));
+}
+
+void MainWindow::updateAllCameraInfo()
+{
+    for (const CameraChannel& camera : m_cameras)
+    {
+        updateCameraInfo(camera);
+    }
+}
+
+void MainWindow::updateFrameInfo()
+{
+    QStringList videoLines;
+    for (const CameraChannel& camera : m_cameras)
+    {
+        if (!camera.loaded || !camera.reader.isOpen())
+        {
+            videoLines << QStringLiteral("%1：未导入").arg(camera.name);
+            continue;
+        }
+        videoLines << QStringLiteral("%1：%2x%3，%4 帧，FPS %5，后端 %6，同步帧 %7")
+                          .arg(camera.name)
+                          .arg(camera.reader.width())
+                          .arg(camera.reader.height())
+                          .arg(camera.reader.frameCount())
+                          .arg(camera.usedFps, 0, 'f', 3)
+                          .arg(camera.reader.backendName())
+                          .arg(camera.syncFrame);
+    }
+    m_videoInfoLabel->setText(videoLines.join(QStringLiteral("  |  ")));
+
+    QStringList frameLines;
+    frameLines << QStringLiteral("同步时间轴帧：%1，范围：%2 至 %3，共 %4 帧")
+                      .arg(m_timelineFrame)
+                      .arg(timelineMinFrame())
+                      .arg(timelineMaxFrame())
+                      .arg(timelineFrameCount());
+    for (const CameraChannel& camera : m_cameras)
+    {
+        if (camera.loaded)
+        {
+            frameLines << QStringLiteral("%1 当前帧：%2").arg(camera.name).arg(cameraFrameForTimeline(camera, m_timelineFrame));
+        }
+    }
+    m_frameInfoLabel->setText(frameLines.join(QStringLiteral("  |  ")));
+}
+
+void MainWindow::refreshCurrentCameraUi()
+{
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        if (m_cameraSelectButtons[i] != nullptr)
+        {
+            const QSignalBlocker blocker(m_cameraSelectButtons[i]);
+            m_cameraSelectButtons[i]->setChecked(i == m_currentCameraIndex);
+        }
+        if (m_videoWidgets[i] != nullptr)
+        {
+            m_videoWidgets[i]->setSelected(i == m_currentCameraIndex);
+        }
+    }
+
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || m_annotationPanel == nullptr)
+    {
+        return;
+    }
+
+    if (!camera->loaded || !camera->reader.isOpen())
+    {
+        m_annotationPanel->setVideoFrameRange(0, 0);
+        m_annotationPanel->setCurrentContext(0, 0.0, 0);
+        m_annotationPanel->setCurrentFrameCorrections({}, true);
+        m_annotationPanel->setAnnotations({}, {});
+        return;
+    }
+
+    const int frame = cameraFrameForTimeline(*camera, m_timelineFrame);
+    m_annotationPanel->setVideoFrameRange(0, qMax(0, camera->reader.frameCount() - 1));
+    m_annotationPanel->setCurrentContext(frame, (double)frame / camera->usedFps, validCircleCount(camera->currentResult));
+    m_annotationPanel->setCurrentFrameCorrections(camera->annotations.correctionsForFrame(frame), true);
+    m_annotationPanel->setAnnotations(camera->annotations.records(), camera->annotations.corrections());
+}
+
+void MainWindow::selectCamera(int cameraIndex)
+{
+    if (!isValidCameraIndex(cameraIndex))
+    {
+        return;
+    }
+
+    m_currentCameraIndex = cameraIndex;
+    refreshCurrentCameraUi();
+    for (CameraChannel& camera : m_cameras)
+    {
+        renderCamera(&camera);
+    }
 }
 
 void MainWindow::saveAnnotation()
 {
-    if (!m_reader.isOpen())
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
     {
-        QMessageBox::warning(this, QStringLiteral("无法保存"), QStringLiteral("请先打开视频"));
+        QMessageBox::information(this, QStringLiteral("保存标注"), QStringLiteral("请先导入当前摄像头的视频。"));
         return;
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-                                                      QStringLiteral("保存标注"),
-                                                      defaultOutputPath(QStringLiteral("_annotation.json")),
-                                                      QStringLiteral("JSON (*.json)"));
+                                                      QStringLiteral("保存当前摄像头标注"),
+                                                      annotationPathForCamera(camera->index),
+                                                      QStringLiteral("JSON 文件 (*.json);;所有文件 (*)"));
     if (path.isEmpty())
     {
         return;
     }
 
     AnnotationVideoInfo info;
-    info.file = m_currentVideoPath;
-    info.width = m_reader.width();
-    info.height = m_reader.height();
-    info.fpsUsed = m_usedFps;
-    info.frameCount = m_reader.frameCount();
+    info.file = camera->videoPath;
+    info.width = camera->reader.width();
+    info.height = camera->reader.height();
+    info.fpsUsed = camera->usedFps;
+    info.frameCount = camera->reader.frameCount();
 
     QString error;
-    if (!AnnotationJson::save(path, info, m_annotations, &error))
+    if (!AnnotationJson::save(path, info, camera->annotations, &error))
     {
-        QMessageBox::critical(this, QStringLiteral("保存失败"), error);
+        QMessageBox::warning(this, QStringLiteral("保存标注失败"), error);
         return;
     }
-    statusBar()->showMessage(QStringLiteral("标注已保存"), 3000);
+    statusBar()->showMessage(QStringLiteral("标注已保存：%1").arg(path), 3000);
 }
 
 void MainWindow::loadAnnotation()
 {
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        QMessageBox::information(this, QStringLiteral("加载标注"), QStringLiteral("请先导入当前摄像头的视频。"));
+        return;
+    }
+
     const QString path = QFileDialog::getOpenFileName(this,
-                                                      QStringLiteral("读取标注"),
-                                                      QString(),
-                                                      QStringLiteral("JSON (*.json)"));
+                                                      QStringLiteral("加载当前摄像头标注"),
+                                                      QFileInfo(annotationPathForCamera(camera->index)).absolutePath(),
+                                                      QStringLiteral("JSON 文件 (*.json);;所有文件 (*)"));
     if (path.isEmpty())
     {
         return;
     }
 
     QString error;
-    if (!AnnotationJson::load(path, &m_annotations, &error))
+    if (!AnnotationJson::load(path, &camera->annotations, &error))
     {
-        QMessageBox::critical(this, QStringLiteral("读取失败"), error);
+        QMessageBox::warning(this, QStringLiteral("加载标注失败"), error);
         return;
     }
-    updateAnnotationList();
-    showFrame(m_currentFrame);
-    statusBar()->showMessage(QStringLiteral("标注已读取"), 3000);
+    showFrame(m_timelineFrame);
+    statusBar()->showMessage(QStringLiteral("标注已加载：%1").arg(path), 3000);
 }
 
 void MainWindow::exportMarkedAvi()
 {
-    if (!m_reader.isOpen())
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
     {
-        QMessageBox::warning(this, QStringLiteral("无法导出"), QStringLiteral("请先打开视频"));
+        QMessageBox::information(this, QStringLiteral("导出视频"), QStringLiteral("请先导入当前摄像头的视频。"));
         return;
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-                                                      QStringLiteral("导出标注 AVI"),
-                                                      defaultOutputPath(QStringLiteral("_marked.avi")),
-                                                      QStringLiteral("AVI Video (*.avi)"));
+                                                      QStringLiteral("导出当前摄像头标注视频"),
+                                                      defaultOutputPath(camera->index, QStringLiteral("_marked.avi")),
+                                                      QStringLiteral("AVI 文件 (*.avi);;所有文件 (*)"));
     if (path.isEmpty())
     {
         return;
     }
 
-    QProgressDialog progress(QStringLiteral("正在导出 AVI..."), QStringLiteral("取消"), 0, m_reader.frameCount(), this);
+    QProgressDialog progress(QStringLiteral("正在导出 AVI..."), QStringLiteral("取消"), 0, camera->reader.frameCount(), this);
     progress.setWindowModality(Qt::WindowModal);
 
     VideoExporter exporter;
     QString error;
-    const bool ok = exporter.exportMarkedAvi(m_currentVideoPath, path, m_usedFps, &m_runner, &m_annotations,
-                                             [&](int current, int total) {
-                                                 progress.setMaximum(total);
+    const bool ok = exporter.exportMarkedAvi(camera->videoPath,
+                                             path,
+                                             camera->usedFps,
+                                             &camera->runner,
+                                             &camera->annotations,
+                                             [&progress](int current, int total) {
+                                                 progress.setRange(0, total);
                                                  progress.setValue(current);
-                                                 QApplication::processEvents();
+                                                 qApp->processEvents();
                                                  return !progress.wasCanceled();
                                              },
                                              &error);
-    progress.setValue(progress.maximum());
     if (!ok)
     {
-        QMessageBox::critical(this, QStringLiteral("导出失败"), error);
+        QMessageBox::warning(this, QStringLiteral("导出 AVI 失败"), error);
         return;
     }
-    statusBar()->showMessage(QStringLiteral("AVI 已导出"), 3000);
+    statusBar()->showMessage(QStringLiteral("AVI 已导出：%1").arg(path), 3000);
 }
 
 void MainWindow::exportCsv()
 {
-    if (!m_reader.isOpen())
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
     {
-        QMessageBox::warning(this, QStringLiteral("无法导出"), QStringLiteral("请先打开视频"));
+        QMessageBox::information(this, QStringLiteral("导出 CSV"), QStringLiteral("请先导入当前摄像头的视频。"));
         return;
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-                                                      QStringLiteral("导出 CSV"),
-                                                      defaultOutputPath(QStringLiteral("_result.csv")),
-                                                      QStringLiteral("CSV (*.csv)"));
+                                                      QStringLiteral("导出当前摄像头检测 CSV"),
+                                                      defaultOutputPath(camera->index, QStringLiteral("_result.csv")),
+                                                      QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
     if (path.isEmpty())
     {
         return;
     }
 
-    QProgressDialog progress(QStringLiteral("正在导出 CSV..."), QStringLiteral("取消"), 0, m_reader.frameCount(), this);
+    QProgressDialog progress(QStringLiteral("正在导出 CSV..."), QStringLiteral("取消"), 0, camera->reader.frameCount(), this);
     progress.setWindowModality(Qt::WindowModal);
 
     VideoExporter exporter;
     QString error;
-    const bool ok = exporter.exportResultCsv(m_currentVideoPath, path, m_usedFps, &m_runner,
-                                             [&](int current, int total) {
-                                                 progress.setMaximum(total);
+    const bool ok = exporter.exportResultCsv(camera->videoPath,
+                                             path,
+                                             camera->usedFps,
+                                             &camera->runner,
+                                             [&progress](int current, int total) {
+                                                 progress.setRange(0, total);
                                                  progress.setValue(current);
-                                                 QApplication::processEvents();
+                                                 qApp->processEvents();
                                                  return !progress.wasCanceled();
                                              },
                                              &error);
-    progress.setValue(progress.maximum());
     if (!ok)
     {
-        QMessageBox::critical(this, QStringLiteral("导出失败"), error);
+        QMessageBox::warning(this, QStringLiteral("导出 CSV 失败"), error);
         return;
     }
-    statusBar()->showMessage(QStringLiteral("CSV 已导出"), 3000);
+    statusBar()->showMessage(QStringLiteral("CSV 已导出：%1").arg(path), 3000);
 }
 
 void MainWindow::play()
 {
-    if (m_reader.isOpen())
+    if (!hasAnyVideo())
     {
-        m_globalPlaying = true;
-        resetPlaybackClock();
-        m_playTimer.start(playbackIntervalMs());
-        updatePlayPauseButton();
+        return;
     }
+    m_playing = true;
+    resetPlaybackClock();
+    m_playTimer.start(playbackIntervalMs());
+    updatePlayPauseButton();
 }
 
 void MainWindow::pause()
 {
-    m_globalPlaying = false;
+    m_playing = false;
     m_playTimer.stop();
     updatePlayPauseButton();
 }
 
+void MainWindow::nextFrame()
+{
+    pause();
+    showFrame(qMin(timelineMaxFrame(), m_timelineFrame + 1));
+}
+
+void MainWindow::previousFrame()
+{
+    pause();
+    showFrame(qMax(timelineMinFrame(), m_timelineFrame - 1));
+}
+
+void MainWindow::jumpToFrame()
+{
+    if (m_updatingControls)
+    {
+        return;
+    }
+    pause();
+    showFrame(m_frameSpin->value());
+}
+
+void MainWindow::jumpToTime()
+{
+    if (m_updatingControls)
+    {
+        return;
+    }
+    const double fps = currentCamera() != nullptr && currentCamera()->usedFps > 0.0
+        ? currentCamera()->usedFps
+        : 50.0;
+    pause();
+    showFrame((int)std::llround(m_timeSpin->value() * fps));
+}
+
+void MainWindow::showFrameFromSlider(int value)
+{
+    pause();
+    showFrame(value);
+}
+
+void MainWindow::saveCurrentFrameCorrections(const QVector<CorrectionShape>& corrections)
+{
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        return;
+    }
+
+    const int frame = cameraFrameForTimeline(*camera, m_timelineFrame);
+    camera->annotations.removeCorrectionsForFrame(frame);
+    for (CorrectionShape correction : corrections)
+    {
+        correction.frame = frame;
+        camera->annotations.addCorrection(correction);
+    }
+
+    refreshCurrentCameraUi();
+    renderCamera(camera);
+    updateAnnotationList();
+    statusBar()->showMessage(QStringLiteral("已保存当前帧纠错标注"), 2000);
+}
+
+void MainWindow::batchAddCorrections(const QVector<int>& correctionRows,
+                                     int startFrame,
+                                     int endFrame,
+                                     double overlapPixelThreshold)
+{
+    Q_UNUSED(overlapPixelThreshold);
+
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        return;
+    }
+
+    const QVector<CorrectionShape>& allCorrections = camera->annotations.corrections();
+    if (startFrame > endFrame)
+    {
+        std::swap(startFrame, endFrame);
+    }
+
+    int added = 0;
+    for (int row : correctionRows)
+    {
+        if (row < 0 || row >= allCorrections.size())
+        {
+            continue;
+        }
+
+        const CorrectionShape source = allCorrections[row];
+        for (int frame = qMax(0, startFrame); frame <= endFrame && frame < camera->reader.frameCount(); ++frame)
+        {
+            CorrectionShape copy = source;
+            copy.frame = frame;
+            camera->annotations.addCorrection(copy);
+            ++added;
+        }
+    }
+
+    showFrame(m_timelineFrame);
+    statusBar()->showMessage(QStringLiteral("批量添加纠错 %1 条").arg(added), 3000);
+}
+
+void MainWindow::autoMatchCorrectionFrames(const QVector<int>& correctionRows,
+                                           int backwardMaxFrames,
+                                           int forwardMaxFrames,
+                                           double positionThreshold,
+                                           double overlapPixelThreshold)
+{
+    Q_UNUSED(correctionRows);
+    Q_UNUSED(positionThreshold);
+    Q_UNUSED(overlapPixelThreshold);
+
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        return;
+    }
+
+    const int currentFrame = cameraFrameForTimeline(*camera, m_timelineFrame);
+    QVector<int> frames;
+    const int startFrame = qMax(0, currentFrame - qMax(0, backwardMaxFrames));
+    const int endFrame = qMin(camera->reader.frameCount() - 1, currentFrame + qMax(0, forwardMaxFrames));
+    for (int frame = startFrame; frame <= endFrame; ++frame)
+    {
+        if (frame != currentFrame)
+        {
+            frames.push_back(frame);
+        }
+    }
+
+    m_annotationPanel->setAutoMatchedBatchFrames(frames);
+    statusBar()->showMessage(QStringLiteral("已生成批量候选帧：%1 帧").arg(frames.size()), 3000);
+}
+
+void MainWindow::batchAddCorrectionsToFrames(const QVector<int>& correctionRows, const QVector<int>& frames)
+{
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        return;
+    }
+
+    const QVector<CorrectionShape>& allCorrections = camera->annotations.corrections();
+    int added = 0;
+    for (int row : correctionRows)
+    {
+        if (row < 0 || row >= allCorrections.size())
+        {
+            continue;
+        }
+
+        const CorrectionShape source = allCorrections[row];
+        for (int frame : frames)
+        {
+            if (frame < 0 || frame >= camera->reader.frameCount())
+            {
+                continue;
+            }
+
+            CorrectionShape copy = source;
+            copy.frame = frame;
+            camera->annotations.addCorrection(copy);
+            ++added;
+        }
+    }
+
+    showFrame(m_timelineFrame);
+    statusBar()->showMessage(QStringLiteral("已向匹配帧添加纠错 %1 条").arg(added), 3000);
+}
+
+void MainWindow::deleteAnnotation(int row)
+{
+    CameraChannel* camera = currentCamera();
+    if (camera != nullptr && camera->annotations.removeAt(row))
+    {
+        updateAnnotationList();
+    }
+}
+
+void MainWindow::deleteCorrection(int row)
+{
+    CameraChannel* camera = currentCamera();
+    if (camera != nullptr && camera->annotations.removeCorrectionAt(row))
+    {
+        showFrame(m_timelineFrame);
+    }
+}
+
+void MainWindow::deleteAnnotations(const QVector<int>& rows)
+{
+    QVector<int> sorted = rows;
+    std::sort(sorted.begin(), sorted.end(), std::greater<int>());
+    for (int row : sorted)
+    {
+        deleteAnnotation(row);
+    }
+}
+
+void MainWindow::deleteCorrections(const QVector<int>& rows)
+{
+    QVector<int> sorted = rows;
+    std::sort(sorted.begin(), sorted.end(), std::greater<int>());
+    for (int row : sorted)
+    {
+        deleteCorrection(row);
+    }
+}
+
+void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
+{
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded || points.isEmpty())
+    {
+        return;
+    }
+
+    m_annotationPanel->applyDrawnCorrectionShape(shapeType, points);
+    renderCamera(camera);
+}
+
+void MainWindow::autoIdentifyCorrectionTargets()
+{
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        return;
+    }
+
+    CorrectionShape shape;
+    if (!m_annotationPanel->activeDraftShape(&shape))
+    {
+        QMessageBox::information(this, QStringLiteral("自动识别"), QStringLiteral("请先绘制一个封闭纠错图形。"));
+        return;
+    }
+
+    QVector<int> matchedIndices;
+    for (int i = 0; i < camera->currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    {
+        const beacon_circle_t& circle = camera->currentResult.circles[i];
+        if (circle.valid == 0)
+        {
+            continue;
+        }
+
+        const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
+        bool contains = false;
+        if (shape.shapeType == QStringLiteral("circle") && shape.points.size() >= 2)
+        {
+            contains = QLineF(shape.points[0], imagePoint).length() <= QLineF(shape.points[0], shape.points[1]).length();
+        }
+        else if (shape.shapeType == QStringLiteral("rect") && shape.points.size() >= 2)
+        {
+            contains = QRectF(shape.points[0], shape.points[1]).normalized().contains(imagePoint);
+        }
+        else if (shape.shapeType == QStringLiteral("polygon") && shape.points.size() >= 3)
+        {
+            contains = QPolygonF(shape.points).containsPoint(imagePoint, Qt::OddEvenFill);
+        }
+
+        if (contains)
+        {
+            matchedIndices.push_back(i);
+        }
+    }
+
+    if (matchedIndices.isEmpty())
+    {
+        QMessageBox::information(this, QStringLiteral("自动识别"), QStringLiteral("封闭区域内没有已识别信标灯。"));
+        return;
+    }
+
+    m_annotationPanel->applyAutoIdentifiedErrorCircles(matchedIndices);
+    renderCamera(camera);
+}
+
+void MainWindow::jumpToRecordFrame(int frame)
+{
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || !camera->loaded)
+    {
+        return;
+    }
+
+    pause();
+    showFrame(frame - camera->syncFrame);
+}
+
+void MainWindow::updateHoverPixelInfo(int x, int y, int gray, bool valid)
+{
+    if (!valid)
+    {
+        m_pixelInfoLabel->setText(QStringLiteral("像素：-"));
+        return;
+    }
+    m_pixelInfoLabel->setText(QStringLiteral("像素：X=%1  Y=%2  Gray=%3").arg(x).arg(y).arg(gray));
+}
+
+void MainWindow::updateAnnotationList()
+{
+    CameraChannel* camera = currentCamera();
+    if (camera == nullptr || m_annotationPanel == nullptr)
+    {
+        return;
+    }
+    m_annotationPanel->setAnnotations(camera->annotations.records(), camera->annotations.corrections());
+}
+
 void MainWindow::togglePlayPause()
 {
-    if (m_globalPlaying)
+    if (m_playing)
     {
         pause();
     }
@@ -2778,77 +1607,13 @@ void MainWindow::updatePlayPauseButton()
     {
         return;
     }
-
-    if (m_globalPlaying)
-    {
-        m_playPauseButton->setText(QStringLiteral("暂停"));
-        m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPause));
-    }
-    else
-    {
-        m_playPauseButton->setText(QStringLiteral("播放"));
-        m_playPauseButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-    }
-}
-
-void MainWindow::updateResponsiveConsole()
-{
-    if (m_controlsFrame == nullptr)
-    {
-        return;
-    }
-
-    const int width = m_controlsFrame->width();
-    const QString density = width < 660
-        ? QStringLiteral("tiny")
-        : (width < 920 ? QStringLiteral("compact") : QStringLiteral("normal"));
-
-    setStyleProperty(m_controlsFrame, "consoleDensity", density);
-    const auto consoleWidgets = m_controlsFrame->findChildren<QWidget*>();
-    for (QWidget* widget : consoleWidgets)
-    {
-        setStyleProperty(widget, "consoleDensity", density);
-    }
-
-    const bool tiny = density == QStringLiteral("tiny");
-    const bool compact = density == QStringLiteral("compact");
-    const int marginH = tiny ? 8 : (compact ? 12 : 18);
-    const int marginTop = tiny ? 8 : (compact ? 10 : 14);
-    const int marginBottom = tiny ? 10 : (compact ? 12 : 16);
-    const int spacing = tiny ? 5 : (compact ? 7 : 10);
-
-    if (QLayout* layout = m_controlsFrame->layout())
-    {
-        layout->setContentsMargins(marginH, marginTop, marginH, marginBottom);
-        setLayoutSpacingRecursive(layout, spacing);
-    }
-
-    m_controlsFrame->setMinimumHeight(tiny ? 138 : (compact ? 154 : 170));
-    m_slider->setMinimumWidth(tiny ? 40 : (compact ? 60 : 80));
-    m_frameSpin->setMinimumWidth(tiny ? 56 : (compact ? 64 : 72));
-    m_timeSpin->setMinimumWidth(tiny ? 72 : (compact ? 84 : 94));
-    m_viewModeCombo->setMinimumWidth(tiny ? 52 : (compact ? 62 : 72));
-    m_speedCombo->setMinimumWidth(tiny ? 48 : (compact ? 56 : 66));
-    m_autoPauseJumpThresholdSpin->setMinimumWidth(tiny ? 64 : (compact ? 72 : 82));
-
-    const QSize iconSize = tiny ? QSize(13, 13) : (compact ? QSize(15, 15) : QSize(18, 18));
-    const auto buttons = m_controlsFrame->findChildren<QPushButton*>();
-    for (QPushButton* button : buttons)
-    {
-        button->setIconSize(iconSize);
-    }
+    m_playPauseButton->setIcon(style()->standardIcon(m_playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
 }
 
 void MainWindow::setPlaybackSpeed(double speed)
 {
-    if (speed <= 0.0)
-    {
-        return;
-    }
-
-    const bool wasPlaying = m_globalPlaying;
-    m_playbackSpeed = speed;
-    if (wasPlaying)
+    m_playbackSpeed = qBound(0.125, speed, 8.0);
+    if (m_playing)
     {
         resetPlaybackClock();
         m_playTimer.start(playbackIntervalMs());
@@ -2857,1151 +1622,60 @@ void MainWindow::setPlaybackSpeed(double speed)
 
 int MainWindow::playbackIntervalMs() const
 {
-    const double fps = m_usedFps > 0.0 ? m_usedFps : 50.0;
-    return qMax(1, (int)std::round(1000.0 / (fps * m_playbackSpeed)));
+    const double fps = currentCamera() != nullptr && currentCamera()->usedFps > 0.0
+        ? currentCamera()->usedFps
+        : 50.0;
+    return qBound(1, (int)std::floor(1000.0 / qMax(1.0, fps * m_playbackSpeed)), 100);
 }
 
 void MainWindow::resetPlaybackClock()
 {
-    m_playbackStartFrame = m_currentFrame;
+    m_playbackStartFrame = m_timelineFrame;
     m_playbackClock.restart();
 }
 
-bool MainWindow::validateAnnotationInput(const QStringList& types,
-                                         const QVector<ErrorCircle>& errorCircles,
-                                         const QString& actionName) const
+double MainWindow::frameTime(int frame) const
 {
-    if (types.isEmpty())
-    {
-        QMessageBox::warning(const_cast<MainWindow*>(this),
-                             actionName,
-                             QStringLiteral("请至少选择一个错误类型。"));
-        return false;
-    }
-
-    if (typesRequireErrorSource(types) && errorCircles.isEmpty())
-    {
-        QMessageBox::warning(const_cast<MainWindow*>(this),
-                             actionName,
-                             QStringLiteral("选中误检、排序错误、目标跳变或其他类型时，必须选择至少一个错误圆并填写对应期望编号。"));
-        return false;
-    }
-
-    return true;
+    const double fps = currentCamera() != nullptr && currentCamera()->usedFps > 0.0
+        ? currentCamera()->usedFps
+        : 50.0;
+    return (double)frame / fps;
 }
 
-void MainWindow::nextFrame()
+QString MainWindow::viewMode() const
 {
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-    if (m_currentFrame + 1 >= m_reader.frameCount())
-    {
-        pause();
-        return;
-    }
-    showFrame(m_currentFrame + 1);
+    return m_viewModeCombo != nullptr
+        ? m_viewModeCombo->currentData().toString()
+        : QStringLiteral("original");
 }
 
-void MainWindow::previousFrame()
+QString MainWindow::defaultOutputPath(int cameraIndex, const QString& suffix) const
 {
-    if (m_reader.isOpen())
+    if (!isValidCameraIndex(cameraIndex) || m_cameras[cameraIndex].videoPath.isEmpty())
     {
-        showFrame(qMax(0, m_currentFrame - 1));
+        return QString();
     }
+
+    const QFileInfo info(m_cameras[cameraIndex].videoPath);
+    return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + suffix;
 }
 
-void MainWindow::jumpToFrame()
+QString MainWindow::annotationPathForCamera(int cameraIndex) const
 {
-    showFrame(m_frameSpin->value());
-}
-
-void MainWindow::jumpToTime()
-{
-    showFrame(qBound(0, (int)(m_timeSpin->value() * m_usedFps + 0.5), qMax(0, m_reader.frameCount() - 1)));
-}
-
-void MainWindow::showFrameFromSlider(int value)
-{
-    if (!m_updatingControls)
-    {
-        pause();
-        showFrame(value);
-    }
-}
-
-void MainWindow::showFrame(int frameIndex)
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-
-    frameIndex = qBound(0, frameIndex, m_reader.frameCount() - 1);
-    QImage gray;
-    QString error;
-    if (!m_reader.readFrame(frameIndex, &gray, &error))
-    {
-        QMessageBox::critical(this, QStringLiteral("读取帧失败"), error);
-        pause();
-        return;
-    }
-
-    const int previousFrame = m_currentFrame;
-    QVector<QPair<AnalyzerInstance*, beacon_result_t>> results;
-    for (AnalyzerInstance* instance : m_instances)
-    {
-        if (instance == nullptr)
-        {
-            continue;
-        }
-        const beacon_result_t result = instance->runner.process(gray);
-        instance->currentResult = result;
-        results.push_back(qMakePair(instance, result));
-    }
-
-    m_currentFrame = frameIndex;
-    const beacon_result_t result = m_currentResult;
-    const QVector<CorrectionShape> savedCorrections = m_annotations.correctionsForFrame(m_currentFrame);
-    m_annotationPanel->setCurrentContext(m_currentFrame, frameTime(m_currentFrame), result.count);
-    m_annotationPanel->setCurrentFrameCorrections(savedCorrections);
-    renderAllDisplayedInstances(gray, results);
-
-    m_updatingControls = true;
-    m_slider->setValue(frameIndex);
-    m_frameSpin->setValue(frameIndex);
-    m_timeSpin->setValue(frameTime(frameIndex));
-    m_updatingControls = false;
-
-    updateFrameInfo(result);
-    QString autoPauseReason;
-    if (autoPauseTriggered(previousFrame, frameIndex, results, &autoPauseReason))
-    {
-        pause();
-        statusBar()->showMessage(autoPauseReason, 5000);
-    }
-}
-
-bool MainWindow::autoPauseTriggered(int previousFrame,
-                                    int currentFrame,
-                                    const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results,
-                                    QString* reason)
-{
-    const bool enabled = m_autoPauseEnableCheck != nullptr && m_autoPauseEnableCheck->isChecked();
-    const bool jumpEnabled = m_autoPauseJumpCheck != nullptr && m_autoPauseJumpCheck->isChecked();
-    const bool countEnabled = m_autoPauseCountCheck != nullptr && m_autoPauseCountCheck->isChecked();
-    const double jumpThreshold = m_autoPauseJumpThresholdSpin != nullptr
-        ? m_autoPauseJumpThresholdSpin->value()
-        : 0.0;
-
-    bool triggered = false;
-    QString triggerReason;
-    const bool adjacentForwardFrame = currentFrame == previousFrame + 1;
-
-    if (enabled && m_globalPlaying && adjacentForwardFrame && (jumpEnabled || countEnabled))
-    {
-        for (const auto& item : results)
-        {
-            AnalyzerInstance* instance = item.first;
-            const beacon_result_t& current = item.second;
-            if (instance == nullptr ||
-                !instance->hasPreviousAutoPauseResult ||
-                instance->previousAutoPauseFrame != previousFrame)
-            {
-                continue;
-            }
-
-            const beacon_result_t& previous = instance->previousAutoPauseResult;
-            if (countEnabled && validCircleCount(previous) != validCircleCount(current))
-            {
-                triggered = true;
-                triggerReason = QStringLiteral("自动暂停：%1 相邻帧识别圆数量变化").arg(instance->name);
-                break;
-            }
-
-            if (jumpEnabled)
-            {
-                const int count = qMin<int>(qMin(previous.count, current.count), BEACON_MAX_CIRCLE_COUNT);
-                for (int i = 0; i < count; ++i)
-                {
-                    if (previous.circles[i].valid == 0 || current.circles[i].valid == 0)
-                    {
-                        continue;
-                    }
-
-                    const double distance = circleImageDistance(previous.circles[i], current.circles[i]);
-                    if (distance > jumpThreshold)
-                    {
-                        triggered = true;
-                        triggerReason = QStringLiteral("自动暂停：%1 目标 #%2 跳变 %3 px")
-                                            .arg(instance->name)
-                                            .arg(i)
-                                            .arg(distance, 0, 'f', 1);
-                        break;
-                    }
-                }
-                if (triggered)
-                {
-                    break;
-                }
-            }
-        }
-    }
-
-    for (const auto& item : results)
-    {
-        AnalyzerInstance* instance = item.first;
-        if (instance == nullptr)
-        {
-            continue;
-        }
-        instance->previousAutoPauseResult = item.second;
-        instance->previousAutoPauseFrame = currentFrame;
-        instance->hasPreviousAutoPauseResult = true;
-    }
-
-    if (triggered && reason != nullptr)
-    {
-        *reason = triggerReason;
-    }
-    return triggered;
-}
-
-void MainWindow::updateFrameInfo(const beacon_result_t& result)
-{
-    int validCircleCount = 0;
-    QString text;
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        const beacon_circle_t& circle = result.circles[i];
-        if (circle.valid == 0)
-        {
-            continue;
-        }
-        ++validCircleCount;
-        const double area = 3.14159265358979323846 * circle.radius * circle.radius;
-        text += QStringLiteral("#%1  X=%2  Y=%3  R=%4  Area=%5\n")
-                    .arg(i)
-                    .arg(circle.x, 0, 'f', 2)
-                    .arg(circle.y, 0, 'f', 2)
-                    .arg(circle.radius, 0, 'f', 2)
-                    .arg(area, 0, 'f', 2);
-    }
-
-    m_frameInfoLabel->setText(QStringLiteral("当前帧: %1 / %2\n播放时间: %3 s / %4 s\n识别圆总数: %5")
-                                  .arg(m_currentFrame)
-                                  .arg(qMax(0, m_reader.frameCount() - 1))
-                                  .arg(frameTime(m_currentFrame), 0, 'f', 3)
-                                  .arg(frameTime(qMax(0, m_reader.frameCount() - 1)), 0, 'f', 3)
-                                  .arg(validCircleCount));
-
-    if (text.isEmpty())
-    {
-        text = QStringLiteral("圆总数: 0\n无有效圆");
-    }
-    else
-    {
-        text.prepend(QStringLiteral("圆总数: %1\n").arg(validCircleCount));
-    }
-    m_resultText->setPlainText(text);
-    updateCurrentAnnotationInfo();
-}
-
-void MainWindow::updateHoverPixelInfo(int x, int y, int gray, bool valid)
-{
-    if (m_pixelInfoLabel == nullptr)
-    {
-        return;
-    }
-
-    if (!valid)
-    {
-        m_pixelInfoLabel->setText(QStringLiteral("鼠标: -"));
-        statusBar()->clearMessage();
-        return;
-    }
-
-    const QString text = QStringLiteral("鼠标 X=%1 Y=%2 灰度=%3").arg(x).arg(y).arg(gray);
-    m_pixelInfoLabel->setText(text);
-    statusBar()->showMessage(text);
-}
-
-void MainWindow::updateCurrentAnnotationInfo()
-{
-    if (m_currentAnnotationsLabel == nullptr)
-    {
-        return;
-    }
-
-    const QVector<AnnotationRecord> records = m_annotations.recordsForFrame(m_currentFrame);
-    const QVector<CorrectionShape> corrections = m_annotations.correctionsForFrame(m_currentFrame);
-    if (records.isEmpty() && corrections.isEmpty())
-    {
-        m_currentAnnotationsLabel->setText(QStringLiteral("当前帧标注: 无"));
-        return;
-    }
-
-    QString text = QStringLiteral("当前帧标注: 文字 %1 条 / 图形 %2 条\n").arg(records.size()).arg(corrections.size());
-    for (const AnnotationRecord& record : records)
-    {
-        const QStringList types = record.types.isEmpty() ? QStringList{ record.type } : record.types;
-        const QVector<ErrorCircle> circles = record.errorCircles.isEmpty() && record.circleIndex >= 0
-            ? QVector<ErrorCircle>{ ErrorCircle{ record.circleIndex, -1 } }
-            : record.errorCircles;
-        text += QStringLiteral("- %1 %2 %3\n")
-                    .arg(annotationTypesDisplayName(types))
-                    .arg(errorCirclesDisplayName(circles))
-                    .arg(record.description);
-    }
-    for (const CorrectionShape& shape : corrections)
-    {
-        text += QStringLiteral("- 图形 %1 %2 %3 %4\n")
-                    .arg(annotationTypesDisplayName(shape.errorTypes.isEmpty() ? QStringList{ shape.errorType } : shape.errorTypes))
-                    .arg(shape.shapeType)
-                    .arg(errorCirclesDisplayName(shape.errorCircles))
-                    .arg(shape.description);
-    }
-    m_currentAnnotationsLabel->setText(text.trimmed());
-}
-
-void MainWindow::markCurrentFrameAnnotation(const QStringList& types,
-                                            const QVector<ErrorCircle>& errorCircles,
-                                            const QString& description)
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-    if (!validateAnnotationInput(types, errorCircles, QStringLiteral("标记当前帧")))
-    {
-        return;
-    }
-
-    AnnotationRecord record;
-    record.type = types.isEmpty() ? QStringLiteral("other") : types.first();
-    record.types = types;
-    record.startFrame = m_currentFrame;
-    record.endFrame = m_currentFrame;
-    record.startTimeSec = frameTime(m_currentFrame);
-    record.endTimeSec = record.startTimeSec;
-    record.circleIndex = errorCircles.isEmpty() ? -1 : errorCircles.first().circleIndex;
-    record.errorCircles = errorCircles;
-    record.description = description;
-    m_annotations.add(record);
-    updateAnnotationList();
-}
-
-void MainWindow::setSegmentStart()
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-    m_segmentStartFrame = m_currentFrame;
-    m_annotationPanel->setSegmentStart(m_segmentStartFrame);
-}
-
-void MainWindow::setSegmentEnd()
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-    m_segmentEndFrame = m_currentFrame;
-    m_annotationPanel->setSegmentEnd(m_segmentEndFrame);
-}
-
-void MainWindow::saveSegmentAnnotation(const QStringList& types,
-                                       const QVector<ErrorCircle>& errorCircles,
-                                       const QString& description)
-{
-    if (!m_reader.isOpen() || m_segmentStartFrame < 0 || m_segmentEndFrame < 0)
-    {
-        QMessageBox::warning(this, QStringLiteral("片段不完整"), QStringLiteral("请先设置片段开始和结束"));
-        return;
-    }
-    if (!validateAnnotationInput(types, errorCircles, QStringLiteral("保存片段标注")))
-    {
-        return;
-    }
-
-    const int startFrame = qMin(m_segmentStartFrame, m_segmentEndFrame);
-    const int endFrame = qMax(m_segmentStartFrame, m_segmentEndFrame);
-    AnnotationRecord record;
-    record.type = types.isEmpty() ? QStringLiteral("other") : types.first();
-    record.types = types;
-    record.startFrame = startFrame;
-    record.endFrame = endFrame;
-    record.startTimeSec = frameTime(startFrame);
-    record.endTimeSec = frameTime(endFrame);
-    record.circleIndex = errorCircles.isEmpty() ? -1 : errorCircles.first().circleIndex;
-    record.errorCircles = errorCircles;
-    record.description = description;
-    m_annotations.add(record);
-    updateAnnotationList();
-}
-
-void MainWindow::deleteAnnotation(int row)
-{
-    if (m_annotations.removeAt(row))
-    {
-        updateAnnotationList();
-        showFrame(m_currentFrame);
-    }
-}
-
-void MainWindow::deleteCorrection(int row)
-{
-    if (m_annotations.removeCorrectionAt(row))
-    {
-        updateAnnotationList();
-        showFrame(m_currentFrame);
-    }
-}
-
-void MainWindow::deleteAnnotations(const QVector<int>& rows)
-{
-    bool changed = false;
-    QVector<int> sortedRows = rows;
-    std::sort(sortedRows.begin(), sortedRows.end(), std::greater<int>());
-    for (int row : sortedRows)
-    {
-        changed = m_annotations.removeAt(row) || changed;
-    }
-    if (changed)
-    {
-        updateAnnotationList();
-        showFrame(m_currentFrame);
-    }
-}
-
-void MainWindow::deleteCorrections(const QVector<int>& rows)
-{
-    bool changed = false;
-    QVector<int> sortedRows = rows;
-    std::sort(sortedRows.begin(), sortedRows.end(), std::greater<int>());
-    for (int row : sortedRows)
-    {
-        changed = m_annotations.removeCorrectionAt(row) || changed;
-    }
-    if (changed)
-    {
-        updateAnnotationList();
-        showFrame(m_currentFrame);
-    }
-}
-
-void MainWindow::saveCurrentFrameCorrections(const QVector<CorrectionShape>& corrections)
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-
-    m_annotations.removeCorrectionsForFrame(m_currentFrame);
-    for (CorrectionShape correction : corrections)
-    {
-        correction.frame = m_currentFrame;
-        if (correction.name.trimmed().isEmpty())
-        {
-            correction.name = annotationTypeDisplayName(correction.errorType);
-        }
-        m_annotations.addCorrection(correction);
-    }
-
-    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
-    updateAnnotationList();
-    showFrame(m_currentFrame);
-    statusBar()->showMessage(QStringLiteral("当前帧纠错已保存"), 3000);
-}
-
-bool MainWindow::collectBatchCorrections(const QVector<int>& correctionRows,
-                                         QVector<CorrectionShape>* corrections,
-                                         QString* errorMessage) const
-{
-    if (corrections == nullptr)
-    {
-        return false;
-    }
-
-    corrections->clear();
-    QVector<int> rows = correctionRows;
-    std::sort(rows.begin(), rows.end());
-    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-    if (rows.isEmpty())
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("请先选择当前帧已保存的纠错条目。");
-        }
-        return false;
-    }
-
-    const QVector<CorrectionShape>& allCorrections = m_annotations.corrections();
-    for (int row : rows)
-    {
-        if (row < 0 || row >= allCorrections.size())
-        {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("选中的纠错条目已失效，请刷新后重新选择。");
-            }
-            return false;
-        }
-
-        const CorrectionShape& correction = allCorrections[row];
-        if (correction.frame != m_currentFrame)
-        {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("只能批量添加当前帧已保存的纠错条目。");
-            }
-            return false;
-        }
-        corrections->push_back(correction);
-    }
-
-    return true;
-}
-
-bool MainWindow::correctionsHaveMixedBatchTypes(const QVector<CorrectionShape>& corrections) const
-{
-    bool hasMissed = false;
-    bool hasNonMissed = false;
-    for (const CorrectionShape& correction : corrections)
-    {
-        if (isMissedCorrectionType(correction.errorType))
-        {
-            hasMissed = true;
-        }
-        else
-        {
-            hasNonMissed = true;
-        }
-    }
-    return hasMissed && hasNonMissed;
-}
-
-bool MainWindow::correctionsAreAllMissed(const QVector<CorrectionShape>& corrections) const
-{
-    if (corrections.isEmpty())
-    {
-        return false;
-    }
-    for (const CorrectionShape& correction : corrections)
-    {
-        if (!isMissedCorrectionType(correction.errorType))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool MainWindow::processFrameForBatch(int frame, beacon_result_t* result, QString* errorMessage) const
-{
-    if (result == nullptr)
-    {
-        return false;
-    }
-    if (!m_reader.isOpen() || frame < 0 || frame >= m_reader.frameCount())
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("帧号超出视频有效范围。");
-        }
-        return false;
-    }
-
-    QImage gray;
-    QString readError;
-    if (!m_reader.readFrame(frame, &gray, &readError))
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = readError;
-        }
-        return false;
-    }
-
-    *result = m_runner.process(gray);
-    return true;
-}
-
-bool MainWindow::batchCorrectionsMatchAdjacent(const QVector<CorrectionShape>& corrections,
-                                               const beacon_result_t& previous,
-                                               const beacon_result_t& next,
-                                               double positionThreshold) const
-{
-    for (const CorrectionShape& correction : corrections)
-    {
-        QVector<int> sourceIndices;
-        for (const ErrorCircle& circle : correction.errorCircles)
-        {
-            if (circle.circleIndex >= 0 && !sourceIndices.contains(circle.circleIndex))
-            {
-                sourceIndices.push_back(circle.circleIndex);
-            }
-        }
-        if (sourceIndices.isEmpty())
-        {
-            return false;
-        }
-
-        for (int circleIndex : sourceIndices)
-        {
-            if (circleIndex >= BEACON_MAX_CIRCLE_COUNT ||
-                circleIndex >= previous.count ||
-                circleIndex >= next.count)
-            {
-                return false;
-            }
-
-            const beacon_circle_t& previousCircle = previous.circles[circleIndex];
-            const beacon_circle_t& nextCircle = next.circles[circleIndex];
-            if (previousCircle.valid == 0 || nextCircle.valid == 0)
-            {
-                return false;
-            }
-
-            const QPointF previousPoint = FrameRenderer::algorithmToImagePoint(previousCircle.x, previousCircle.y);
-            const QPointF nextPoint = FrameRenderer::algorithmToImagePoint(nextCircle.x, nextCircle.y);
-            if (QLineF(previousPoint, nextPoint).length() > positionThreshold)
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool MainWindow::buildMissedBatchCorrections(const QVector<CorrectionShape>& baseCorrections,
-                                             int startFrame,
-                                             int endFrame,
-                                             double overlapPixelThreshold,
-                                             QVector<CorrectionShape>* matchedCorrections,
-                                             QVector<int>* matchedFrames,
-                                             QVector<int>* failedFrames,
-                                             QString* errorMessage) const
-{
-    if (matchedCorrections == nullptr || matchedFrames == nullptr || failedFrames == nullptr)
-    {
-        return false;
-    }
-
-    matchedCorrections->clear();
-    matchedFrames->clear();
-    failedFrames->clear();
-
-    QVector<MissedBatchTarget> baseTargets;
-    if (!prepareMissedBatchTargets(baseCorrections, &baseTargets, errorMessage))
-    {
-        return false;
-    }
-
-    auto scanDirection = [&](int direction) {
-        QVector<MissedBatchTarget> previousTargets = baseTargets;
-        int previousFrame = m_currentFrame;
-        while (true)
-        {
-            const int nextFrame = previousFrame + direction;
-            if (nextFrame < 0 || nextFrame >= m_reader.frameCount())
-            {
-                break;
-            }
-            if (direction < 0 && nextFrame < startFrame)
-            {
-                break;
-            }
-            if (direction > 0 && nextFrame > endFrame)
-            {
-                break;
-            }
-
-            QImage gray;
-            QString readError;
-            if (!m_reader.readFrame(nextFrame, &gray, &readError))
-            {
-                if (errorMessage != nullptr)
-                {
-                    *errorMessage = readError;
-                }
-                failedFrames->push_back(nextFrame);
-                break;
-            }
-
-            QVector<MissedBatchTarget> nextTargets;
-            QVector<CorrectionShape> frameCorrections;
-            if (!matchMissedTargetsInImage(gray,
-                                           previousTargets,
-                                           qMax(0.0, overlapPixelThreshold),
-                                           &nextTargets,
-                                           &frameCorrections))
-            {
-                failedFrames->push_back(nextFrame);
-                break;
-            }
-
-            if (nextFrame >= startFrame && nextFrame <= endFrame)
-            {
-                matchedFrames->push_back(nextFrame);
-                for (CorrectionShape correction : frameCorrections)
-                {
-                    correction.frame = nextFrame;
-                    matchedCorrections->push_back(correction);
-                }
-            }
-
-            previousTargets = nextTargets;
-            previousFrame = nextFrame;
-        }
-    };
-
-    if (startFrame < m_currentFrame)
-    {
-        scanDirection(-1);
-    }
-    if (endFrame > m_currentFrame)
-    {
-        scanDirection(1);
-    }
-
-    std::sort(matchedFrames->begin(), matchedFrames->end());
-    matchedFrames->erase(std::unique(matchedFrames->begin(), matchedFrames->end()), matchedFrames->end());
-    return true;
-}
-
-void MainWindow::appendCorrectionsToFrames(const QVector<CorrectionShape>& corrections,
-                                           const QVector<int>& frames,
-                                           const QString& actionName)
-{
-    QVector<int> targetFrames = frames;
-    std::sort(targetFrames.begin(), targetFrames.end());
-    targetFrames.erase(std::unique(targetFrames.begin(), targetFrames.end()), targetFrames.end());
-    if (corrections.isEmpty() || targetFrames.isEmpty())
-    {
-        QMessageBox::information(this, actionName, QStringLiteral("没有可添加的目标帧。"));
-        return;
-    }
-
-    for (int frame : targetFrames)
-    {
-        if (frame < 0 || frame >= m_reader.frameCount())
-        {
-            QMessageBox::warning(this, actionName, QStringLiteral("目标帧号超出视频有效范围。"));
-            return;
-        }
-    }
-
-    int addedCount = 0;
-    for (int frame : targetFrames)
-    {
-        for (CorrectionShape correction : corrections)
-        {
-            correction = batchCorrectionConfigOnly(correction);
-            correction.frame = frame;
-            if (correction.name.trimmed().isEmpty())
-            {
-                correction.name = annotationTypeDisplayName(correction.errorType);
-            }
-            m_annotations.addCorrection(correction);
-            ++addedCount;
-        }
-    }
-
-    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
-    updateAnnotationList();
-    showFrame(m_currentFrame);
-    QMessageBox::information(this,
-                             actionName,
-                             QStringLiteral("批量添加完成：已向 %1 个目标帧追加 %2 条纠错。")
-                                 .arg(targetFrames.size())
-                                 .arg(addedCount));
-}
-
-void MainWindow::appendResolvedCorrections(const QVector<CorrectionShape>& corrections,
-                                           const QString& actionName)
-{
-    if (corrections.isEmpty())
-    {
-        QMessageBox::information(this, actionName, QStringLiteral("没有可添加的目标帧。"));
-        return;
-    }
-
-    QVector<int> targetFrames;
-    int addedCount = 0;
-    for (CorrectionShape correction : corrections)
-    {
-        correction = batchCorrectionConfigOnly(correction);
-        if (correction.frame < 0 || correction.frame >= m_reader.frameCount())
-        {
-            QMessageBox::warning(this, actionName, QStringLiteral("目标帧号超出视频有效范围。"));
-            return;
-        }
-        if (!targetFrames.contains(correction.frame))
-        {
-            targetFrames.push_back(correction.frame);
-        }
-        if (correction.name.trimmed().isEmpty())
-        {
-            correction.name = annotationTypeDisplayName(correction.errorType);
-        }
-        m_annotations.addCorrection(correction);
-        ++addedCount;
-    }
-
-    std::sort(targetFrames.begin(), targetFrames.end());
-    m_annotationPanel->setCurrentFrameCorrections(m_annotations.correctionsForFrame(m_currentFrame), true);
-    updateAnnotationList();
-    showFrame(m_currentFrame);
-    QMessageBox::information(this,
-                             actionName,
-                             QStringLiteral("批量添加完成：已向 %1 个目标帧追加 %2 条纠错。")
-                                 .arg(targetFrames.size())
-                                 .arg(addedCount));
-}
-
-void MainWindow::batchAddCorrections(const QVector<int>& correctionRows,
-                                     int startFrame,
-                                     int endFrame,
-                                     double overlapPixelThreshold)
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-    if (startFrame > endFrame)
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("手动批量添加"),
-                             QStringLiteral("起始帧不能大于结束帧，请修正后再操作。"));
-        return;
-    }
-    if (startFrame < 0 || endFrame >= m_reader.frameCount())
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("手动批量添加"),
-                             QStringLiteral("目标帧号超出视频有效范围。"));
-        return;
-    }
-
-    QVector<CorrectionShape> corrections;
-    QString error;
-    if (!collectBatchCorrections(correctionRows, &corrections, &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("手动批量添加"), error);
-        return;
-    }
-    if (correctionsHaveMixedBatchTypes(corrections))
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("批量操作"),
-                             QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
-        return;
-    }
-    if (correctionsAreAllMissed(corrections))
-    {
-        QVector<CorrectionShape> matchedCorrections;
-        QVector<int> matchedFrames;
-        QVector<int> failedFrames;
-        if (!buildMissedBatchCorrections(corrections,
-                                         startFrame,
-                                         endFrame,
-                                         overlapPixelThreshold,
-                                         &matchedCorrections,
-                                         &matchedFrames,
-                                         &failedFrames,
-                                         &error))
-        {
-            QMessageBox::warning(this, QStringLiteral("手动批量添加"), error);
-            return;
-        }
-        if (!failedFrames.isEmpty())
-        {
-            QMessageBox::warning(this,
-                                 QStringLiteral("手动批量添加"),
-                                 QStringLiteral("漏检匹配在帧 %1 失败，已停止对应方向检索。")
-                                     .arg(framesText(failedFrames)));
-        }
-        if (matchedCorrections.isEmpty())
-        {
-            if (failedFrames.isEmpty())
-            {
-                QMessageBox::information(this, QStringLiteral("手动批量添加"), QStringLiteral("没有可添加的目标帧。"));
-            }
-            return;
-        }
-        appendResolvedCorrections(matchedCorrections, QStringLiteral("手动批量添加"));
-        return;
-    }
-
-    QVector<int> frames;
-    for (int frame = startFrame; frame <= endFrame; ++frame)
-    {
-        frames.push_back(frame);
-    }
-    appendCorrectionsToFrames(corrections, frames, QStringLiteral("手动批量添加"));
-}
-
-void MainWindow::autoMatchCorrectionFrames(const QVector<int>& correctionRows,
-                                           int backwardMaxFrames,
-                                           int forwardMaxFrames,
-                                           double positionThreshold,
-                                           double overlapPixelThreshold)
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-    m_pendingAutoBatchRows.clear();
-    m_pendingAutoMatchedCorrections.clear();
-
-    QVector<CorrectionShape> corrections;
-    QString error;
-    if (!collectBatchCorrections(correctionRows, &corrections, &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
-        return;
-    }
-    if (correctionsHaveMixedBatchTypes(corrections))
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("批量操作"),
-                             QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
-        return;
-    }
-    if (correctionsAreAllMissed(corrections))
-    {
-        QVector<CorrectionShape> matchedCorrections;
-        QVector<int> matchedFrames;
-        QVector<int> failedFrames;
-        if (!buildMissedBatchCorrections(corrections,
-                                         0,
-                                         m_reader.frameCount() - 1,
-                                         overlapPixelThreshold,
-                                         &matchedCorrections,
-                                         &matchedFrames,
-                                         &failedFrames,
-                                         &error))
-        {
-            QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
-            return;
-        }
-
-        m_pendingAutoBatchRows = normalizedRows(correctionRows);
-        m_pendingAutoMatchedCorrections = matchedCorrections;
-        m_annotationPanel->setAutoMatchedBatchFrames(matchedFrames);
-        QString status = QStringLiteral("自动识别匹配帧完成：%1 帧").arg(matchedFrames.size());
-        if (!failedFrames.isEmpty())
-        {
-            status += QStringLiteral("；停止帧：%1").arg(framesText(failedFrames));
-        }
-        statusBar()->showMessage(status, 3000);
-        return;
-    }
-
-    for (const CorrectionShape& correction : corrections)
-    {
-        bool hasSource = false;
-        for (const ErrorCircle& circle : correction.errorCircles)
-        {
-            if (circle.circleIndex >= 0)
-            {
-                hasSource = true;
-                break;
-            }
-        }
-        if (!hasSource)
-        {
-            QMessageBox::warning(this,
-                                 QStringLiteral("自动批量添加"),
-                                 QStringLiteral("自动匹配要求选中的每个纠错条目都包含错误源光点。"));
-            return;
-        }
-    }
-
-    beacon_result_t baseResult;
-    if (!processFrameForBatch(m_currentFrame, &baseResult, &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
-        return;
-    }
-
-    QVector<int> matchedFrames;
-    auto scanDirection = [&](int direction, int maxFrames) {
-        beacon_result_t previousResult = baseResult;
-        int previousFrame = m_currentFrame;
-        for (int step = 1; step <= maxFrames; ++step)
-        {
-            const int nextFrame = previousFrame + direction;
-            if (nextFrame < 0 || nextFrame >= m_reader.frameCount())
-            {
-                break;
-            }
-
-            beacon_result_t nextResult;
-            QString frameError;
-            if (!processFrameForBatch(nextFrame, &nextResult, &frameError))
-            {
-                break;
-            }
-            if (!batchCorrectionsMatchAdjacent(corrections, previousResult, nextResult, positionThreshold))
-            {
-                break;
-            }
-
-            if (direction < 0)
-            {
-                matchedFrames.prepend(nextFrame);
-            }
-            else
-            {
-                matchedFrames.push_back(nextFrame);
-            }
-            previousResult = nextResult;
-            previousFrame = nextFrame;
-        }
-    };
-
-    scanDirection(-1, qMax(0, backwardMaxFrames));
-    scanDirection(1, qMax(0, forwardMaxFrames));
-    m_annotationPanel->setAutoMatchedBatchFrames(matchedFrames);
-    statusBar()->showMessage(QStringLiteral("自动识别匹配帧完成：%1 帧").arg(matchedFrames.size()), 3000);
-}
-
-void MainWindow::batchAddCorrectionsToFrames(const QVector<int>& correctionRows, const QVector<int>& frames)
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-
-    QVector<CorrectionShape> corrections;
-    QString error;
-    if (!collectBatchCorrections(correctionRows, &corrections, &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("自动批量添加"), error);
-        return;
-    }
-    if (correctionsHaveMixedBatchTypes(corrections))
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("批量操作"),
-                             QStringLiteral("选中条目同时包含漏检和非漏检类型，不可混用批量操作。"));
-        return;
-    }
-    if (correctionsAreAllMissed(corrections))
-    {
-        const QVector<int> rows = normalizedRows(correctionRows);
-        if (m_pendingAutoBatchRows != rows || m_pendingAutoMatchedCorrections.isEmpty())
-        {
-            QMessageBox::warning(this,
-                                 QStringLiteral("自动批量添加"),
-                                 QStringLiteral("请先点击“自动识别匹配帧”生成匹配帧列表。"));
-            return;
-        }
-
-        const QVector<int> targetFrames = normalizedRows(frames);
-        QVector<CorrectionShape> resolvedCorrections;
-        for (const CorrectionShape& correction : m_pendingAutoMatchedCorrections)
-        {
-            if (targetFrames.contains(correction.frame))
-            {
-                resolvedCorrections.push_back(correction);
-            }
-        }
-        appendResolvedCorrections(resolvedCorrections, QStringLiteral("自动批量添加"));
-        return;
-    }
-
-    appendCorrectionsToFrames(corrections, frames, QStringLiteral("自动批量添加"));
-}
-
-void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
-{
-    if (!m_reader.isOpen() || points.isEmpty())
-    {
-        return;
-    }
-
-    m_annotationPanel->applyDrawnCorrectionShape(shapeType, points);
-    showFrame(m_currentFrame);
-}
-
-void MainWindow::autoIdentifyCorrectionTargets()
-{
-    if (!m_reader.isOpen())
-    {
-        return;
-    }
-
-    CorrectionShape shape;
-    if (!m_annotationPanel->activeDraftShape(&shape) || !isClosedCorrectionShape(shape))
-    {
-        QMessageBox::information(this,
-                                 QStringLiteral("自动识别"),
-                                 QStringLiteral("请先在当前帧绘制一个封闭纠错图形（圆、矩形或自由闭合）。"));
-        return;
-    }
-
-    QVector<int> matchedIndices;
-    for (int i = 0; i < m_currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        const beacon_circle_t& circle = m_currentResult.circles[i];
-        if (circle.valid == 0)
-        {
-            continue;
-        }
-
-        const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
-        if (shapeContainsPoint(shape, imagePoint))
-        {
-            matchedIndices.push_back(i);
-        }
-    }
-
-    if (matchedIndices.isEmpty())
-    {
-        QMessageBox::information(this,
-                                 QStringLiteral("自动识别"),
-                                 QStringLiteral("封闭区域内没有已识别的光点目标。"));
-        return;
-    }
-
-    m_annotationPanel->applyAutoIdentifiedErrorCircles(matchedIndices);
-    showFrame(m_currentFrame);
-    statusBar()->showMessage(QStringLiteral("已自动选择 %1 个错误圆").arg(matchedIndices.size()), 3000);
-}
-
-void MainWindow::openAlgorithmLocation()
-{
-    const QString algorithmPath = currentInstance()->algorithmPath.isEmpty()
-        ? defaultAlgorithmPath()
-        : currentInstance()->algorithmPath;
-    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(algorithmPath).absolutePath()));
-}
-
-void MainWindow::jumpToRecordFrame(int frame)
-{
-    if (!m_reader.isOpen())
+    if (!isValidCameraIndex(cameraIndex) || m_cameras[cameraIndex].videoPath.isEmpty())
     {
-        return;
+        return QString();
     }
-    pause();
-    showFrame(qBound(0, frame, qMax(0, m_reader.frameCount() - 1)));
-}
 
-void MainWindow::updateAnnotationList()
-{
-    m_annotationPanel->setAnnotations(m_annotations.records(), m_annotations.corrections());
-    updateCurrentAnnotationInfo();
+    const QFileInfo info(m_cameras[cameraIndex].videoPath);
+    return info.absolutePath() + QLatin1Char('/') +
+           info.completeBaseName() +
+           QStringLiteral("_camera%1_annotations.json").arg(cameraIndex + 1);
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
     Q_UNUSED(watched);
-
     if (event->type() != QEvent::KeyPress || qApp->activeWindow() != this)
     {
         return false;
@@ -4020,229 +1694,24 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     }
     if (keyEvent->key() == Qt::Key_Left)
     {
-        pause();
         previousFrame();
         return true;
     }
     if (keyEvent->key() == Qt::Key_Right)
     {
-        pause();
         nextFrame();
         return true;
     }
-
+    if (keyEvent->key() >= Qt::Key_1 && keyEvent->key() <= Qt::Key_3)
+    {
+        selectCamera(keyEvent->key() - Qt::Key_1);
+        return true;
+    }
     return false;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    const int previousInstanceId = m_currentInstanceId;
-    for (AnalyzerInstance* instance : m_instances)
-    {
-        if (instance != nullptr)
-        {
-            m_currentInstanceId = instance->id;
-            saveProject();
-        }
-    }
-    m_currentInstanceId = previousInstanceId;
+    pause();
     QMainWindow::closeEvent(event);
-}
-
-void MainWindow::resizeEvent(QResizeEvent* event)
-{
-    QMainWindow::resizeEvent(event);
-    updateResponsiveConsole();
-}
-
-void MainWindow::restoreLastSession()
-{
-    QSettings settings(QStringLiteral("BeaconImageAnalyzer"), QStringLiteral("BeaconImageAnalyzer"));
-    const QString projectPath = settings.value(QStringLiteral("last_project_path")).toString();
-    if (projectPath.isEmpty())
-    {
-        return;
-    }
-
-    QFile file(projectPath);
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        return;
-    }
-
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    const QString videoPath = document.object()
-                                  .value(QStringLiteral("session")).toObject()
-                                  .value(QStringLiteral("video_path")).toString();
-    if (!videoPath.isEmpty() && QFileInfo::exists(videoPath))
-    {
-        loadVideoFile(videoPath, true, 0);
-    }
-}
-
-void MainWindow::saveProject()
-{
-    if (!m_reader.isOpen() || m_currentVideoPath.isEmpty())
-    {
-        return;
-    }
-
-    const QString path = projectPathForVideo(m_currentVideoPath);
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-    {
-        return;
-    }
-
-    QJsonObject root;
-    root.insert(QStringLiteral("project"), QStringLiteral("BeaconImageAnalyzer"));
-
-    QJsonObject video;
-    video.insert(QStringLiteral("file"), QFileInfo(m_currentVideoPath).fileName());
-    video.insert(QStringLiteral("width"), m_reader.width());
-    video.insert(QStringLiteral("height"), m_reader.height());
-    video.insert(QStringLiteral("fps_used"), m_usedFps);
-    video.insert(QStringLiteral("frame_count"), m_reader.frameCount());
-    root.insert(QStringLiteral("video"), video);
-
-    QJsonObject session;
-    session.insert(QStringLiteral("video_path"), QFileInfo(m_currentVideoPath).absoluteFilePath());
-    session.insert(QStringLiteral("current_frame"), m_currentFrame);
-    session.insert(QStringLiteral("zoom"), m_zoom);
-    session.insert(QStringLiteral("show_overlay"), m_showOverlay);
-    session.insert(QStringLiteral("view_mode"), viewMode());
-    session.insert(QStringLiteral("window_geometry"), QString::fromLatin1(saveGeometry().toBase64()));
-    root.insert(QStringLiteral("session"), session);
-
-    QJsonObject algorithm;
-    algorithm.insert(QStringLiteral("name"), QStringLiteral("beacon_image_process"));
-    algorithm.insert(QStringLiteral("version"), QStringLiteral("v1"));
-    algorithm.insert(QStringLiteral("source_path"), currentInstance()->algorithmPath);
-    algorithm.insert(QStringLiteral("instance_name"), currentInstance()->name);
-    algorithm.insert(QStringLiteral("note"), QStringLiteral("simple threshold + connected components"));
-    root.insert(QStringLiteral("algorithm"), algorithm);
-
-    QJsonArray annotations;
-    for (const AnnotationRecord& record : m_annotations.records())
-    {
-        QJsonObject item;
-        item.insert(QStringLiteral("type"), record.type);
-        item.insert(QStringLiteral("types"), stringListToJson(record.types));
-        item.insert(QStringLiteral("start_frame"), record.startFrame);
-        item.insert(QStringLiteral("end_frame"), record.endFrame);
-        item.insert(QStringLiteral("start_time_sec"), record.startTimeSec);
-        item.insert(QStringLiteral("end_time_sec"), record.endTimeSec);
-        item.insert(QStringLiteral("circle_index"), record.circleIndex);
-        item.insert(QStringLiteral("error_circles"), errorCirclesToJson(record.errorCircles));
-        item.insert(QStringLiteral("description"), record.description);
-        annotations.append(item);
-    }
-    root.insert(QStringLiteral("annotations"), annotations);
-
-    QJsonArray corrections;
-    for (const CorrectionShape& shape : m_annotations.corrections())
-    {
-        QJsonObject item;
-        item.insert(QStringLiteral("name"), shape.name);
-        item.insert(QStringLiteral("shape_type"), shape.shapeType);
-        item.insert(QStringLiteral("frame"), shape.frame);
-        item.insert(QStringLiteral("error_type"), shape.errorType);
-        item.insert(QStringLiteral("error_types"), stringListToJson(shape.errorTypes));
-        item.insert(QStringLiteral("expected_index"), shape.expectedIndex);
-        item.insert(QStringLiteral("error_circles"), errorCirclesToJson(shape.errorCircles));
-        item.insert(QStringLiteral("description"), shape.description);
-        item.insert(QStringLiteral("line_color"), shape.lineColor.name(QColor::HexRgb));
-        item.insert(QStringLiteral("line_width"), shape.lineWidth);
-        item.insert(QStringLiteral("points"), pointsToJson(shape.points));
-        corrections.append(item);
-    }
-    root.insert(QStringLiteral("corrections"), corrections);
-
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-
-    QSettings settings(QStringLiteral("BeaconImageAnalyzer"), QStringLiteral("BeaconImageAnalyzer"));
-    settings.setValue(QStringLiteral("last_project_path"), path);
-}
-
-bool MainWindow::loadProject()
-{
-    if (m_currentVideoPath.isEmpty())
-    {
-        return false;
-    }
-
-    const QString path = projectPathForVideo(m_currentVideoPath);
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        return false;
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject())
-    {
-        return false;
-    }
-
-    const QJsonObject root = document.object();
-    const QJsonObject session = root.value(QStringLiteral("session")).toObject();
-    m_currentFrame = session.value(QStringLiteral("current_frame")).toInt(m_currentFrame);
-    m_zoom = 1;
-    m_showOverlay = session.value(QStringLiteral("show_overlay")).toBool(m_showOverlay);
-
-    const QString restoredViewMode = session.value(QStringLiteral("view_mode")).toString(QStringLiteral("original"));
-    const int viewIndex = m_viewModeCombo->findData(restoredViewMode);
-    if (viewIndex >= 0)
-    {
-        m_viewModeCombo->setCurrentIndex(viewIndex);
-    }
-
-    const QByteArray geometry = QByteArray::fromBase64(session.value(QStringLiteral("window_geometry")).toString().toLatin1());
-    if (!geometry.isEmpty())
-    {
-        restoreGeometry(geometry);
-    }
-
-    QString error;
-    if (!AnnotationJson::load(path, &m_annotations, &error))
-    {
-        return false;
-    }
-    return true;
-}
-
-QString MainWindow::projectPathForVideo(const QString& videoPath) const
-{
-    const QFileInfo info(videoPath);
-    const AnalyzerInstance* instance = currentInstance();
-    if (instance != nullptr && !instance->rootDir.isEmpty())
-    {
-        return QDir(instance->rootDir).absoluteFilePath(info.completeBaseName() + QStringLiteral(".bia_project.json"));
-    }
-    return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".bia_project.json");
-}
-
-QString MainWindow::viewMode() const
-{
-    if (m_viewModeCombo == nullptr)
-    {
-        return QStringLiteral("original");
-    }
-    return m_viewModeCombo->currentData().toString();
-}
-
-QString MainWindow::defaultOutputPath(const QString& suffix) const
-{
-    if (m_currentVideoPath.isEmpty())
-    {
-        return QString();
-    }
-    const QFileInfo info(m_currentVideoPath);
-    return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + suffix;
-}
-
-double MainWindow::frameTime(int frame) const
-{
-    return (double)frame / m_usedFps;
 }
