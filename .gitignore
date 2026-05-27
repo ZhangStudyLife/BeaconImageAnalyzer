@@ -49,3 +49,6 @@ build.ninja
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Spec workflow templates
+.spec-workflow/templates/
