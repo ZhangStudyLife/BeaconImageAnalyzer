@@ -130,8 +130,8 @@ QVector<QPointF> displayPointsForShape(const CorrectionShape& shape, int safeSca
 
 QPointF FrameRenderer::algorithmToImagePoint(float x, float y)
 {
-    const float centerX = (float)BEACON_IMAGE_W * 0.5f - x;
-    const float centerY = (float)BEACON_IMAGE_H * 0.5f + y;
+    const float centerX = BEACON_IMAGE_TARGET_PIXEL_X - x;
+    const float centerY = BEACON_IMAGE_TARGET_PIXEL_Y + y;
     return QPointF(centerX, centerY);
 }
 

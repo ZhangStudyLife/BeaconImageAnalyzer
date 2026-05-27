@@ -15,6 +15,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
 add_library(beacon_algorithm STATIC
     algorithm/beacon_image.c
     algorithm/beacon_fusion.c
+    algorithm/desktop_mt9v03x_stub.c
 )
 
 target_include_directories(beacon_algorithm PUBLIC

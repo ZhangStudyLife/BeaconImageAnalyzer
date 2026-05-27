@@ -12,6 +12,37 @@
 
 namespace
 {
+void cameraResultsToFusionFrames(const beacon_result_t cameraResults[BEACON_CAMERA_COUNT],
+                                 beacon_fusion_camera_frame_t cameraFrames[BEACON_FUSION_CAMERA_COUNT])
+{
+    std::memset(cameraFrames, 0, sizeof(beacon_fusion_camera_frame_t) * BEACON_FUSION_CAMERA_COUNT);
+    if (cameraResults == nullptr)
+    {
+        return;
+    }
+
+    for (int cameraIndex = 0; cameraIndex < BEACON_FUSION_CAMERA_COUNT; ++cameraIndex)
+    {
+        const beacon_result_t& cameraResult = cameraResults[cameraIndex];
+        for (int targetIndex = 0;
+             targetIndex < cameraResult.count && targetIndex < BEACON_FUSION_CAMERA_TARGETS;
+             ++targetIndex)
+        {
+            const beacon_circle_t& circle = cameraResult.circles[targetIndex];
+            beacon_fusion_camera_target_t& target = cameraFrames[cameraIndex].target[targetIndex];
+            if (circle.valid == 0)
+            {
+                continue;
+            }
+
+            target.valid = 1U;
+            target.x = BEACON_IMAGE_TARGET_PIXEL_X - circle.x;
+            target.y = BEACON_IMAGE_TARGET_PIXEL_Y + circle.y;
+            target.radius = circle.radius;
+        }
+    }
+}
+
 QString projectAlgorithmIncludeDir()
 {
 #ifdef BEACON_SOURCE_DIR
@@ -107,6 +138,8 @@ bool FusionRunner::loadSourceFile(const QString& sourcePath, const QString& buil
     }
     m_initFn = nullptr;
     m_analyzeFn = nullptr;
+    m_updateFn = nullptr;
+    m_getResultFn = nullptr;
 
     const QString outputPath = dynamicLibraryPath(sourceInfo.absoluteFilePath(), buildDir);
     QStringList arguments;
@@ -145,11 +178,13 @@ bool FusionRunner::loadSourceFile(const QString& sourcePath, const QString& buil
 
     m_initFn = reinterpret_cast<InitFn>(m_library.resolve("beacon_fusion_init"));
     m_analyzeFn = reinterpret_cast<AnalyzeFn>(m_library.resolve("beacon_fusion_analyze"));
-    if (m_analyzeFn == nullptr)
+    m_updateFn = reinterpret_cast<UpdateFn>(m_library.resolve("beacon_fusion_update_100HZ"));
+    m_getResultFn = reinterpret_cast<GetResultFn>(m_library.resolve("beacon_fusion_get_result"));
+    if (m_analyzeFn == nullptr && (m_updateFn == nullptr || m_getResultFn == nullptr))
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("融合分析库未导出 beacon_fusion_analyze。");
+            *errorMessage = QStringLiteral("融合分析库需导出 beacon_fusion_analyze，或同时导出 beacon_fusion_update_100HZ / beacon_fusion_get_result。");
         }
         m_library.unload();
         return false;
@@ -170,7 +205,7 @@ QString FusionRunner::sourcePath() const
 
 bool FusionRunner::usesDynamicLibrary() const
 {
-    return m_analyzeFn != nullptr;
+    return m_analyzeFn != nullptr || (m_updateFn != nullptr && m_getResultFn != nullptr);
 }
 
 beacon_fusion_result_t FusionRunner::analyze(const beacon_result_t cameraResults[BEACON_CAMERA_COUNT]) const
@@ -186,6 +221,17 @@ beacon_fusion_result_t FusionRunner::analyze(const beacon_result_t cameraResults
     if (m_analyzeFn != nullptr)
     {
         m_analyzeFn(cameraResults, &result);
+    }
+    else if (m_updateFn != nullptr && m_getResultFn != nullptr)
+    {
+        beacon_fusion_camera_frame_t cameraFrames[BEACON_FUSION_CAMERA_COUNT];
+        cameraResultsToFusionFrames(cameraResults, cameraFrames);
+        m_updateFn(cameraFrames);
+        const beacon_fusion_result_t* dynamicResult = m_getResultFn();
+        if (dynamicResult != nullptr)
+        {
+            result = *dynamicResult;
+        }
     }
     else
     {

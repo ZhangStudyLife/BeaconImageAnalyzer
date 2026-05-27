@@ -90,7 +90,7 @@ bool copyGrayToAlgorithmImage(const QImage& grayImage,
 
 AlgorithmRunner::AlgorithmRunner()
 {
-    beacon_image_init();
+    beacon_image_context_init(&m_defaultContext);
 }
 
 AlgorithmRunner::~AlgorithmRunner()
@@ -131,6 +131,10 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     m_initFn = nullptr;
     m_processFn = nullptr;
     m_binaryFn = nullptr;
+    m_imageUpdateFn = nullptr;
+    m_imageGetCirclesFn = nullptr;
+    m_dynamicFrameBuffer = nullptr;
+    m_dynamicFinishFlag = nullptr;
 
     const QString outputPath = dynamicLibraryPath(sourceInfo.absoluteFilePath(), buildDir);
     QStringList arguments;
@@ -141,6 +145,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
               << QStringLiteral("-I") << projectAlgorithmIncludeDir()
               << QStringLiteral("-o") << outputPath
               << sourceInfo.absoluteFilePath()
+              << QDir(projectAlgorithmIncludeDir()).absoluteFilePath(QStringLiteral("desktop_mt9v03x_stub.c"))
               << QStringLiteral("-lm");
 
     QProcess compilerProcess;
@@ -215,7 +220,7 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
     }
     else
     {
-        beacon_image_process(image, &result);
+        beacon_image_process_with_context(&m_defaultContext, image, &result);
     }
     return result;
 }

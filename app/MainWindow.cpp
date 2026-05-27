@@ -126,12 +126,12 @@ protected:
         }
 
         double maxDistance = 10.0;
-        for (int i = 0; i < m_result.count && i < BEACON_MAX_FUSION_TARGET_COUNT; ++i)
+        for (int i = 0; i < m_result.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
         {
-            const beacon_fusion_target_t& target = m_result.targets[i];
-            if (target.valid != 0 && std::isfinite(target.distance))
+            const beacon_fusion_beacon_t& beacon = m_result.beacon[i];
+            if (beacon.valid != 0 && std::isfinite(beacon.range_proxy))
             {
-                maxDistance = qMax(maxDistance, (double)target.distance);
+                maxDistance = qMax(maxDistance, (double)beacon.range_proxy);
             }
         }
 
@@ -170,31 +170,33 @@ protected:
                          Qt::AlignRight | Qt::AlignVCenter,
                          QStringLiteral("270"));
 
-        const QColor colors[BEACON_CAMERA_COUNT] = {
+        const QColor colors[BEACON_FUSION_MAX_BEACONS] = {
             QColor(64, 211, 255),
             QColor(255, 196, 70),
-            QColor(120, 235, 126)
+            QColor(120, 235, 126),
+            QColor(255, 112, 178),
+            QColor(190, 140, 255)
         };
-        for (int i = 0; i < m_result.count && i < BEACON_MAX_FUSION_TARGET_COUNT; ++i)
+        for (int i = 0; i < m_result.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
         {
-            const beacon_fusion_target_t& target = m_result.targets[i];
-            if (target.valid == 0 || !std::isfinite(target.angle_deg) || !std::isfinite(target.distance))
+            const beacon_fusion_beacon_t& beacon = m_result.beacon[i];
+            if (beacon.valid == 0 || !std::isfinite(beacon.bearing_deg) || !std::isfinite(beacon.range_proxy))
             {
                 continue;
             }
 
-            const double clampedDistance = qBound(0.0, (double)target.distance, maxDistance);
+            const double clampedDistance = qBound(0.0, (double)beacon.range_proxy, maxDistance);
             const double normalizedDistance = clampedDistance / maxDistance;
-            const double radians = (double)target.angle_deg * Pi / 180.0;
+            const double radians = (double)beacon.bearing_deg * Pi / 180.0;
             const QPointF point(center.x() + std::sin(radians) * radius * normalizedDistance,
                                 center.y() - std::cos(radians) * radius * normalizedDistance);
-            const QColor color = colors[qBound(0, (int)target.camera_index, BEACON_CAMERA_COUNT - 1)];
+            const QColor color = colors[i % BEACON_FUSION_MAX_BEACONS];
 
             painter.setPen(QPen(color, 2));
             painter.setBrush(color);
             painter.drawEllipse(point, 5.0, 5.0);
             painter.drawText(point + QPointF(7.0, -7.0),
-                             QStringLiteral("C%1-%2").arg((int)target.camera_index + 1).arg((int)target.source_index));
+                             QStringLiteral("#%1").arg(i));
         }
 
         painter.setPen(QColor(225, 232, 238));
@@ -936,7 +938,13 @@ void MainWindow::updateFusion()
     }
 
     QStringList lines;
-    lines << QStringLiteral("融合后信标灯总数：%1").arg((int)m_fusionResult.count);
+    lines << QStringLiteral("融合后信标灯总数：%1").arg((int)m_fusionResult.beacon_count);
+    lines << QStringLiteral("观测总数：%1  最优目标：%2  更新次数：%3")
+                 .arg((int)m_fusionResult.observation_count)
+                 .arg(m_fusionResult.best_index < BEACON_FUSION_MAX_BEACONS
+                          ? QStringLiteral("#%1").arg((int)m_fusionResult.best_index)
+                          : QStringLiteral("-"))
+                 .arg((unsigned int)m_fusionResult.update_count);
     if (!hasAllVideos())
     {
         lines << QStringLiteral("提示：尚未导入全部三路视频，融合结果只使用已导入摄像头的当前帧。");
@@ -950,22 +958,26 @@ void MainWindow::updateFusion()
         lines << QStringLiteral("融合代码：%1").arg(m_fusionRunner.sourcePath());
     }
     lines << QString();
-    lines << QStringLiteral("index,camera,source,angle_deg,distance,x,y");
-    for (int i = 0; i < m_fusionResult.count && i < BEACON_MAX_FUSION_TARGET_COUNT; ++i)
+    lines << QStringLiteral("index,bearing_deg,range_proxy,x_body,y_body,control_x,control_y,observations,camera_mask,confidence,stable_ticks");
+    for (int i = 0; i < m_fusionResult.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
     {
-        const beacon_fusion_target_t& target = m_fusionResult.targets[i];
-        if (target.valid == 0)
+        const beacon_fusion_beacon_t& beacon = m_fusionResult.beacon[i];
+        if (beacon.valid == 0)
         {
             continue;
         }
-        lines << QStringLiteral("%1,C%2,#%3,%4,%5,%6,%7")
+        lines << QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,0x%9,%10,%11")
                      .arg(i)
-                     .arg((int)target.camera_index + 1)
-                     .arg((int)target.source_index)
-                     .arg(target.angle_deg, 0, 'f', 2)
-                     .arg(target.distance, 0, 'f', 2)
-                     .arg(target.x, 0, 'f', 2)
-                     .arg(target.y, 0, 'f', 2);
+                     .arg(beacon.bearing_deg, 0, 'f', 2)
+                     .arg(beacon.range_proxy, 0, 'f', 2)
+                     .arg(beacon.x_body, 0, 'f', 2)
+                     .arg(beacon.y_body, 0, 'f', 2)
+                     .arg(beacon.control_x, 0, 'f', 2)
+                     .arg(beacon.control_y, 0, 'f', 2)
+                     .arg((int)beacon.observation_count)
+                     .arg((int)beacon.source_camera_mask, 0, 16)
+                     .arg(beacon.confidence, 0, 'f', 2)
+                     .arg((int)beacon.stable_ticks);
     }
 
     m_fusionText->setPlainText(lines.join(QLatin1Char('\n')));

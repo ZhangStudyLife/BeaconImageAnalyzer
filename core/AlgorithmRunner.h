@@ -24,12 +24,19 @@ private:
     using ProcessFn = void (*)(const unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W], beacon_result_t*);
     using BinaryFn = void (*)(const unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W],
                               unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W]);
+    using ImageUpdateFn = void (*)();
+    using ImageGetCirclesFn = unsigned char (*)(const beacon_circle_t**);
 
+    mutable beacon_image_context_t m_defaultContext = {};
     QString m_sourcePath;
     QLibrary m_library;
     InitFn m_initFn = nullptr;
     ProcessFn m_processFn = nullptr;
     BinaryFn m_binaryFn = nullptr;
+    ImageUpdateFn m_imageUpdateFn = nullptr;
+    ImageGetCirclesFn m_imageGetCirclesFn = nullptr;
+    unsigned char* m_dynamicFrameBuffer = nullptr;
+    unsigned char* m_dynamicFinishFlag = nullptr;
 };
 
 #endif

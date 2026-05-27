@@ -1,5 +1,5 @@
-#ifndef BEACON_FUSION_H_
-#define BEACON_FUSION_H_
+#ifndef BEACON_FUSION_H
+#define BEACON_FUSION_H
 
 #include "beacon_image.h"
 
@@ -8,26 +8,58 @@ extern "C" {
 #endif
 
 #define BEACON_CAMERA_COUNT 3
-#define BEACON_MAX_FUSION_TARGET_COUNT (BEACON_CAMERA_COUNT * BEACON_MAX_CIRCLE_COUNT)
+#define BEACON_FUSION_CAMERA_COUNT 3
+#define BEACON_FUSION_CAMERA_TARGETS BEACON_MAX_CIRCLE_COUNT
+#define BEACON_FUSION_MAX_OBSERVATIONS (BEACON_FUSION_CAMERA_COUNT * BEACON_FUSION_CAMERA_TARGETS)
+#define BEACON_FUSION_MAX_BEACONS 5
+
+typedef unsigned char uint8;
+typedef unsigned int uint32;
 
 typedef struct
 {
-    float angle_deg;
-    float distance;
+    uint8 valid;
     float x;
     float y;
-    unsigned char camera_index;
-    unsigned char source_index;
-    unsigned char valid;
-} beacon_fusion_target_t;
+    float radius;
+} beacon_fusion_camera_target_t;
 
 typedef struct
 {
-    beacon_fusion_target_t targets[BEACON_MAX_FUSION_TARGET_COUNT];
-    unsigned char count;
+    beacon_fusion_camera_target_t target[BEACON_FUSION_CAMERA_TARGETS];
+} beacon_fusion_camera_frame_t;
+
+typedef struct
+{
+    uint8 valid;
+    uint8 source_camera_mask;
+    uint8 observation_count;
+    uint8 stable_ticks;
+    float bearing_deg;
+    float range_proxy;
+    float x_body;
+    float y_body;
+    float control_x;
+    float control_y;
+    float confidence;
+} beacon_fusion_beacon_t;
+
+typedef struct
+{
+    uint8 beacon_count;
+    uint8 best_index;
+    uint8 observation_count;
+    uint32 update_count;
+    beacon_fusion_beacon_t beacon[BEACON_FUSION_MAX_BEACONS];
 } beacon_fusion_result_t;
 
+extern beacon_fusion_result_t g_beacon_fusion_result;
+
 void beacon_fusion_init(void);
+void beacon_fusion_set_auto_max_count(uint8 max_count);
+void beacon_fusion_set_expected_count(uint8 expected_count);
+void beacon_fusion_update_100HZ(const beacon_fusion_camera_frame_t camera[BEACON_FUSION_CAMERA_COUNT]);
+const beacon_fusion_result_t *beacon_fusion_get_result(void);
 
 void beacon_fusion_analyze(
     const beacon_result_t camera_results[BEACON_CAMERA_COUNT],

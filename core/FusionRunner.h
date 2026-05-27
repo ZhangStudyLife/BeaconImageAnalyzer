@@ -20,11 +20,15 @@ public:
 private:
     using InitFn = void (*)();
     using AnalyzeFn = void (*)(const beacon_result_t[BEACON_CAMERA_COUNT], beacon_fusion_result_t*);
+    using UpdateFn = void (*)(const beacon_fusion_camera_frame_t[BEACON_FUSION_CAMERA_COUNT]);
+    using GetResultFn = const beacon_fusion_result_t* (*)();
 
     QString m_sourcePath;
     QLibrary m_library;
     InitFn m_initFn = nullptr;
     AnalyzeFn m_analyzeFn = nullptr;
+    UpdateFn m_updateFn = nullptr;
+    GetResultFn m_getResultFn = nullptr;
 };
 
 #endif
