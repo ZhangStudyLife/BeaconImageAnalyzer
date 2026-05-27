@@ -1,32 +1,219 @@
 #include "beacon_image.h"
-
 #include "beacon_image_config.h"
 
 #include <math.h>
 #include <string.h>
 
+/* 内部圆结构，与车端 image_circle 一致 */
+typedef struct
+{
+    float x;
+    float y;
+    float radius;
+    unsigned char valid;
+} internal_circle_t;
+
+/* 连通域统计 */
 typedef struct
 {
     int area;
     int sum_x;
     int sum_y;
-    int min_x;
-    int min_y;
-    int max_x;
-    int max_y;
-} beacon_component_t;
+} component_t;
 
-static unsigned char g_visited[BEACON_IMAGE_H][BEACON_IMAGE_W];
-static int g_queue_x[BEACON_IMAGE_W * BEACON_IMAGE_H];
-static int g_queue_y[BEACON_IMAGE_W * BEACON_IMAGE_H];
-static beacon_component_t g_components[BEACON_IMAGE_W * BEACON_IMAGE_H / BEACON_MIN_COMPONENT_AREA];
+/* 静态缓冲区 */
+static unsigned char g_binary[BEACON_IMAGE_H][BEACON_IMAGE_W];
+static unsigned char g_visit_stamp[BEACON_IMAGE_H][BEACON_IMAGE_W];
+static unsigned char g_current_stamp = 0;
+static unsigned char g_queue_x[BEACON_QUEUE_SIZE];
+static unsigned char g_queue_y[BEACON_QUEUE_SIZE];
+static internal_circle_t g_circles[BEACON_MAX_CIRCLE_COUNT];
+static unsigned short g_circle_area[BEACON_MAX_CIRCLE_COUNT];
+
+/* 全局结果 */
+static beacon_result_t g_result;
 
 void beacon_image_init(void)
 {
-    memset(g_visited, 0, sizeof(g_visited));
+    memset(g_binary, 0, sizeof(g_binary));
+    memset(g_visit_stamp, 0, sizeof(g_visit_stamp));
+    memset(g_circles, 0, sizeof(g_circles));
+    memset(g_circle_area, 0, sizeof(g_circle_area));
+    memset(&g_result, 0, sizeof(g_result));
+    g_current_stamp = 0;
 }
 
-static void clear_result(beacon_result_t *result)
+static void begin_visit_pass(void)
+{
+    g_current_stamp++;
+    if (g_current_stamp == 0)
+    {
+        memset(g_visit_stamp, 0, sizeof(g_visit_stamp));
+        g_current_stamp = 1;
+    }
+}
+
+static unsigned char is_visited(unsigned char x, unsigned char y)
+{
+    return (g_visit_stamp[y][x] == g_current_stamp) ? 1 : 0;
+}
+
+static void mark_visited(unsigned char x, unsigned char y)
+{
+    g_visit_stamp[y][x] = g_current_stamp;
+}
+
+/* 固定阈值二值化，与车端一致 */
+static void threshold_fixed(const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W])
+{
+    const unsigned char *src = &image[0][0];
+    unsigned char *dst = &g_binary[0][0];
+    int i;
+
+    for (i = 0; i < BEACON_IMAGE_W * BEACON_IMAGE_H; i++)
+    {
+        dst[i] = (src[i] >= BEACON_BINARY_THRESHOLD) ? 255 : 0;
+    }
+}
+
+/* 8 连通域 flood fill */
+static component_t grow_component(unsigned char start_x, unsigned char start_y)
+{
+    static const signed char dx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+    static const signed char dy[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+    unsigned short head = 0;
+    unsigned short tail = 0;
+    component_t comp;
+
+    comp.area = 0;
+    comp.sum_x = 0;
+    comp.sum_y = 0;
+
+    g_queue_x[tail] = start_x;
+    g_queue_y[tail] = start_y;
+    tail++;
+    mark_visited(start_x, start_y);
+
+    while (head < tail)
+    {
+        unsigned char i;
+        unsigned char x = g_queue_x[head];
+        unsigned char y = g_queue_y[head];
+        head++;
+
+        comp.area++;
+        comp.sum_x += x;
+        comp.sum_y += y;
+
+        for (i = 0; i < 8; i++)
+        {
+            int nx = (int)x + dx[i];
+            int ny = (int)y + dy[i];
+
+            if (nx < 0 || nx >= BEACON_IMAGE_W || ny < 0 || ny >= BEACON_IMAGE_H)
+            {
+                continue;
+            }
+            if (g_binary[ny][nx] == 0)
+            {
+                continue;
+            }
+            if (is_visited((unsigned char)nx, (unsigned char)ny))
+            {
+                continue;
+            }
+            if (tail >= BEACON_QUEUE_SIZE)
+            {
+                continue;
+            }
+
+            mark_visited((unsigned char)nx, (unsigned char)ny);
+            g_queue_x[tail] = (unsigned char)nx;
+            g_queue_y[tail] = (unsigned char)ny;
+            tail++;
+        }
+    }
+
+    return comp;
+}
+
+/* 按面积排序插入 */
+static void insert_sorted(const component_t *comp)
+{
+    int i;
+    int slot;
+
+    if (comp->area < BEACON_MIN_COMPONENT_AREA)
+    {
+        return;
+    }
+
+    slot = g_result.count;
+    if (slot >= BEACON_MAX_CIRCLE_COUNT)
+    {
+        slot = BEACON_MAX_CIRCLE_COUNT - 1;
+        if (comp->area <= g_circle_area[slot])
+        {
+            return;
+        }
+    }
+    else
+    {
+        g_result.count++;
+    }
+
+    for (i = slot - 1; i >= 0; i--)
+    {
+        if (comp->area <= g_circle_area[i])
+        {
+            break;
+        }
+        g_circles[i + 1] = g_circles[i];
+        g_circle_area[i + 1] = g_circle_area[i];
+    }
+
+    g_circle_area[i + 1] = (unsigned short)comp->area;
+    g_circles[i + 1].x = (float)comp->sum_x / (float)comp->area;
+    g_circles[i + 1].y = (float)comp->sum_y / (float)comp->area;
+    g_circles[i + 1].radius = sqrtf((float)comp->area / 3.1415926f);
+    g_circles[i + 1].valid = 1;
+}
+
+/* 查找连通域 */
+static void find_components(void)
+{
+    unsigned char x;
+    unsigned char y;
+
+    memset(g_circles, 0, sizeof(g_circles));
+    memset(g_circle_area, 0, sizeof(g_circle_area));
+    g_result.count = 0;
+    begin_visit_pass();
+
+    for (y = 0; y < BEACON_IMAGE_H; y++)
+    {
+        for (x = 0; x < BEACON_IMAGE_W; x++)
+        {
+            component_t comp;
+
+            if (g_binary[y][x] == 0)
+            {
+                continue;
+            }
+            if (is_visited(x, y))
+            {
+                continue;
+            }
+
+            comp = grow_component(x, y);
+            insert_sorted(&comp);
+        }
+    }
+}
+
+void beacon_image_process(
+    const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
+    beacon_result_t *result)
 {
     int i;
 
@@ -36,254 +223,64 @@ static void clear_result(beacon_result_t *result)
     }
 
     memset(result, 0, sizeof(*result));
-    for (i = 0; i < BEACON_MAX_CIRCLE_COUNT; ++i)
+
+    if (image == 0)
     {
-        result->circles[i].valid = 0;
+        return;
     }
-    for (i = 0; i < BEACON_MAX_BEACON_COUNT; ++i)
+
+    threshold_fixed(image);
+    find_components();
+
+    /* 坐标转换：图像坐标 -> 算法坐标 */
+    result->beacon_count = g_result.count;
+    result->car_lamp_count = 0;
+
+    for (i = 0; i < g_result.count; i++)
     {
-        result->beacons[i].valid = 0;
+        result->circles[i].x = (float)BEACON_IMAGE_W * 0.5f - g_circles[i].x;
+        result->circles[i].y = g_circles[i].y - (float)BEACON_IMAGE_H * 0.5f;
+        result->circles[i].radius = g_circles[i].radius;
+        result->circles[i].valid = g_circles[i].valid;
+
+        /* 默认全部作为信标 */
+        result->beacons[i] = result->circles[i];
     }
-    for (i = 0; i < BEACON_MAX_CAR_LAMP_COUNT; ++i)
+
+    for (i = 0; i < BEACON_MAX_BEACON_COUNT; i++)
+    {
+        if (i >= g_result.count)
+        {
+            result->beacons[i].valid = 0;
+        }
+    }
+
+    for (i = 0; i < BEACON_MAX_CAR_LAMP_COUNT; i++)
     {
         result->car_lamps[i].valid = 0;
     }
 }
 
-static unsigned char compute_threshold(const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W])
-{
-    int x;
-    int y;
-    int max_value = 0;
-    unsigned long sum = 0;
-    const int pixel_count = BEACON_IMAGE_W * BEACON_IMAGE_H;
-    int mean_value;
-    int threshold;
-
-    for (y = 0; y < BEACON_IMAGE_H; ++y)
-    {
-        for (x = 0; x < BEACON_IMAGE_W; ++x)
-        {
-            const int value = image[y][x];
-            sum += (unsigned long)value;
-            if (value > max_value)
-            {
-                max_value = value;
-            }
-        }
-    }
-
-    if (max_value < BEACON_THRESHOLD_MIN_VALUE)
-    {
-        return 255;
-    }
-
-    mean_value = (int)(sum / (unsigned long)pixel_count);
-    threshold = mean_value + (max_value - mean_value) * 45 / 100;
-    if (threshold < BEACON_THRESHOLD_MIN_VALUE)
-    {
-        threshold = BEACON_THRESHOLD_MIN_VALUE;
-    }
-    if (threshold > 245)
-    {
-        threshold = 245;
-    }
-
-    return (unsigned char)threshold;
-}
-
 unsigned char beacon_image_debug_threshold(
     const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W])
 {
-    if (image == 0)
-    {
-        return 255;
-    }
-    return compute_threshold(image);
+    (void)image;
+    return BEACON_BINARY_THRESHOLD;
 }
 
 void beacon_image_debug_binary(
     const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
     unsigned char binary[BEACON_IMAGE_H][BEACON_IMAGE_W])
 {
-    int x;
-    int y;
-    const unsigned char threshold = beacon_image_debug_threshold(image);
+    int i;
 
     if (image == 0 || binary == 0)
     {
         return;
     }
 
-    for (y = 0; y < BEACON_IMAGE_H; ++y)
+    for (i = 0; i < BEACON_IMAGE_W * BEACON_IMAGE_H; i++)
     {
-        for (x = 0; x < BEACON_IMAGE_W; ++x)
-        {
-            binary[y][x] = (threshold != 255 && image[y][x] >= threshold) ? 255 : 0;
-        }
-    }
-}
-
-static beacon_component_t flood_component(
-    const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
-    int start_x,
-    int start_y,
-    unsigned char threshold)
-{
-    int head = 0;
-    int tail = 0;
-    beacon_component_t component;
-
-    component.area = 0;
-    component.sum_x = 0;
-    component.sum_y = 0;
-    component.min_x = start_x;
-    component.min_y = start_y;
-    component.max_x = start_x;
-    component.max_y = start_y;
-
-    g_queue_x[tail] = start_x;
-    g_queue_y[tail] = start_y;
-    ++tail;
-    g_visited[start_y][start_x] = 1;
-
-    while (head < tail)
-    {
-        static const int dx[4] = { 1, -1, 0, 0 };
-        static const int dy[4] = { 0, 0, 1, -1 };
-        int i;
-        const int x = g_queue_x[head];
-        const int y = g_queue_y[head];
-        ++head;
-
-        ++component.area;
-        component.sum_x += x;
-        component.sum_y += y;
-        if (x < component.min_x)
-        {
-            component.min_x = x;
-        }
-        if (y < component.min_y)
-        {
-            component.min_y = y;
-        }
-        if (x > component.max_x)
-        {
-            component.max_x = x;
-        }
-        if (y > component.max_y)
-        {
-            component.max_y = y;
-        }
-
-        for (i = 0; i < 4; ++i)
-        {
-            const int nx = x + dx[i];
-            const int ny = y + dy[i];
-            if (nx < 0 || nx >= BEACON_IMAGE_W || ny < 0 || ny >= BEACON_IMAGE_H)
-            {
-                continue;
-            }
-            if (g_visited[ny][nx] != 0 || image[ny][nx] < threshold)
-            {
-                continue;
-            }
-            g_visited[ny][nx] = 1;
-            g_queue_x[tail] = nx;
-            g_queue_y[tail] = ny;
-            ++tail;
-        }
-    }
-
-    return component;
-}
-
-static void insert_component_sorted(beacon_component_t *components, int *count, beacon_component_t component)
-{
-    int pos = *count;
-    int i;
-
-    if (pos >= BEACON_MAX_CIRCLE_COUNT && component.area <= components[BEACON_MAX_CIRCLE_COUNT - 1].area)
-    {
-        return;
-    }
-
-    if (pos < BEACON_MAX_CIRCLE_COUNT)
-    {
-        ++(*count);
-    }
-    else
-    {
-        pos = BEACON_MAX_CIRCLE_COUNT - 1;
-    }
-
-    for (i = pos - 1; i >= 0 && components[i].area < component.area; --i)
-    {
-        components[i + 1] = components[i];
-    }
-    components[i + 1] = component;
-}
-
-void beacon_image_process(
-    const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
-    beacon_result_t *result)
-{
-    unsigned char threshold;
-    int x;
-    int y;
-    int component_count = 0;
-    int i;
-
-    clear_result(result);
-    if (image == 0 || result == 0)
-    {
-        return;
-    }
-
-    memset(g_visited, 0, sizeof(g_visited));
-    memset(g_components, 0, sizeof(g_components));
-    threshold = compute_threshold(image);
-    if (threshold == 255)
-    {
-        return;
-    }
-
-    for (y = 0; y < BEACON_IMAGE_H; ++y)
-    {
-        for (x = 0; x < BEACON_IMAGE_W; ++x)
-        {
-            beacon_component_t component;
-
-            if (g_visited[y][x] != 0 || image[y][x] < threshold)
-            {
-                continue;
-            }
-
-            component = flood_component(image, x, y, threshold);
-            if (component.area < BEACON_MIN_COMPONENT_AREA ||
-                component.area > BEACON_MAX_COMPONENT_AREA)
-            {
-                continue;
-            }
-
-            insert_component_sorted(g_components, &component_count, component);
-        }
-    }
-
-    result->count = (unsigned char)component_count;
-    result->beacon_count = (unsigned char)component_count;
-    result->car_lamp_count = 0;
-    for (i = 0; i < component_count; ++i)
-    {
-        const beacon_component_t *component = &g_components[i];
-        const float center_x = (float)component->sum_x / (float)component->area;
-        const float center_y = (float)component->sum_y / (float)component->area;
-        const float radius = sqrtf((float)component->area / 3.1415926f);
-
-        result->circles[i].x = (float)BEACON_IMAGE_W * 0.5f - center_x;
-        result->circles[i].y = center_y - (float)BEACON_IMAGE_H * 0.5f;
-        result->circles[i].radius = radius;
-        result->circles[i].valid = 1;
-        result->beacons[i] = result->circles[i];
+        ((unsigned char *)binary)[i] = (((const unsigned char *)image)[i] >= BEACON_BINARY_THRESHOLD) ? 255 : 0;
     }
 }
