@@ -958,7 +958,6 @@ void MainWindow::updateFusion()
         lines << QStringLiteral("融合代码：%1").arg(m_fusionRunner.sourcePath());
     }
     lines << QString();
-    lines << QStringLiteral("index,bearing_deg,range_proxy,x_body,y_body,control_x,control_y,observations,camera_mask,confidence,stable_ticks");
     for (int i = 0; i < m_fusionResult.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
     {
         const beacon_fusion_beacon_t& beacon = m_fusionResult.beacon[i];
@@ -966,18 +965,18 @@ void MainWindow::updateFusion()
         {
             continue;
         }
-        lines << QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,0x%9,%10,%11")
-                     .arg(i)
-                     .arg(beacon.bearing_deg, 0, 'f', 2)
-                     .arg(beacon.range_proxy, 0, 'f', 2)
-                     .arg(beacon.x_body, 0, 'f', 2)
-                     .arg(beacon.y_body, 0, 'f', 2)
-                     .arg(beacon.control_x, 0, 'f', 2)
-                     .arg(beacon.control_y, 0, 'f', 2)
-                     .arg((int)beacon.observation_count)
-                     .arg((int)beacon.source_camera_mask, 0, 16)
-                     .arg(beacon.confidence, 0, 'f', 2)
-                     .arg((int)beacon.stable_ticks);
+        lines << QStringLiteral("信标 #%1").arg(i);
+        lines << QStringLiteral("  角度 bearing_deg：%1").arg(beacon.bearing_deg, 0, 'f', 2);
+        lines << QStringLiteral("  距离 range_proxy：%1").arg(beacon.range_proxy, 0, 'f', 2);
+        lines << QStringLiteral("  车体 X x_body：%1").arg(beacon.x_body, 0, 'f', 2);
+        lines << QStringLiteral("  车体 Y y_body：%1").arg(beacon.y_body, 0, 'f', 2);
+        lines << QStringLiteral("  控制 X control_x：%1").arg(beacon.control_x, 0, 'f', 2);
+        lines << QStringLiteral("  控制 Y control_y：%1").arg(beacon.control_y, 0, 'f', 2);
+        lines << QStringLiteral("  观测数 observations：%1").arg((int)beacon.observation_count);
+        lines << QStringLiteral("  摄像头掩码 camera_mask：0x%1").arg((int)beacon.source_camera_mask, 0, 16);
+        lines << QStringLiteral("  置信度 confidence：%1").arg(beacon.confidence, 0, 'f', 2);
+        lines << QStringLiteral("  稳定帧 stable_ticks：%1").arg((int)beacon.stable_ticks);
+        lines << QString();
     }
 
     m_fusionText->setPlainText(lines.join(QLatin1Char('\n')));
