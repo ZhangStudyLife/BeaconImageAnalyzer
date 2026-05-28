@@ -21,11 +21,21 @@ typedef struct
 
 typedef struct
 {
+    float cx;
+    float cy;
+    float width;
+    float length;
+    float angle;
+    unsigned char valid;
+} beacon_rect_t;
+
+typedef struct
+{
     beacon_circle_t circles[BEACON_MAX_CIRCLE_COUNT];
     unsigned char count;
     beacon_circle_t beacons[BEACON_MAX_BEACON_COUNT];
     unsigned char beacon_count;
-    beacon_circle_t car_lamps[BEACON_MAX_CAR_LAMP_COUNT];
+    beacon_rect_t car_lamps[BEACON_MAX_CAR_LAMP_COUNT];
     unsigned char car_lamp_count;
 } beacon_result_t;
 

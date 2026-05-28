@@ -934,6 +934,20 @@ QStatusBar {
 )");
 }
 
+QImage applyManualThreshold(const QImage& gray, int threshold)
+{
+    QImage binary = gray.convertToFormat(QImage::Format_Grayscale8);
+    for (int y = 0; y < binary.height(); ++y)
+    {
+        uchar* line = binary.scanLine(y);
+        for (int x = 0; x < binary.width(); ++x)
+        {
+            line[x] = (line[x] >= threshold) ? 255 : 0;
+        }
+    }
+    return binary;
+}
+
 }
 
 #define m_reader m_globalReader
@@ -957,6 +971,7 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowIcon(QIcon(QStringLiteral(":/img/logo.png")));
     buildUi();
     buildMenus();
+    ensureDefaultInstance();
     refreshInstanceList();
     updateSplitLayout();
     updateAnnotationList();
@@ -1653,6 +1668,10 @@ void MainWindow::renderInstance(AnalyzerInstance* instance,
             displayImage = binary;
         }
     }
+    else if (viewMode() == QStringLiteral("manual_binary") && m_manualThresholdSlider != nullptr)
+    {
+        displayImage = applyManualThreshold(gray, m_manualThresholdSlider->value());
+    }
     QVector<CorrectionShape> visibleCorrections = corrections;
     if (instance->id == m_currentInstanceId && m_annotationPanel != nullptr)
     {
@@ -2046,7 +2065,23 @@ void MainWindow::buildUi()
     m_viewModeCombo = new QComboBox(controlsFrame);
     m_viewModeCombo->addItem(QStringLiteral("原始图像"), QStringLiteral("original"));
     m_viewModeCombo->addItem(QStringLiteral("二值化图像"), QStringLiteral("binary"));
+    m_viewModeCombo->addItem(QStringLiteral("手动二值化"), QStringLiteral("manual_binary"));
     m_viewModeCombo->setFixedWidth(128);
+    m_manualThresholdSlider = new QSlider(Qt::Horizontal, controlsFrame);
+    m_manualThresholdSlider->setRange(0, 255);
+    m_manualThresholdSlider->setValue(100);
+    m_manualThresholdSlider->setFixedWidth(120);
+    m_manualThresholdSpin = new QSpinBox(controlsFrame);
+    m_manualThresholdSpin->setRange(0, 255);
+    m_manualThresholdSpin->setValue(100);
+    m_manualThresholdSpin->setFixedWidth(75);
+    m_manualThresholdWidget = new QWidget(controlsFrame);
+    auto* thresholdLayout = new QHBoxLayout(m_manualThresholdWidget);
+    thresholdLayout->setContentsMargins(0, 0, 0, 0);
+    thresholdLayout->setSpacing(4);
+    thresholdLayout->addWidget(m_manualThresholdSlider);
+    thresholdLayout->addWidget(m_manualThresholdSpin);
+    m_manualThresholdWidget->setVisible(false);
     m_speedCombo = new QComboBox(controlsFrame);
     m_speedCombo->addItem(QStringLiteral("1/8倍速"), 0.125);
     m_speedCombo->addItem(QStringLiteral("1/4倍速"), 0.25);
@@ -2083,6 +2118,7 @@ void MainWindow::buildUi()
     transportRow->addSpacing(10);
     transportRow->addWidget(viewLabel);
     transportRow->addWidget(m_viewModeCombo);
+    transportRow->addWidget(m_manualThresholdWidget);
     transportRow->addWidget(speedLabel);
     transportRow->addWidget(m_speedCombo);
     transportRow->addStretch(1);
@@ -2138,8 +2174,25 @@ void MainWindow::buildUi()
     });
     connect(m_slider, &QSlider::valueChanged, this, &MainWindow::showFrameFromSlider);
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+        m_manualThresholdWidget->setVisible(m_viewModeCombo->currentData().toString() == QStringLiteral("manual_binary"));
         renderAllDisplayedInstances();
         refreshCurrentInstanceUi();
+    });
+    connect(m_manualThresholdSlider, &QSlider::valueChanged, this, [this](int value) {
+        m_updatingControls = true;
+        m_manualThresholdSpin->setValue(value);
+        m_updatingControls = false;
+        if (viewMode() == QStringLiteral("manual_binary"))
+        {
+            renderAllDisplayedInstances();
+        }
+    });
+    connect(m_manualThresholdSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+        if (m_updatingControls)
+        {
+            return;
+        }
+        m_manualThresholdSlider->setValue(value);
     });
     connect(m_speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         setPlaybackSpeed(m_speedCombo->currentData().toDouble());
@@ -3046,18 +3099,18 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
     const int carLampLimit = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
     for (int i = 0; i < carLampLimit; ++i)
     {
-        const beacon_circle_t& circle = result.car_lamps[i];
-        if (circle.valid == 0)
+        const beacon_rect_t& rect = result.car_lamps[i];
+        if (rect.valid == 0)
         {
             continue;
         }
-        const double area = 3.14159265358979323846 * circle.radius * circle.radius;
-        text += QStringLiteral("车灯 #%1  X=%2  Y=%3  R=%4  Area=%5\n")
+        text += QStringLiteral("车灯 #%1  CX=%2  CY=%3  W=%4  L=%5  A=%6\n")
                     .arg(i)
-                    .arg(circle.x, 0, 'f', 2)
-                    .arg(circle.y, 0, 'f', 2)
-                    .arg(circle.radius, 0, 'f', 2)
-                    .arg(area, 0, 'f', 2);
+                    .arg(rect.cx, 0, 'f', 2)
+                    .arg(rect.cy, 0, 'f', 2)
+                    .arg(rect.width, 0, 'f', 1)
+                    .arg(rect.length, 0, 'f', 1)
+                    .arg(rect.angle, 0, 'f', 1);
     }
 
     m_frameInfoLabel->setText(QStringLiteral("当前帧: %1 / %2\n播放时间: %3 s / %4 s\n信标: %5  车灯: %6  总目标: %7")
@@ -4108,6 +4161,10 @@ void MainWindow::saveProject()
     session.insert(QStringLiteral("zoom"), m_zoom);
     session.insert(QStringLiteral("show_overlay"), m_showOverlay);
     session.insert(QStringLiteral("view_mode"), viewMode());
+    if (m_manualThresholdSlider != nullptr)
+    {
+        session.insert(QStringLiteral("manual_threshold"), m_manualThresholdSlider->value());
+    }
     session.insert(QStringLiteral("window_geometry"), QString::fromLatin1(saveGeometry().toBase64()));
     root.insert(QStringLiteral("session"), session);
 
@@ -4193,6 +4250,12 @@ bool MainWindow::loadProject()
     if (viewIndex >= 0)
     {
         m_viewModeCombo->setCurrentIndex(viewIndex);
+    }
+
+    const int restoredThreshold = session.value(QStringLiteral("manual_threshold")).toInt(100);
+    if (m_manualThresholdSlider != nullptr)
+    {
+        m_manualThresholdSlider->setValue(restoredThreshold);
     }
 
     const QByteArray geometry = QByteArray::fromBase64(session.value(QStringLiteral("window_geometry")).toString().toLatin1());

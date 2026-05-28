@@ -213,6 +213,9 @@ private:
     QSpinBox* m_frameSpin = nullptr;
     QDoubleSpinBox* m_timeSpin = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
+    QSlider* m_manualThresholdSlider = nullptr;
+    QSpinBox* m_manualThresholdSpin = nullptr;
+    QWidget* m_manualThresholdWidget = nullptr;
     QComboBox* m_speedCombo = nullptr;
     QCheckBox* m_autoPauseEnableCheck = nullptr;
     QCheckBox* m_autoPauseJumpCheck = nullptr;

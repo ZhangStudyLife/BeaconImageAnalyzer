@@ -54,11 +54,18 @@ center_x = BEACON_IMAGE_W * 0.5f - x;
 center_y = BEACON_IMAGE_H * 0.5f + y;
 ```
 
+**结果结构体**：`beacon_result_t` 包含三层数据通道
+- `circles[]/count` — legacy 通道，兼容旧算法
+- `beacons[]/beacon_count` — 场地信标灯（`beacon_circle_t`，圆形）
+- `car_lamps[]/car_lamp_count` — 车灯标识（`beacon_rect_t`，矩形）
+
+**车灯标识**：用户车上使用高亮度红外灯带，用 `beacon_rect_t` 描述（cx, cy, width, length, angle）。区分思路：固定高阈值（~200）二值化，信标灯是点状，灯带是条状（长宽比大）。
+
 **自动恢复**：程序关闭时写入 `<video_basename>.bia_project.json`，保存视频路径、当前帧、缩放、视图模式、标注数据。下次启动自动恢复。
 
 **UI 布局**：DJI 风格暗色中控台
 - 左侧：竖向快捷栏（打开视频、保存/读取标注、导出等）
-- 中央：视频画布（5 倍放大，叠加检测圆、圆心、编号）
+- 中央：视频画布（5 倍放大，叠加检测圆/矩形、圆心、编号）
 - 右侧：状态/检测结果/标注面板
 - 底部：回放控制台（播放、逐帧、进度条、跳转）
 - 顶部：菜单栏

@@ -2,6 +2,7 @@
 
 #include "BeaconResultUtils.h"
 
+#include <cmath>
 #include <QFont>
 #include <QLineF>
 #include <QPainter>
@@ -160,6 +161,53 @@ QPointF displayPointForCircle(const beacon_circle_t& circle, int safeScale)
     const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
     return QPointF(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
 }
+
+QPointF displayPointForRect(const beacon_rect_t& rect, int safeScale)
+{
+    const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(rect.cx, rect.cy);
+    return QPointF(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
+}
+
+void drawTargetRect(QPainter& painter,
+                    const beacon_rect_t& rect,
+                    const QColor& rectColor,
+                    const QString& label,
+                    int safeScale)
+{
+    const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(rect.cx, rect.cy);
+    const QPointF center(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
+    const qreal halfW = (double)rect.width * 0.5 * safeScale;
+    const qreal halfL = (double)rect.length * 0.5 * safeScale;
+    const qreal angleRad = (double)rect.angle * M_PI / 180.0;
+    const qreal cosA = qCos(angleRad);
+    const qreal sinA = qSin(angleRad);
+
+    QPolygonF polygon;
+    polygon << QPointF(center.x() + (-halfL * cosA - (-halfW) * sinA),
+                       center.y() + (-halfL * sinA + (-halfW) * cosA));
+    polygon << QPointF(center.x() + (halfL * cosA - (-halfW) * sinA),
+                       center.y() + (halfL * sinA + (-halfW) * cosA));
+    polygon << QPointF(center.x() + (halfL * cosA - halfW * sinA),
+                       center.y() + (halfL * sinA + halfW * cosA));
+    polygon << QPointF(center.x() + (-halfL * cosA - halfW * sinA),
+                       center.y() + (-halfL * sinA + halfW * cosA));
+
+    QPen rectPen(rectColor);
+    rectPen.setWidth(qMax(1, safeScale / 2));
+    painter.setPen(rectPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPolygon(polygon);
+
+    painter.drawLine(QPointF(center.x() - safeScale, center.y()),
+                     QPointF(center.x() + safeScale, center.y()));
+    painter.drawLine(QPointF(center.x(), center.y() - safeScale),
+                     QPointF(center.x(), center.y() + safeScale));
+
+    painter.setPen(QColor(255, 235, 80));
+    painter.drawText(QPointF(center.x() + 2 * safeScale,
+                             center.y() - 2 * safeScale),
+                     label);
+}
 }
 
 QPointF FrameRenderer::algorithmToImagePoint(float x, float y)
@@ -222,22 +270,22 @@ QImage FrameRenderer::render(const QImage& grayImage,
         QPen linkPen(QColor(255, 215, 0));
         linkPen.setWidth(qMax(1, safeScale / 2));
         painter.setPen(linkPen);
-        painter.drawLine(displayPointForCircle(result.car_lamps[0], safeScale),
-                         displayPointForCircle(result.car_lamps[1], safeScale));
+        painter.drawLine(displayPointForRect(result.car_lamps[0], safeScale),
+                         displayPointForRect(result.car_lamps[1], safeScale));
     }
     for (int i = 0; i < carLampCount; ++i)
     {
-        const beacon_circle_t& lamp = result.car_lamps[i];
+        const beacon_rect_t& lamp = result.car_lamps[i];
         if (lamp.valid == 0)
         {
             continue;
         }
 
-        drawTargetCircle(painter,
-                         lamp,
-                         QColor(255, 95, 45),
-                         QStringLiteral("CAR %1").arg(i),
-                         safeScale);
+        drawTargetRect(painter,
+                       lamp,
+                       QColor(255, 95, 45),
+                       QStringLiteral("CAR %1").arg(i),
+                       safeScale);
     }
 
     QPen correctionPen;

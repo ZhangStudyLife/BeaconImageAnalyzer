@@ -394,7 +394,7 @@ QString AiInstanceDialog::systemPrompt() const
         "3. JSON 字符串内换行必须正常转义，不能输出代码块围栏。\n\n"
         "文件要求：\n"
         "1. beacon_image.h 必须自包含，并定义 BEACON_IMAGE_W=188、BEACON_IMAGE_H=120、"
-        "BEACON_MAX_CIRCLE_COUNT=8、beacon_circle_t、beacon_result_t，以及 beacon_image_init、"
+        "BEACON_MAX_CIRCLE_COUNT=8、beacon_circle_t、beacon_rect_t、beacon_result_t，以及 beacon_image_init、"
         "beacon_image_process、beacon_image_debug_binary 的声明。\n"
         "2. beacon_image.c 必须 #include \"beacon_image.h\"。\n"
         "3. beacon_image.c 必须导出 void beacon_image_init(void)。\n"
@@ -422,12 +422,15 @@ QString AiInstanceDialog::systemPrompt() const
         "并追加 beacons[BEACON_MAX_BEACON_COUNT]、beacon_count、car_lamps[BEACON_MAX_CAR_LAMP_COUNT]、car_lamp_count。\n"
         "2. 必须定义 BEACON_MAX_BEACON_COUNT=8 和 BEACON_MAX_CAR_LAMP_COUNT=2。字段顺序必须先 legacy circles/count，"
         "再追加 beacons/beacon_count/car_lamps/car_lamp_count，不能重排旧字段。\n"
-        "3. 信标和车灯是并列结果：信标写入 result->beacons[] / result->beacon_count；车灯写入 "
-        "result->car_lamps[] / result->car_lamp_count。禁止把车灯混入 beacons[]。\n"
+        "3. 信标和车灯是并列结果：信标写入 result->beacons[] / result->beacon_count（beacon_circle_t 类型）；车灯写入 "
+        "result->car_lamps[] / result->car_lamp_count（beacon_rect_t 类型）。禁止把车灯混入 beacons[]。\n"
         "4. 为兼容旧显示，信标结果也要同步写入 result->circles[] / result->count；车灯不要写入 legacy circles[]。\n"
         "5. v1 只支持一辆车的一对车灯，所以 car_lamp_count 最大为 2；没有车灯时必须明确保持为 0。\n"
-        "6. 坐标转换同样适用于 beacons[]、car_lamps[] 和 legacy circles[]："
+        "6. 坐标转换适用于 beacons[] 和 legacy circles[]："
         "result_x = BEACON_IMAGE_W * 0.5f - pixel_x; result_y = pixel_y - BEACON_IMAGE_H * 0.5f。\n"
+        "   car_lamps[] 使用 beacon_rect_t，坐标转换同样适用于 cx/cy："
+        "result_cx = BEACON_IMAGE_W * 0.5f - pixel_cx; result_cy = pixel_cy - BEACON_IMAGE_H * 0.5f。\n"
+        "   width/length 为像素尺寸，angle 为旋转角度（度）。\n"
         "7. 生成前自检是否填充 beacon_count 或兼容 legacy count，识别车灯时是否填充 car_lamps[] / car_lamp_count，"
         "是否保持中心坐标转换，是否没有擅自修改用户算法参数。\n");
     prompt += learnedFailurePrompt();
@@ -622,6 +625,7 @@ bool AiInstanceDialog::validateGeneratedFiles(const GeneratedFiles& files, QStri
         !header.contains(QStringLiteral("BEACON_MAX_CAR_LAMP_COUNT")) ||
         !header.contains(QStringLiteral("beacons")) ||
         !header.contains(QStringLiteral("beacon_count")) ||
+        !header.contains(QStringLiteral("beacon_rect_t")) ||
         !header.contains(QStringLiteral("car_lamps")) ||
         !header.contains(QStringLiteral("car_lamp_count")))
     {
