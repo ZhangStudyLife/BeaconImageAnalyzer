@@ -1,3 +1,6 @@
+param(
+    [switch]$Distribution
+)
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -26,6 +29,17 @@ if (Test-Path -LiteralPath $CacheFile) {
             $ConfigureArgs += "--fresh"
         }
     }
+
+    $DistLine = Select-String -LiteralPath $CacheFile -Pattern "^BEACON_DISTRIBUTION_BUILD:BOOL=(.*)$" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($DistLine -ne $null) {
+        $CachedDist = $DistLine.Matches[0].Groups[1].Value
+        if ($Distribution -and $CachedDist -ne "ON") {
+            $ConfigureArgs += "--fresh"
+        }
+        elseif (!$Distribution -and $CachedDist -eq "ON") {
+            $ConfigureArgs += "--fresh"
+        }
+    }
 }
 
 $ConfigureArgs += @(
@@ -35,6 +49,10 @@ $ConfigureArgs += @(
     "-DCMAKE_PREFIX_PATH=$MsysRoot",
     "-DCMAKE_BUILD_TYPE=Release"
 )
+
+if ($Distribution) {
+    $ConfigureArgs += "-DBEACON_DISTRIBUTION_BUILD=ON"
+}
 
 & $CMake @ConfigureArgs
 if ($LASTEXITCODE -ne 0) {

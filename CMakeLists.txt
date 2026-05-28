@@ -12,8 +12,16 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 REQUIRED COMPONENTS Network Widgets)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
 
+option(BEACON_DISTRIBUTION_BUILD "Build with stub algorithm for distribution" OFF)
+
+if(BEACON_DISTRIBUTION_BUILD)
+    set(BEACON_ALGORITHM_SOURCE algorithm/beacon_image_stub.c)
+else()
+    set(BEACON_ALGORITHM_SOURCE algorithm/beacon_image.c)
+endif()
+
 add_library(beacon_algorithm STATIC
-    algorithm/beacon_image.c
+    ${BEACON_ALGORITHM_SOURCE}
 )
 
 target_include_directories(beacon_algorithm PUBLIC

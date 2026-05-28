@@ -110,8 +110,8 @@ Assert-FileExists $WindeployQt "windeployqt"
 Assert-FileExists $Objdump "objdump"
 
 if (!$SkipBuild) {
-    Write-Host "Building Release..."
-    & $BuildScript
+    Write-Host "Building Release (distribution mode)..."
+    & $BuildScript -Distribution
 }
 
 Assert-FileExists $Exe "BeaconImageAnalyzer.exe"
@@ -142,6 +142,25 @@ Write-Host "Deploying Qt runtime..."
 Write-Host "Collecting OpenCV / MinGW / FFmpeg dependencies..."
 Copy-RecursiveDependencies
 
+Write-Host "Including algorithm SDK..."
+$AlgorithmStageDir = Join-Path $StageDir "algorithm"
+New-Item -ItemType Directory -Force -Path $AlgorithmStageDir | Out-Null
+$AlgorithmSourceDir = Join-Path $ProjectRoot "algorithm"
+Copy-Item -LiteralPath (Join-Path $AlgorithmSourceDir "beacon_image_stub.c") `
+          -Destination (Join-Path $AlgorithmStageDir "beacon_image.c") -Force
+Copy-Item -LiteralPath (Join-Path $AlgorithmSourceDir "beacon_image.h") `
+          -Destination (Join-Path $AlgorithmStageDir "beacon_image.h") -Force
+Copy-Item -LiteralPath (Join-Path $AlgorithmSourceDir "beacon_image_config.h") `
+          -Destination (Join-Path $AlgorithmStageDir "beacon_image_config.h") -Force
+
+Write-Host "Including documentation..."
+$DocStageDir = Join-Path $StageDir "docs"
+New-Item -ItemType Directory -Force -Path $DocStageDir | Out-Null
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\beacon_algorithm_api.md") `
+          -Destination (Join-Path $DocStageDir "beacon_algorithm_api.md") -Force
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\beacon_image_template.c") `
+          -Destination (Join-Path $DocStageDir "beacon_image_template.c") -Force
+
 $LauncherPath = Join-Path $StageDir "Start BeaconImageAnalyzer.bat"
 @(
     '@echo off',
@@ -159,6 +178,15 @@ $ReadmePath = Join-Path $StageDir "README-portable.txt"
     '1. Extract the whole BeaconImageAnalyzer-portable folder.',
     '2. Double-click BeaconImageAnalyzer.exe or Start BeaconImageAnalyzer.bat.',
     '3. Qt, OpenCV, MSYS2, and PATH configuration are not required on the target machine.',
+    '',
+    'Algorithm Development:',
+    '- This package ships with a stub (empty) algorithm.',
+    '- You can browse videos but detection results will be empty.',
+    '- To run your own beacon detection algorithm, write a C file implementing the required interface.',
+    '- See docs/beacon_algorithm_api.md for the full API specification.',
+    '- See docs/beacon_image_template.c for a starting template.',
+    '- In the application, use "Import Algorithm C File" to load your implementation.',
+    '- You need gcc (MinGW/MSYS2) installed to compile your algorithm at runtime.',
     '',
     'Notes:',
     '- Do not copy only the exe. Keep all DLL files and plugin folders together.',
