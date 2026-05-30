@@ -63,6 +63,7 @@ private slots:
     void exportCsv();
     void play();
     void pause();
+    void applyFrameSynchronization();
     void nextFrame();
     void previousFrame();
     void jumpToFrame();

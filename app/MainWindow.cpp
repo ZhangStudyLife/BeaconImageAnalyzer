@@ -283,6 +283,27 @@ void MainWindow::buildUi()
     }
     workspaceLayout->addWidget(cameraGroup, 5);
 
+    auto* syncGroup = new QGroupBox(QStringLiteral("同步帧设置"), workspace);
+    auto* syncLayout = new QHBoxLayout(syncGroup);
+    syncLayout->setContentsMargins(10, 8, 10, 8);
+    syncLayout->setSpacing(8);
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        auto* label = new QLabel(QStringLiteral("摄像头 %1 帧").arg(i + 1), syncGroup);
+        auto* syncSpin = new QSpinBox(syncGroup);
+        syncSpin->setRange(0, 0);
+        syncSpin->setEnabled(false);
+        m_syncFrameSpins[i] = syncSpin;
+        syncLayout->addWidget(label);
+        syncLayout->addWidget(syncSpin);
+    }
+    auto* syncButton = new QPushButton(QStringLiteral("同步"), syncGroup);
+    syncButton->setToolTip(QStringLiteral("将三个输入框中的帧号设为同一时刻，并跳转到同步后的当前帧"));
+    syncLayout->addWidget(syncButton);
+    syncLayout->addStretch(1);
+    workspaceLayout->addWidget(syncGroup);
+    connect(syncButton, &QPushButton::clicked, this, &MainWindow::applyFrameSynchronization);
+
     auto* fusionGroup = new QGroupBox(QStringLiteral("融合结果"), workspace);
     auto* fusionLayout = new QHBoxLayout(fusionGroup);
     fusionLayout->setContentsMargins(10, 10, 10, 10);
@@ -469,15 +490,9 @@ void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int colu
     selectButton->setCheckable(true);
     auto* videoButton = new QPushButton(QStringLiteral("导入视频"), panel);
     auto* algorithmButton = new QPushButton(QStringLiteral("导入处理代码"), panel);
-    auto* syncSpin = new QSpinBox(panel);
-    syncSpin->setRange(0, 0);
-    syncSpin->setEnabled(false);
-    syncSpin->setPrefix(QStringLiteral("同步帧 "));
-
     header->addWidget(selectButton);
     header->addWidget(videoButton);
     header->addWidget(algorithmButton);
-    header->addWidget(syncSpin);
     panelLayout->addLayout(header);
 
     auto* videoWidget = new VideoWidget(panel);
@@ -492,7 +507,6 @@ void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int colu
 
     m_videoWidgets[cameraIndex] = videoWidget;
     m_cameraInfoLabels[cameraIndex] = infoLabel;
-    m_syncFrameSpins[cameraIndex] = syncSpin;
     m_cameraSelectButtons[cameraIndex] = selectButton;
 
     connect(selectButton, &QPushButton::clicked, this, [this, cameraIndex]() {
@@ -503,17 +517,6 @@ void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int colu
     });
     connect(algorithmButton, &QPushButton::clicked, this, [this, cameraIndex]() {
         importCameraAlgorithm(cameraIndex);
-    });
-    connect(syncSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this, cameraIndex](int value) {
-        if (!isValidCameraIndex(cameraIndex))
-        {
-            return;
-        }
-        m_cameras[cameraIndex].syncFrame = value;
-        const int minFrame = timelineMinFrame();
-        const int maxFrame = timelineMaxFrame();
-        m_timelineFrame = qBound(minFrame, m_timelineFrame, maxFrame);
-        showFrame(m_timelineFrame);
     });
     connect(videoWidget, &VideoWidget::activated, this, [this, cameraIndex]() {
         selectCamera(cameraIndex);
@@ -1289,6 +1292,30 @@ void MainWindow::pause()
     m_playing = false;
     m_playTimer.stop();
     updatePlayPauseButton();
+}
+
+void MainWindow::applyFrameSynchronization()
+{
+    pause();
+    if (!hasAllVideos())
+    {
+        QMessageBox::information(this, QStringLiteral("同步帧设置"), QStringLiteral("请先导入三路视频。"));
+        return;
+    }
+
+    const int baseFrame = m_syncFrameSpins[0] != nullptr ? m_syncFrameSpins[0]->value() : 0;
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        if (m_syncFrameSpins[i] == nullptr)
+        {
+            return;
+        }
+
+        m_cameras[i].syncFrame = m_syncFrameSpins[i]->value() - baseFrame;
+    }
+
+    showFrame(baseFrame);
+    statusBar()->showMessage(QStringLiteral("已同步三路视频到所选帧"), 2000);
 }
 
 void MainWindow::nextFrame()
