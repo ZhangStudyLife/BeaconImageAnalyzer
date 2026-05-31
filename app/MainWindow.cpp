@@ -88,6 +88,35 @@ double circleArea(const beacon_circle_t& circle)
     return Pi * (double)circle.radius * (double)circle.radius;
 }
 
+bool framesExactlyEqual(const QImage& lhs, const QImage& rhs)
+{
+    if (lhs.isNull() || rhs.isNull() || lhs.size() != rhs.size())
+    {
+        return false;
+    }
+
+    const QImage left = lhs.format() == QImage::Format_Grayscale8
+        ? lhs
+        : lhs.convertToFormat(QImage::Format_Grayscale8);
+    const QImage right = rhs.format() == QImage::Format_Grayscale8
+        ? rhs
+        : rhs.convertToFormat(QImage::Format_Grayscale8);
+    const int width = left.width();
+    const int height = left.height();
+
+    for (int y = 0; y < height; ++y)
+    {
+        const auto* leftLine = left.constScanLine(y);
+        const auto* rightLine = right.constScanLine(y);
+        if (memcmp(leftLine, rightLine, (size_t)width) != 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 QString cameraBuildDir(const QString& name)
 {
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("imported_algorithms/%1").arg(name));
@@ -299,10 +328,14 @@ void MainWindow::buildUi()
     }
     auto* syncButton = new QPushButton(QStringLiteral("同步"), syncGroup);
     syncButton->setToolTip(QStringLiteral("将三个输入框中的帧号设为同一时刻，并跳转到同步后的当前帧"));
+    auto* autoSyncButton = new QPushButton(QStringLiteral("自动寻找同步帧"), syncGroup);
+    autoSyncButton->setToolTip(QStringLiteral("从视频尾部寻找最后一段静止帧的起点，并将三路起点作为同一时刻"));
     syncLayout->addWidget(syncButton);
+    syncLayout->addWidget(autoSyncButton);
     syncLayout->addStretch(1);
     workspaceLayout->addWidget(syncGroup);
     connect(syncButton, &QPushButton::clicked, this, &MainWindow::applyFrameSynchronization);
+    connect(autoSyncButton, &QPushButton::clicked, this, &MainWindow::autoFindFrameSynchronization);
 
     auto* fusionGroup = new QGroupBox(QStringLiteral("融合结果"), workspace);
     auto* fusionLayout = new QHBoxLayout(fusionGroup);
@@ -1039,6 +1072,76 @@ void MainWindow::updateAllCameraInfo()
     }
 }
 
+bool MainWindow::findFrozenTailStartFrame(const CameraChannel& camera,
+                                          int* frameIndex,
+                                          QString* errorMessage) const
+{
+    if (frameIndex == nullptr)
+    {
+        return false;
+    }
+    if (!camera.loaded || !camera.reader.isOpen())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("视频未导入。");
+        }
+        return false;
+    }
+    if (camera.reader.frameCount() < 2)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("视频帧数不足，无法判断静止尾段。");
+        }
+        return false;
+    }
+
+    QImage lastFrame;
+    QString readError;
+    const int lastIndex = camera.reader.frameCount() - 1;
+    if (!camera.reader.readFrame(lastIndex, &lastFrame, &readError))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("读取最后一帧失败：%1").arg(readError);
+        }
+        return false;
+    }
+
+    int start = lastIndex;
+    for (int frame = lastIndex - 1; frame >= 0; --frame)
+    {
+        QImage currentFrame;
+        if (!camera.reader.readFrame(frame, &currentFrame, &readError))
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("读取第 %1 帧失败：%2").arg(frame).arg(readError);
+            }
+            return false;
+        }
+
+        if (!framesExactlyEqual(currentFrame, lastFrame))
+        {
+            break;
+        }
+        start = frame;
+    }
+
+    if (start == lastIndex)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("末尾没有检测到保持最后一帧不变的静止段。");
+        }
+        return false;
+    }
+
+    *frameIndex = start;
+    return true;
+}
+
 void MainWindow::updateFrameInfo()
 {
     QStringList videoLines;
@@ -1316,6 +1419,47 @@ void MainWindow::applyFrameSynchronization()
 
     showFrame(baseFrame);
     statusBar()->showMessage(QStringLiteral("已同步三路视频到所选帧"), 2000);
+}
+
+void MainWindow::autoFindFrameSynchronization()
+{
+    pause();
+    if (!hasAllVideos())
+    {
+        QMessageBox::information(this, QStringLiteral("自动寻找同步帧"), QStringLiteral("请先导入三路视频。"));
+        return;
+    }
+
+    int syncFrames[BEACON_CAMERA_COUNT] = { 0, 0, 0 };
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        QString error;
+        if (!findFrozenTailStartFrame(m_cameras[i], &syncFrames[i], &error))
+        {
+            QMessageBox::warning(this,
+                                 QStringLiteral("自动寻找同步帧失败"),
+                                 QStringLiteral("%1：%2").arg(m_cameras[i].name, error));
+            return;
+        }
+    }
+
+    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    {
+        if (m_syncFrameSpins[i] == nullptr)
+        {
+            continue;
+        }
+
+        QSignalBlocker blocker(m_syncFrameSpins[i]);
+        m_syncFrameSpins[i]->setValue(syncFrames[i]);
+    }
+
+    applyFrameSynchronization();
+    statusBar()->showMessage(QStringLiteral("已自动找到同步帧：C1=%1, C2=%2, C3=%3")
+                                 .arg(syncFrames[0])
+                                 .arg(syncFrames[1])
+                                 .arg(syncFrames[2]),
+                             4000);
 }
 
 void MainWindow::nextFrame()

@@ -517,7 +517,7 @@ static void output_tracks(const beacon_image_context_t *context,
         {
             continue;
         }
-        if (context->tracks[track_index].missing != 0U && matched_this_frame == 0U)
+        if (context->tracks[track_index].missing != 0U)
         {
             continue;
         }

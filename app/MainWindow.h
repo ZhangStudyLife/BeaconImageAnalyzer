@@ -64,6 +64,7 @@ private slots:
     void play();
     void pause();
     void applyFrameSynchronization();
+    void autoFindFrameSynchronization();
     void nextFrame();
     void previousFrame();
     void jumpToFrame();
@@ -110,6 +111,7 @@ private:
     void updateCameraInfo(const CameraChannel& camera);
     void updateAllCameraInfo();
     void updateFrameInfo();
+    bool findFrozenTailStartFrame(const CameraChannel& camera, int* frameIndex, QString* errorMessage) const;
     void updateAnnotationList();
     void refreshCurrentCameraUi();
     void selectCamera(int cameraIndex);
