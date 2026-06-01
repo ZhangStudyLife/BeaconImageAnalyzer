@@ -404,7 +404,7 @@ QRectF VideoWidget::imageDisplayRect() const
         return QRectF();
     }
 
-    const QRectF contentRect = QRectF(rect()).adjusted(12.0, 12.0, -12.0, -12.0);
+    const QRectF contentRect = QRectF(rect()).adjusted(6.0, 6.0, -6.0, -6.0);
     const QSize scaled = m_image.size().scaled(contentRect.size().toSize(), Qt::KeepAspectRatio);
     return QRectF(contentRect.left() + (contentRect.width() - scaled.width()) / 2.0,
                   contentRect.top() + (contentRect.height() - scaled.height()) / 2.0,

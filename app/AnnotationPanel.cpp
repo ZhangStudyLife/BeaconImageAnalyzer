@@ -1,6 +1,6 @@
 #include "AnnotationPanel.h"
 
-#include "beacon_image.h"
+#include "ImageResult.h"
 
 #include <QAbstractItemView>
 #include <QColorDialog>

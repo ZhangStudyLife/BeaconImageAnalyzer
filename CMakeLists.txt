@@ -13,8 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
 
 add_library(beacon_algorithm STATIC
-    algorithm/beacon_image.c
-    algorithm/beacon_fusion.c
+    algorithm/image.c
     algorithm/desktop_mt9v03x_stub.c
 )
 
@@ -40,10 +39,9 @@ add_executable(BeaconImageAnalyzer
     app/AnnotationPanel.cpp
     core/VideoReader.h
     core/VideoReader.cpp
+    core/ImageResult.h
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
-    core/FusionRunner.h
-    core/FusionRunner.cpp
     core/FrameRenderer.h
     core/FrameRenderer.cpp
     core/VideoExporter.h

@@ -3,10 +3,8 @@
 
 #include "AlgorithmRunner.h"
 #include "AnnotationModel.h"
-#include "FusionRunner.h"
+#include "ImageResult.h"
 #include "VideoReader.h"
-#include "beacon_fusion.h"
-#include "beacon_image.h"
 
 #include <QElapsedTimer>
 #include <QMainWindow>
@@ -23,9 +21,7 @@ class QLabel;
 class QKeyEvent;
 class QSlider;
 class QSpinBox;
-class QTextEdit;
 class QPushButton;
-class RadarWidget;
 class VideoWidget;
 
 struct CameraChannel
@@ -56,7 +52,6 @@ private slots:
     void importAllCameraVideos();
     void importCameraVideo(int cameraIndex);
     void importCameraAlgorithm(int cameraIndex);
-    void importFusionAlgorithm();
     void saveAnnotation();
     void loadAnnotation();
     void exportMarkedAvi();
@@ -107,7 +102,6 @@ private:
     int cameraFrameForTimeline(const CameraChannel& camera, int timelineFrame) const;
     void showFrame(int frameIndex);
     void renderCamera(CameraChannel* camera);
-    void updateFusion();
     void updateCameraInfo(const CameraChannel& camera);
     void updateAllCameraInfo();
     void updateFrameInfo();
@@ -128,17 +122,15 @@ private:
     const CameraChannel* currentCamera() const;
     bool isValidCameraIndex(int cameraIndex) const;
 
-    std::array<CameraChannel, BEACON_CAMERA_COUNT> m_cameras;
-    FusionRunner m_fusionRunner;
-    beacon_fusion_result_t m_fusionResult = {};
+    static constexpr int CameraCount = 3;
+
+    std::array<CameraChannel, CameraCount> m_cameras;
     QTimer m_playTimer;
 
-    std::array<VideoWidget*, BEACON_CAMERA_COUNT> m_videoWidgets = {};
-    std::array<QLabel*, BEACON_CAMERA_COUNT> m_cameraInfoLabels = {};
-    std::array<QSpinBox*, BEACON_CAMERA_COUNT> m_syncFrameSpins = {};
-    std::array<QPushButton*, BEACON_CAMERA_COUNT> m_cameraSelectButtons = {};
-    QTextEdit* m_fusionText = nullptr;
-    RadarWidget* m_radarWidget = nullptr;
+    std::array<VideoWidget*, CameraCount> m_videoWidgets = {};
+    std::array<QLabel*, CameraCount> m_cameraInfoLabels = {};
+    std::array<QSpinBox*, CameraCount> m_syncFrameSpins = {};
+    std::array<QPushButton*, CameraCount> m_cameraSelectButtons = {};
     AnnotationPanel* m_annotationPanel = nullptr;
     QLabel* m_videoInfoLabel = nullptr;
     QLabel* m_frameInfoLabel = nullptr;

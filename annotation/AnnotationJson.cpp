@@ -1,6 +1,6 @@
 #include "AnnotationJson.h"
 
-#include "beacon_image.h"
+#include "ImageResult.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -189,7 +189,7 @@ bool AnnotationJson::save(const QString& path,
     root.insert(QStringLiteral("video"), video);
 
     QJsonObject algorithm;
-    algorithm.insert(QStringLiteral("name"), QStringLiteral("beacon_image_process"));
+    algorithm.insert(QStringLiteral("name"), QStringLiteral("image_update"));
     algorithm.insert(QStringLiteral("version"), QStringLiteral("v1"));
     algorithm.insert(QStringLiteral("note"), QStringLiteral("simple threshold + connected components"));
     root.insert(QStringLiteral("algorithm"), algorithm);

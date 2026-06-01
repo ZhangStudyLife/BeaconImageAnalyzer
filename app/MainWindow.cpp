@@ -123,133 +123,18 @@ QString cameraBuildDir(const QString& name)
 }
 }
 
-class RadarWidget : public QWidget
-{
-public:
-    explicit RadarWidget(QWidget* parent = nullptr)
-        : QWidget(parent)
-    {
-        setMinimumSize(300, 260);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    }
-
-    void setResult(const beacon_fusion_result_t& result)
-    {
-        m_result = result;
-        update();
-    }
-
-protected:
-    void paintEvent(QPaintEvent*) override
-    {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.fillRect(rect(), QColor(8, 10, 13));
-
-        const QRectF area = QRectF(rect()).adjusted(18.0, 18.0, -18.0, -18.0);
-        const QPointF center = area.center();
-        const double radius = qMin(area.width(), area.height()) * 0.46;
-        if (radius <= 0.0)
-        {
-            return;
-        }
-
-        double maxDistance = 10.0;
-        for (int i = 0; i < m_result.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
-        {
-            const beacon_fusion_beacon_t& beacon = m_result.beacon[i];
-            if (beacon.valid != 0 && std::isfinite(beacon.range_proxy))
-            {
-                maxDistance = qMax(maxDistance, (double)beacon.range_proxy);
-            }
-        }
-
-        QPen gridPen(QColor(125, 150, 170, 90));
-        gridPen.setWidth(1);
-        painter.setPen(gridPen);
-        painter.setBrush(Qt::NoBrush);
-        for (int ring = 1; ring <= 4; ++ring)
-        {
-            const double ringRadius = radius * (double)ring / 4.0;
-            painter.drawEllipse(center, ringRadius, ringRadius);
-        }
-
-        for (int degree = 0; degree < 360; degree += 30)
-        {
-            const double radians = (double)degree * Pi / 180.0;
-            const QPointF end(center.x() + std::sin(radians) * radius,
-                              center.y() - std::cos(radians) * radius);
-            painter.drawLine(center, end);
-        }
-
-        QFont font = painter.font();
-        font.setPixelSize(11);
-        painter.setFont(font);
-        painter.setPen(QColor(225, 232, 238));
-        painter.drawText(QRectF(center.x() - 18.0, center.y() - radius - 17.0, 36.0, 16.0),
-                         Qt::AlignCenter,
-                         QStringLiteral("0"));
-        painter.drawText(QRectF(center.x() + radius + 2.0, center.y() - 8.0, 34.0, 16.0),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         QStringLiteral("90"));
-        painter.drawText(QRectF(center.x() - 22.0, center.y() + radius + 1.0, 44.0, 16.0),
-                         Qt::AlignCenter,
-                         QStringLiteral("180"));
-        painter.drawText(QRectF(center.x() - radius - 38.0, center.y() - 8.0, 34.0, 16.0),
-                         Qt::AlignRight | Qt::AlignVCenter,
-                         QStringLiteral("270"));
-
-        const QColor colors[BEACON_FUSION_MAX_BEACONS] = {
-            QColor(64, 211, 255),
-            QColor(255, 196, 70),
-            QColor(120, 235, 126),
-            QColor(255, 112, 178),
-            QColor(190, 140, 255)
-        };
-        for (int i = 0; i < m_result.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
-        {
-            const beacon_fusion_beacon_t& beacon = m_result.beacon[i];
-            if (beacon.valid == 0 || !std::isfinite(beacon.bearing_deg) || !std::isfinite(beacon.range_proxy))
-            {
-                continue;
-            }
-
-            const double clampedDistance = qBound(0.0, (double)beacon.range_proxy, maxDistance);
-            const double normalizedDistance = clampedDistance / maxDistance;
-            const double radians = (double)beacon.bearing_deg * Pi / 180.0;
-            const QPointF point(center.x() + std::sin(radians) * radius * normalizedDistance,
-                                center.y() - std::cos(radians) * radius * normalizedDistance);
-            const QColor color = colors[i % BEACON_FUSION_MAX_BEACONS];
-
-            painter.setPen(QPen(color, 2));
-            painter.setBrush(color);
-            painter.drawEllipse(point, 5.0, 5.0);
-            painter.drawText(point + QPointF(7.0, -7.0),
-                             QStringLiteral("#%1").arg(i));
-        }
-
-        painter.setPen(QColor(225, 232, 238));
-        painter.drawText(area.adjusted(4.0, 4.0, -4.0, -4.0),
-                         Qt::AlignLeft | Qt::AlignTop,
-                         QStringLiteral("360度雷达图  最大距离 %1").arg(maxDistance, 0, 'f', 2));
-    }
-
-private:
-    beacon_fusion_result_t m_result = {};
-};
-
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         m_cameras[i].index = i;
         m_cameras[i].name = QStringLiteral("摄像头 %1").arg(i + 1);
         std::memset(&m_cameras[i].currentResult, 0, sizeof(m_cameras[i].currentResult));
     }
 
-    setWindowTitle(QStringLiteral("BeaconImageAnalyzer - 三摄像头融合版"));
-    resize(1480, 900);
+    setWindowTitle(QStringLiteral("BeaconImageAnalyzer"));
+    resize(1680, 940);
     buildUi();
     buildMenus();
     qApp->installEventFilter(this);
@@ -293,30 +178,30 @@ void MainWindow::buildUi()
     setCentralWidget(central);
 
     auto* root = new QHBoxLayout(central);
-    root->setContentsMargins(10, 10, 10, 10);
-    root->setSpacing(10);
+    root->setContentsMargins(8, 8, 8, 8);
+    root->setSpacing(8);
 
     auto* workspace = new QWidget(central);
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
-    workspaceLayout->setSpacing(10);
+    workspaceLayout->setSpacing(8);
 
     auto* cameraGroup = new QGroupBox(QStringLiteral("三路视频"), workspace);
     auto* cameraGrid = new QGridLayout(cameraGroup);
-    cameraGrid->setContentsMargins(10, 10, 10, 10);
-    cameraGrid->setHorizontalSpacing(10);
-    cameraGrid->setVerticalSpacing(10);
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    cameraGrid->setContentsMargins(6, 6, 6, 6);
+    cameraGrid->setHorizontalSpacing(6);
+    cameraGrid->setVerticalSpacing(6);
+    for (int i = 0; i < CameraCount; ++i)
     {
         buildCameraPanel(cameraGrid, i, i);
     }
-    workspaceLayout->addWidget(cameraGroup, 5);
+    workspaceLayout->addWidget(cameraGroup, 12);
 
     auto* syncGroup = new QGroupBox(QStringLiteral("同步帧设置"), workspace);
     auto* syncLayout = new QHBoxLayout(syncGroup);
     syncLayout->setContentsMargins(10, 8, 10, 8);
     syncLayout->setSpacing(8);
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         auto* label = new QLabel(QStringLiteral("摄像头 %1 帧").arg(i + 1), syncGroup);
         auto* syncSpin = new QSpinBox(syncGroup);
@@ -336,20 +221,6 @@ void MainWindow::buildUi()
     workspaceLayout->addWidget(syncGroup);
     connect(syncButton, &QPushButton::clicked, this, &MainWindow::applyFrameSynchronization);
     connect(autoSyncButton, &QPushButton::clicked, this, &MainWindow::autoFindFrameSynchronization);
-
-    auto* fusionGroup = new QGroupBox(QStringLiteral("融合结果"), workspace);
-    auto* fusionLayout = new QHBoxLayout(fusionGroup);
-    fusionLayout->setContentsMargins(10, 10, 10, 10);
-    fusionLayout->setSpacing(10);
-
-    m_fusionText = new QTextEdit(fusionGroup);
-    m_fusionText->setReadOnly(true);
-    m_fusionText->setMinimumHeight(180);
-    m_fusionText->setText(QStringLiteral("等待导入视频。"));
-    m_radarWidget = new RadarWidget(fusionGroup);
-    fusionLayout->addWidget(m_fusionText, 2);
-    fusionLayout->addWidget(m_radarWidget, 3);
-    workspaceLayout->addWidget(fusionGroup, 2);
 
     auto* controls = new QFrame(workspace);
     controls->setFrameShape(QFrame::StyledPanel);
@@ -423,10 +294,11 @@ void MainWindow::buildUi()
     m_annotationPanel = new AnnotationPanel(central);
     auto* annotationScroll = new QScrollArea(central);
     annotationScroll->setWidgetResizable(true);
-    annotationScroll->setMinimumWidth(360);
+    annotationScroll->setMinimumWidth(280);
+    annotationScroll->setMaximumWidth(340);
     annotationScroll->setWidget(m_annotationPanel);
 
-    root->addWidget(workspace, 1);
+    root->addWidget(workspace, 6);
     root->addWidget(annotationScroll);
 
     connect(previousButton, &QPushButton::clicked, this, &MainWindow::previousFrame);
@@ -513,11 +385,11 @@ void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int colu
     auto* panel = new QWidget(layout->parentWidget());
     auto* panelLayout = new QVBoxLayout(panel);
     panelLayout->setContentsMargins(0, 0, 0, 0);
-    panelLayout->setSpacing(6);
+    panelLayout->setSpacing(4);
 
     auto* header = new QHBoxLayout();
     header->setContentsMargins(0, 0, 0, 0);
-    header->setSpacing(6);
+    header->setSpacing(4);
 
     auto* selectButton = new QPushButton(QStringLiteral("摄像头 %1").arg(cameraIndex + 1), panel);
     selectButton->setCheckable(true);
@@ -532,7 +404,7 @@ void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int colu
     videoWidget->setText(QStringLiteral("导入摄像头 %1 视频").arg(cameraIndex + 1));
     auto* infoLabel = new QLabel(QStringLiteral("未导入视频"), panel);
     infoLabel->setWordWrap(true);
-    infoLabel->setMinimumHeight(86);
+    infoLabel->setMinimumHeight(54);
 
     panelLayout->addWidget(videoWidget, 1);
     panelLayout->addWidget(infoLabel);
@@ -568,20 +440,19 @@ void MainWindow::buildMenus()
 {
     QMenu* fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
     fileMenu->addAction(QStringLiteral("同时导入三路视频"), this, &MainWindow::importAllCameraVideos);
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         fileMenu->addAction(QStringLiteral("导入摄像头 %1 视频").arg(i + 1), this, [this, i]() {
             importCameraVideo(i);
         });
     }
     fileMenu->addSeparator();
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         fileMenu->addAction(QStringLiteral("导入摄像头 %1 处理代码").arg(i + 1), this, [this, i]() {
             importCameraAlgorithm(i);
         });
     }
-    fileMenu->addAction(QStringLiteral("导入三路融合分析代码"), this, &MainWindow::importFusionAlgorithm);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("保存当前摄像头标注"), this, &MainWindow::saveAnnotation);
     fileMenu->addAction(QStringLiteral("加载当前摄像头标注"), this, &MainWindow::loadAnnotation);
@@ -615,7 +486,7 @@ void MainWindow::importAllCameraVideos()
     {
         return;
     }
-    if (paths.size() != BEACON_CAMERA_COUNT)
+    if (paths.size() != CameraCount)
     {
         QMessageBox::warning(this,
                              QStringLiteral("导入三路视频"),
@@ -623,7 +494,7 @@ void MainWindow::importAllCameraVideos()
         return;
     }
 
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         if (!loadCameraVideo(i, paths[i]))
         {
@@ -635,7 +506,7 @@ void MainWindow::importAllCameraVideos()
 
 bool MainWindow::isValidCameraIndex(int cameraIndex) const
 {
-    return cameraIndex >= 0 && cameraIndex < BEACON_CAMERA_COUNT;
+    return cameraIndex >= 0 && cameraIndex < CameraCount;
 }
 
 CameraChannel* MainWindow::currentCamera()
@@ -758,28 +629,6 @@ bool MainWindow::loadCameraAlgorithm(int cameraIndex, const QString& path)
     return true;
 }
 
-void MainWindow::importFusionAlgorithm()
-{
-    const QString path = QFileDialog::getOpenFileName(this,
-                                                      QStringLiteral("导入三摄像头融合分析 C 文件"),
-                                                      QString(),
-                                                      QStringLiteral("C 文件 (*.c);;所有文件 (*)"));
-    if (path.isEmpty())
-    {
-        return;
-    }
-
-    QString error;
-    if (!m_fusionRunner.loadSourceFile(path, cameraBuildDir(QStringLiteral("fusion")), &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("导入融合分析代码失败"), error);
-        return;
-    }
-
-    updateFusion();
-    statusBar()->showMessage(QStringLiteral("已导入三路融合分析代码"), 3000);
-}
-
 bool MainWindow::hasAnyVideo() const
 {
     return std::any_of(m_cameras.begin(), m_cameras.end(), [](const CameraChannel& camera) {
@@ -846,7 +695,6 @@ void MainWindow::showFrame(int frameIndex)
     {
         updateFrameInfo();
         updateAllCameraInfo();
-        updateFusion();
         return;
     }
 
@@ -888,7 +736,6 @@ void MainWindow::showFrame(int frameIndex)
     {
         renderCamera(&camera);
     }
-    updateFusion();
     updateAllCameraInfo();
     updateFrameInfo();
 
@@ -948,74 +795,6 @@ void MainWindow::renderCamera(CameraChannel* camera)
     widget->setPixelSourceImage(camera->currentGray);
     widget->setImage(rendered);
     widget->setSelected(camera->index == m_currentCameraIndex);
-}
-
-void MainWindow::updateFusion()
-{
-    beacon_result_t cameraResults[BEACON_CAMERA_COUNT];
-    std::memset(cameraResults, 0, sizeof(cameraResults));
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
-    {
-        if (m_cameras[i].loaded)
-        {
-            cameraResults[i] = m_cameras[i].currentResult;
-        }
-    }
-
-    m_fusionResult = m_fusionRunner.analyze(cameraResults);
-    if (m_radarWidget != nullptr)
-    {
-        m_radarWidget->setResult(m_fusionResult);
-    }
-
-    if (m_fusionText == nullptr)
-    {
-        return;
-    }
-
-    QStringList lines;
-    lines << QStringLiteral("融合后信标灯总数：%1").arg((int)m_fusionResult.beacon_count);
-    lines << QStringLiteral("观测总数：%1  最优目标：%2  更新次数：%3")
-                 .arg((int)m_fusionResult.observation_count)
-                 .arg(m_fusionResult.best_index < BEACON_FUSION_MAX_BEACONS
-                          ? QStringLiteral("#%1").arg((int)m_fusionResult.best_index)
-                          : QStringLiteral("-"))
-                 .arg((unsigned int)m_fusionResult.update_count);
-    if (!hasAllVideos())
-    {
-        lines << QStringLiteral("提示：尚未导入全部三路视频，融合结果只使用已导入摄像头的当前帧。");
-    }
-    if (!m_fusionRunner.usesDynamicLibrary())
-    {
-        lines << QStringLiteral("融合代码：使用内置默认分析逻辑");
-    }
-    else
-    {
-        lines << QStringLiteral("融合代码：%1").arg(m_fusionRunner.sourcePath());
-    }
-    lines << QString();
-    for (int i = 0; i < m_fusionResult.beacon_count && i < BEACON_FUSION_MAX_BEACONS; ++i)
-    {
-        const beacon_fusion_beacon_t& beacon = m_fusionResult.beacon[i];
-        if (beacon.valid == 0)
-        {
-            continue;
-        }
-        lines << QStringLiteral("信标 #%1").arg(i);
-        lines << QStringLiteral("  角度 bearing_deg：%1").arg(beacon.bearing_deg, 0, 'f', 2);
-        lines << QStringLiteral("  距离 range_proxy：%1").arg(beacon.range_proxy, 0, 'f', 2);
-        lines << QStringLiteral("  车体 X x_body：%1").arg(beacon.x_body, 0, 'f', 2);
-        lines << QStringLiteral("  车体 Y y_body：%1").arg(beacon.y_body, 0, 'f', 2);
-        lines << QStringLiteral("  控制 X control_x：%1").arg(beacon.control_x, 0, 'f', 2);
-        lines << QStringLiteral("  控制 Y control_y：%1").arg(beacon.control_y, 0, 'f', 2);
-        lines << QStringLiteral("  观测数 observations：%1").arg((int)beacon.observation_count);
-        lines << QStringLiteral("  摄像头掩码 camera_mask：0x%1").arg((int)beacon.source_camera_mask, 0, 16);
-        lines << QStringLiteral("  置信度 confidence：%1").arg(beacon.confidence, 0, 'f', 2);
-        lines << QStringLiteral("  稳定帧 stable_ticks：%1").arg((int)beacon.stable_ticks);
-        lines << QString();
-    }
-
-    m_fusionText->setPlainText(lines.join(QLatin1Char('\n')));
 }
 
 void MainWindow::updateCameraInfo(const CameraChannel& camera)
@@ -1181,7 +960,7 @@ void MainWindow::updateFrameInfo()
 
 void MainWindow::refreshCurrentCameraUi()
 {
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         if (m_cameraSelectButtons[i] != nullptr)
         {
@@ -1407,7 +1186,7 @@ void MainWindow::applyFrameSynchronization()
     }
 
     const int baseFrame = m_syncFrameSpins[0] != nullptr ? m_syncFrameSpins[0]->value() : 0;
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         if (m_syncFrameSpins[i] == nullptr)
         {
@@ -1430,8 +1209,8 @@ void MainWindow::autoFindFrameSynchronization()
         return;
     }
 
-    int syncFrames[BEACON_CAMERA_COUNT] = { 0, 0, 0 };
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    int syncFrames[CameraCount] = { 0, 0, 0 };
+    for (int i = 0; i < CameraCount; ++i)
     {
         QString error;
         if (!findFrozenTailStartFrame(m_cameras[i], &syncFrames[i], &error))
@@ -1443,7 +1222,7 @@ void MainWindow::autoFindFrameSynchronization()
         }
     }
 
-    for (int i = 0; i < BEACON_CAMERA_COUNT; ++i)
+    for (int i = 0; i < CameraCount; ++i)
     {
         if (m_syncFrameSpins[i] == nullptr)
         {

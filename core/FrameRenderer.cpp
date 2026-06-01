@@ -9,6 +9,120 @@
 
 namespace
 {
+constexpr int MarkerSize = 3;
+constexpr int CarLampLineWidth = 3;
+constexpr int DisplayBeaconLimit = 3;
+constexpr float Pi = 3.1415926f;
+
+int roundFloatToInt(float value)
+{
+    if (value >= 0.0f)
+    {
+        return (int)(value + 0.5f);
+    }
+    return (int)(value - 0.5f);
+}
+
+bool targetToImagePoint(float x, float y, int* imageX, int* imageY)
+{
+    if (imageX == nullptr || imageY == nullptr)
+    {
+        return false;
+    }
+
+    const int pixelX = roundFloatToInt(BEACON_IMAGE_TARGET_PIXEL_X - x);
+    const int pixelY = roundFloatToInt(y + BEACON_IMAGE_TARGET_PIXEL_Y);
+    if (pixelX < 0 || pixelX >= BEACON_IMAGE_W || pixelY < 0 || pixelY >= BEACON_IMAGE_H)
+    {
+        return false;
+    }
+
+    *imageX = pixelX;
+    *imageY = pixelY;
+    return true;
+}
+
+QRect scaledPixelRect(int imageX, int imageY, int safeScale)
+{
+    return QRect(imageX * safeScale, imageY * safeScale, safeScale, safeScale);
+}
+
+void fillScaledPixel(QPainter& painter, int imageX, int imageY, int safeScale, const QColor& color)
+{
+    if (imageX < 0 || imageX >= BEACON_IMAGE_W || imageY < 0 || imageY >= BEACON_IMAGE_H)
+    {
+        return;
+    }
+
+    painter.fillRect(scaledPixelRect(imageX, imageY, safeScale), color);
+}
+
+void drawBrush(QPainter& painter, int centerX, int centerY, int size, int safeScale, const QColor& color)
+{
+    for (int dy = -(size / 2); dy <= (size / 2); ++dy)
+    {
+        for (int dx = -(size / 2); dx <= (size / 2); ++dx)
+        {
+            fillScaledPixel(painter, centerX + dx, centerY + dy, safeScale, color);
+        }
+    }
+}
+
+void drawBeaconMarkers(QPainter& painter, const beacon_result_t& result, int safeScale)
+{
+    int drawnCount = 0;
+    const int beaconCount = qMin((int)result.beacon_count, BEACON_MAX_CIRCLE_COUNT);
+    for (int i = 0; i < beaconCount && drawnCount < DisplayBeaconLimit; ++i)
+    {
+        const beacon_circle_t& beacon = result.beacons[i];
+        int imageX = 0;
+        int imageY = 0;
+        if (beacon.valid == 0 || !targetToImagePoint(beacon.x, beacon.y, &imageX, &imageY))
+        {
+            continue;
+        }
+
+        drawBrush(painter, imageX, imageY, MarkerSize, safeScale, QColor(255, 0, 255));
+        ++drawnCount;
+    }
+}
+
+void drawCarLampLine(QPainter& painter, const beacon_rect_t& lamp, int safeScale)
+{
+    int centerX = 0;
+    int centerY = 0;
+    if (lamp.valid == 0 || !targetToImagePoint(lamp.cx, lamp.cy, &centerX, &centerY))
+    {
+        return;
+    }
+
+    float halfLength = lamp.length * 0.5f;
+    if (halfLength < 1.0f)
+    {
+        halfLength = 1.0f;
+    }
+
+    const float angleRad = lamp.angle * Pi / 180.0f;
+    const float dirX = qCos(angleRad);
+    const float dirY = qSin(angleRad);
+    const int steps = roundFloatToInt(halfLength);
+    for (int step = -steps; step <= steps; ++step)
+    {
+        const int x = roundFloatToInt((float)centerX + (dirX * (float)step));
+        const int y = roundFloatToInt((float)centerY + (dirY * (float)step));
+        drawBrush(painter, x, y, CarLampLineWidth, safeScale, QColor(255, 0, 0));
+    }
+}
+
+void drawCarLampMarkers(QPainter& painter, const beacon_result_t& result, int safeScale)
+{
+    (void)result.car_lamp_count;
+    for (int i = 0; i < BEACON_MAX_CAR_LAMP_COUNT; ++i)
+    {
+        drawCarLampLine(painter, result.car_lamps[i], safeScale);
+    }
+}
+
 QString correctionType(const CorrectionShape& shape)
 {
     for (const QString& type : shape.errorTypes)
@@ -159,40 +273,10 @@ QImage FrameRenderer::render(const QImage& grayImage,
     QPainter painter(&base);
     painter.setRenderHint(QPainter::Antialiasing, false);
 
-    QPen circlePen(QColor(0, 255, 80));
-    circlePen.setWidth(qMax(1, safeScale / 2));
-    painter.setPen(circlePen);
+    painter.setPen(Qt::NoPen);
     painter.setBrush(Qt::NoBrush);
-
-    QFont font = painter.font();
-    font.setPixelSize(safeScale == 1 ? 8 : 12);
-    font.setBold(true);
-    painter.setFont(font);
-
-    for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        const beacon_circle_t& circle = result.circles[i];
-        if (circle.valid == 0)
-        {
-            continue;
-        }
-
-        const QPointF imagePoint = algorithmToImagePoint(circle.x, circle.y);
-        const QPointF displayPoint(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
-        const qreal displayRadius = qMax(1.0, (double)circle.radius * safeScale);
-
-        painter.setPen(circlePen);
-        painter.drawEllipse(displayPoint, displayRadius, displayRadius);
-        painter.drawLine(QPointF(displayPoint.x() - safeScale, displayPoint.y()),
-                         QPointF(displayPoint.x() + safeScale, displayPoint.y()));
-        painter.drawLine(QPointF(displayPoint.x(), displayPoint.y() - safeScale),
-                         QPointF(displayPoint.x(), displayPoint.y() + safeScale));
-
-        painter.setPen(QColor(255, 235, 80));
-        painter.drawText(QPointF(displayPoint.x() + 2 * safeScale,
-                                 displayPoint.y() - 2 * safeScale),
-                         QStringLiteral("#%1").arg(i));
-    }
+    drawBeaconMarkers(painter, result, safeScale);
+    drawCarLampMarkers(painter, result, safeScale);
 
     QPen correctionPen;
     correctionPen.setWidth(1);

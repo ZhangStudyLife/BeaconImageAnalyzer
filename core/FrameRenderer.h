@@ -1,7 +1,7 @@
 #ifndef FRAME_RENDERER_H
 #define FRAME_RENDERER_H
 
-#include "beacon_image.h"
+#include "ImageResult.h"
 #include "AnnotationModel.h"
 
 #include <QImage>

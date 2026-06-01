@@ -90,7 +90,6 @@ bool copyGrayToAlgorithmImage(const QImage& grayImage,
 
 AlgorithmRunner::AlgorithmRunner()
 {
-    beacon_image_context_init(&m_defaultContext);
 }
 
 AlgorithmRunner::~AlgorithmRunner()
@@ -129,10 +128,11 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
         m_library.unload();
     }
     m_initFn = nullptr;
-    m_processFn = nullptr;
-    m_binaryFn = nullptr;
     m_imageUpdateFn = nullptr;
-    m_imageGetCirclesFn = nullptr;
+    m_dynamicBeaconCount = nullptr;
+    m_dynamicBeacons = nullptr;
+    m_dynamicCarLampCount = nullptr;
+    m_dynamicCarLamps = nullptr;
     m_dynamicFrameBuffer = nullptr;
     m_dynamicFinishFlag = nullptr;
 
@@ -172,24 +172,35 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
         return false;
     }
 
-    m_initFn = reinterpret_cast<InitFn>(m_library.resolve("beacon_image_init"));
-    m_processFn = reinterpret_cast<ProcessFn>(m_library.resolve("beacon_image_process"));
-    m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
+    m_initFn = reinterpret_cast<InitFn>(m_library.resolve("image_init"));
     m_imageUpdateFn = reinterpret_cast<ImageUpdateFn>(m_library.resolve("image_update"));
-    m_imageGetCirclesFn = reinterpret_cast<ImageGetCirclesFn>(m_library.resolve("image_get_circles"));
+    m_dynamicBeaconCount = reinterpret_cast<ImageCircleCountPtr>(m_library.resolve("g_image_beacon_count"));
+    m_dynamicBeacons = reinterpret_cast<ImageCirclePtr>(m_library.resolve("g_image_beacons"));
+    m_dynamicCarLampCount = reinterpret_cast<ImageCarLampCountPtr>(m_library.resolve("g_image_car_lamp_count"));
+    m_dynamicCarLamps = reinterpret_cast<ImageCarLampPtr>(m_library.resolve("g_image_car_lamps"));
     m_dynamicFrameBuffer = reinterpret_cast<unsigned char*>(m_library.resolve("mt9v03x_image"));
     m_dynamicFinishFlag = reinterpret_cast<unsigned char*>(m_library.resolve("mt9v03x_finish_flag"));
-    if (m_initFn == nullptr)
+
+    if (m_dynamicFrameBuffer == nullptr)
     {
-        m_initFn = reinterpret_cast<InitFn>(m_library.resolve("image_init"));
+        using ImageGetFrameBufferFn = unsigned char* (*)();
+        const auto getFrameBuffer =
+            reinterpret_cast<ImageGetFrameBufferFn>(m_library.resolve("image_get_frame_buffer"));
+        if (getFrameBuffer != nullptr)
+        {
+            m_dynamicFrameBuffer = getFrameBuffer();
+        }
     }
-    if (m_processFn == nullptr &&
-        (m_imageUpdateFn == nullptr || m_imageGetCirclesFn == nullptr ||
-         m_dynamicFrameBuffer == nullptr || m_dynamicFinishFlag == nullptr))
+
+    if (m_imageUpdateFn == nullptr ||
+        m_dynamicBeaconCount == nullptr ||
+        m_dynamicBeacons == nullptr ||
+        m_dynamicFrameBuffer == nullptr ||
+        m_dynamicFinishFlag == nullptr)
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("算法库未导出 beacon_image_process。");
+            *errorMessage = QStringLiteral("算法库需导出 image_update、g_image_beacons、g_image_beacon_count、mt9v03x_image、mt9v03x_finish_flag。");
         }
         m_library.unload();
         return false;
@@ -210,7 +221,11 @@ QString AlgorithmRunner::sourcePath() const
 
 bool AlgorithmRunner::usesDynamicLibrary() const
 {
-    return m_processFn != nullptr || (m_imageUpdateFn != nullptr && m_imageGetCirclesFn != nullptr);
+    return m_imageUpdateFn != nullptr &&
+           m_dynamicBeaconCount != nullptr &&
+           m_dynamicBeacons != nullptr &&
+           m_dynamicFrameBuffer != nullptr &&
+           m_dynamicFinishFlag != nullptr;
 }
 
 beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
@@ -224,29 +239,55 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
         return result;
     }
 
-    if (m_processFn != nullptr)
-    {
-        m_processFn(image, &result);
-    }
-    else if (m_imageUpdateFn != nullptr && m_imageGetCirclesFn != nullptr &&
+    if (m_imageUpdateFn != nullptr && m_dynamicBeaconCount != nullptr && m_dynamicBeacons != nullptr &&
              m_dynamicFrameBuffer != nullptr && m_dynamicFinishFlag != nullptr)
     {
-        const beacon_circle_t* circles = nullptr;
         const int imageSize = BEACON_IMAGE_H * BEACON_IMAGE_W;
         memcpy(m_dynamicFrameBuffer, image[0], imageSize);
         *m_dynamicFinishFlag = 1U;
         m_imageUpdateFn();
-        result.count = m_imageGetCirclesFn(&circles);
-        if (circles != nullptr)
+
+        const int beaconCopyCount = qMin((int)*m_dynamicBeaconCount, BEACON_MAX_CIRCLE_COUNT);
+        for (int i = 0; i < beaconCopyCount; ++i)
         {
-            const int copyCount = qMin((int)result.count, BEACON_MAX_CIRCLE_COUNT);
-            memcpy(result.circles, circles, sizeof(beacon_circle_t) * copyCount);
-            result.count = (unsigned char)copyCount;
+            result.beacons[i] = m_dynamicBeacons[i];
+            result.circles[i] = result.beacons[i];
+        }
+        result.count = (unsigned char)beaconCopyCount;
+        result.beacon_count = result.count;
+
+        if (m_dynamicCarLampCount != nullptr && m_dynamicCarLamps != nullptr)
+        {
+            const int carLampCopyCount = qMin((int)*m_dynamicCarLampCount, BEACON_MAX_CAR_LAMP_COUNT);
+            for (int i = 0; i < carLampCopyCount; ++i)
+            {
+                result.car_lamps[i] = m_dynamicCarLamps[i];
+            }
+            result.car_lamp_count = (unsigned char)carLampCopyCount;
         }
     }
     else
     {
-        beacon_image_process_with_context(&m_defaultContext, image, &result);
+        const int imageSize = BEACON_IMAGE_H * BEACON_IMAGE_W;
+        memcpy(mt9v03x_image[0], image[0], imageSize);
+        mt9v03x_finish_flag = 1U;
+        image_update();
+
+        const int beaconCopyCount = qMin((int)g_image_beacon_count, BEACON_MAX_CIRCLE_COUNT);
+        for (int i = 0; i < beaconCopyCount; ++i)
+        {
+            result.beacons[i] = g_image_beacons[i];
+            result.circles[i] = result.beacons[i];
+        }
+        result.count = (unsigned char)beaconCopyCount;
+        result.beacon_count = result.count;
+
+        const int carLampCopyCount = qMin((int)g_image_car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
+        for (int i = 0; i < carLampCopyCount; ++i)
+        {
+            result.car_lamps[i] = g_image_car_lamps[i];
+        }
+        result.car_lamp_count = (unsigned char)carLampCopyCount;
     }
     return result;
 }
@@ -262,17 +303,13 @@ QImage AlgorithmRunner::binaryImage(const QImage& grayImage) const
         return QImage();
     }
 
-    if (m_binaryFn != nullptr)
+    constexpr unsigned char Threshold = 200U;
+    for (int y = 0; y < BEACON_IMAGE_H; ++y)
     {
-        m_binaryFn(image, binary);
-    }
-    else if (m_processFn == nullptr)
-    {
-        beacon_image_debug_binary(image, binary);
-    }
-    else
-    {
-        return QImage();
+        for (int x = 0; x < BEACON_IMAGE_W; ++x)
+        {
+            binary[y][x] = image[y][x] >= Threshold ? 255U : 0U;
+        }
     }
 
     QImage output(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
