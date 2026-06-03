@@ -8,6 +8,7 @@
 #include <functional>
 
 class AlgorithmRunner;
+struct DetectionBoundary;
 
 class VideoExporter
 {
@@ -19,6 +20,8 @@ public:
                          double fps,
                          const AlgorithmRunner* runner,
                          const AnnotationModel* annotations,
+                         int cameraIndex,
+                         const DetectionBoundary* boundary,
                          const ProgressCallback& progress,
                          QString* errorMessage) const;
 
@@ -26,6 +29,8 @@ public:
                          const QString& outputPath,
                          double fps,
                          const AlgorithmRunner* runner,
+                         int cameraIndex,
+                         const DetectionBoundary* boundary,
                          const ProgressCallback& progress,
                          QString* errorMessage) const;
 };

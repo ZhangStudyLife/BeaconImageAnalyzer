@@ -39,7 +39,11 @@ add_executable(BeaconImageAnalyzer
     app/AnnotationPanel.cpp
     core/VideoReader.h
     core/VideoReader.cpp
+    core/CameraFrameTransform.h
+    core/CameraFrameTransform.cpp
     core/ImageResult.h
+    core/DetectionBoundary.h
+    core/DetectionBoundary.cpp
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
     core/FrameRenderer.h

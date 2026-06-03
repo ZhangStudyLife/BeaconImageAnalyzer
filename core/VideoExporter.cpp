@@ -1,6 +1,8 @@
 #include "VideoExporter.h"
 
 #include "AlgorithmRunner.h"
+#include "CameraFrameTransform.h"
+#include "DetectionBoundary.h"
 #include "FrameRenderer.h"
 #include "VideoReader.h"
 
@@ -114,6 +116,8 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
                                      double fps,
                                      const AlgorithmRunner* runner,
                                      const AnnotationModel* annotations,
+                                     int cameraIndex,
+                                     const DetectionBoundary* boundary,
                                      const ProgressCallback& progress,
                                      QString* errorMessage) const
 {
@@ -144,12 +148,15 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
             return false;
         }
 
-        const beacon_result_t result = activeRunner->process(gray);
+        gray = CameraFrameTransform::applyForCameraIndex(gray, cameraIndex);
+        const beacon_result_t rawResult = activeRunner->process(gray);
+        const beacon_result_t result = DetectionBoundaryRules::apply(rawResult, boundary);
         const QImage rendered = FrameRenderer::render(gray,
                                                       result,
                                                       frameCorrections(annotations, frame),
                                                       1,
-                                                      true);
+                                                      true,
+                                                      boundary);
         writer.write(qImageToBgrMat(rendered));
 
         if (progress && !progress(frame + 1, reader.frameCount()))
@@ -170,6 +177,8 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
                                     const QString& outputPath,
                                     double fps,
                                     const AlgorithmRunner* runner,
+                                    int cameraIndex,
+                                    const DetectionBoundary* boundary,
                                     const ProgressCallback& progress,
                                     QString* errorMessage) const
 {
@@ -202,7 +211,9 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
             return false;
         }
 
-        const beacon_result_t result = activeRunner->process(gray);
+        gray = CameraFrameTransform::applyForCameraIndex(gray, cameraIndex);
+        const beacon_result_t rawResult = activeRunner->process(gray);
+        const beacon_result_t result = DetectionBoundaryRules::apply(rawResult, boundary);
         const double timeSec = (double)frame / (fps > 0.0 ? fps : 50.0);
         for (int i = 0; i < result.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
         {

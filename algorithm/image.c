@@ -63,7 +63,7 @@ typedef struct
 #define BEACON_MAX_BEACON_ELONGATION  2.8f
 #define BEACON_TOP_BEACON_Y           24.0f
 #define BEACON_TOP_BEACON_MIN_AREA    3
-#define BEACON_TOP_BEACON_MAX_AREA    48
+#define BEACON_TOP_BEACON_MAX_AREA    150
 #define BEACON_TOP_BEACON_MAX_ELONGATION 3.4f
 #define BEACON_MID_BEACON_Y           56.0f
 #define BEACON_MID_BEACON_MAX_AREA    150
@@ -740,6 +740,7 @@ static void insert_beacon_candidate(const component_t *comp)
                 g_beacon_candidates[i].circle.x = comp_x;
                 g_beacon_candidates[i].circle.y = comp_y;
                 g_beacon_candidates[i].circle.radius = comp->radius;
+                g_beacon_candidates[i].circle.area = (float)comp->area;
                 g_beacon_candidates[i].circle.valid = 1;
                 g_beacon_candidates[i].area = comp->area;
                 g_beacon_candidates[i].score = beacon_candidate_score(comp);
@@ -778,6 +779,7 @@ static void insert_beacon_candidate(const component_t *comp)
     g_beacon_candidates[i + 1].circle.x = comp_x;
     g_beacon_candidates[i + 1].circle.y = comp_y;
     g_beacon_candidates[i + 1].circle.radius = comp->radius;
+    g_beacon_candidates[i + 1].circle.area = (float)comp->area;
     g_beacon_candidates[i + 1].circle.valid = 1;
     g_beacon_candidates[i + 1].area = comp->area;
     g_beacon_candidates[i + 1].score = beacon_candidate_score(comp);

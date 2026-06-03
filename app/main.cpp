@@ -65,6 +65,8 @@ int main(int argc, char* argv[])
             const bool ok = exporter.exportMarkedAvi(args.at(2), args.at(3), 50.0,
                                                      nullptr,
                                                      nullptr,
+                                                     -1,
+                                                     nullptr,
                                                      [](int current, int total) {
                                                          if (current == total || current % 100 == 0)
                                                          {
@@ -86,6 +88,8 @@ int main(int argc, char* argv[])
             VideoExporter exporter;
             QString error;
             const bool ok = exporter.exportResultCsv(args.at(2), args.at(3), 50.0,
+                                                     nullptr,
+                                                     -1,
                                                      nullptr,
                                                      [](int current, int total) {
                                                          if (current == total || current % 100 == 0)

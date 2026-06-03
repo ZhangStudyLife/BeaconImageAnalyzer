@@ -123,6 +123,32 @@ void drawCarLampMarkers(QPainter& painter, const beacon_result_t& result, int sa
     }
 }
 
+void drawDetectionBoundary(QPainter& painter, const DetectionBoundary* boundary, int safeScale)
+{
+    if (boundary == nullptr)
+    {
+        return;
+    }
+
+    const QColor color = DetectionBoundaryRules::colorForType(boundary->type);
+    if (!color.isValid())
+    {
+        return;
+    }
+
+    for (int pixelX = 0; pixelX < BEACON_IMAGE_W; ++pixelX)
+    {
+        bool valid = false;
+        const QPointF point = DetectionBoundaryRules::imagePointForX(*boundary, pixelX, &valid);
+        if (!valid)
+        {
+            continue;
+        }
+
+        drawBrush(painter, pixelX, (int)point.y(), 1, safeScale, color);
+    }
+}
+
 QString correctionType(const CorrectionShape& shape)
 {
     for (const QString& type : shape.errorTypes)
@@ -253,7 +279,8 @@ QImage FrameRenderer::render(const QImage& grayImage,
                              const beacon_result_t& result,
                              const QVector<CorrectionShape>& corrections,
                              int scale,
-                             bool showOverlay)
+                             bool showOverlay,
+                             const DetectionBoundary* boundary)
 {
     const int safeScale = qMax(1, scale);
     QImage base = grayImage.convertToFormat(QImage::Format_RGB32);
@@ -275,6 +302,7 @@ QImage FrameRenderer::render(const QImage& grayImage,
 
     painter.setPen(Qt::NoPen);
     painter.setBrush(Qt::NoBrush);
+    drawDetectionBoundary(painter, boundary, safeScale);
     drawBeaconMarkers(painter, result, safeScale);
     drawCarLampMarkers(painter, result, safeScale);
 

@@ -2,6 +2,8 @@
 
 #include "AnnotationJson.h"
 #include "AnnotationPanel.h"
+#include "CameraFrameTransform.h"
+#include "DetectionBoundary.h"
 #include "FrameRenderer.h"
 #include "VideoExporter.h"
 #include "VideoWidget.h"
@@ -85,6 +87,10 @@ int validCircleCount(const beacon_result_t& result)
 
 double circleArea(const beacon_circle_t& circle)
 {
+    if (circle.area > 0.0f)
+    {
+        return (double)circle.area;
+    }
     return Pi * (double)circle.radius * (double)circle.radius;
 }
 
@@ -727,8 +733,10 @@ void MainWindow::showFrame(int frameIndex)
             continue;
         }
 
-        camera.currentGray = gray;
-        camera.currentResult = camera.runner.process(gray);
+        camera.currentGray = CameraFrameTransform::applyForCameraIndex(gray, camera.index);
+        const beacon_result_t rawResult = camera.runner.process(camera.currentGray);
+        camera.currentResult = DetectionBoundaryRules::apply(rawResult,
+                                                             DetectionBoundaryRules::boundaryForCameraIndex(camera.index));
     }
 
     refreshCurrentCameraUi();
@@ -790,7 +798,8 @@ void MainWindow::renderCamera(CameraChannel* camera)
                                                   camera->currentResult,
                                                   corrections,
                                                   1,
-                                                  m_showOverlay);
+                                                  m_showOverlay,
+                                                  DetectionBoundaryRules::boundaryForCameraIndex(camera->index));
     widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1);
     widget->setPixelSourceImage(camera->currentGray);
     widget->setImage(rendered);
@@ -1100,6 +1109,8 @@ void MainWindow::exportMarkedAvi()
                                              camera->usedFps,
                                              &camera->runner,
                                              &camera->annotations,
+                                             camera->index,
+                                             DetectionBoundaryRules::boundaryForCameraIndex(camera->index),
                                              [&progress](int current, int total) {
                                                  progress.setRange(0, total);
                                                  progress.setValue(current);
@@ -1142,6 +1153,8 @@ void MainWindow::exportCsv()
                                              path,
                                              camera->usedFps,
                                              &camera->runner,
+                                             camera->index,
+                                             DetectionBoundaryRules::boundaryForCameraIndex(camera->index),
                                              [&progress](int current, int total) {
                                                  progress.setRange(0, total);
                                                  progress.setValue(current);

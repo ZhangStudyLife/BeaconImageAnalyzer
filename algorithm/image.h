@@ -12,6 +12,7 @@ typedef struct
     float x;
     float y;
     float radius;
+    float area;
     unsigned char valid;
 } beacon_circle_t;
 
