@@ -15,9 +15,8 @@ enum class DetectionBoundaryType
 
 struct DetectionBoundary
 {
-    float a = 0.0f;
-    float b = 0.0f;
-    float c = 0.0f;
+    unsigned char degree = 0U;
+    float c[4] = {};
     float keepSign = 1.0f;
     DetectionBoundaryType type = DetectionBoundaryType::None;
 };

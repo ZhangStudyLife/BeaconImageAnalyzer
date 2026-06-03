@@ -1,28 +1,23 @@
 #include "DetectionBoundary.h"
 
 #include <QtGlobal>
-#include <cmath>
 #include <cstring>
 
 namespace
 {
 constexpr DetectionBoundary FrontBoundary = {
-    0.0307043f,
-    -0.9995285f,
-    -51.0961383f,
-    -1.0f,
+    2U,
+    { -65.0334298f, 0.0142013f, 0.000600320f, 0.0f },
+    1.0f,
     DetectionBoundaryType::Front
 };
 
 constexpr DetectionBoundary RearBoundary = {
-    0.0654442f,
-    -0.9978562f,
-    -20.3339010f,
-    1.0f,
+    1U,
+    { -5.9131233f, 0.0215277f, 0.0f, 0.0f },
+    -1.0f,
     DetectionBoundaryType::Rear
 };
-
-constexpr float Epsilon = 1.0e-6f;
 
 int roundFloatToInt(float value)
 {
@@ -47,6 +42,22 @@ void copyLegacyCircles(beacon_result_t* result)
             std::memset(&result->circles[i], 0, sizeof(result->circles[i]));
         }
     }
+}
+
+float boundaryY(const DetectionBoundary& boundary, float x)
+{
+    const float x2 = x * x;
+    const float x3 = x2 * x;
+    float y = boundary.c[0] + boundary.c[1] * x;
+    if (boundary.degree >= 2U)
+    {
+        y += boundary.c[2] * x2;
+    }
+    if (boundary.degree >= 3U)
+    {
+        y += boundary.c[3] * x3;
+    }
+    return y;
 }
 }
 
@@ -101,23 +112,14 @@ bool DetectionBoundaryRules::keepPoint(const DetectionBoundary* boundary, float 
         return true;
     }
 
-    const float signedDistance = boundary->a * x + boundary->b * (-y) + boundary->c;
-    return signedDistance * boundary->keepSign >= 0.0f;
+    const float testY = -y;
+    return (testY - boundaryY(*boundary, x)) * boundary->keepSign >= 0.0f;
 }
 
 QPointF DetectionBoundaryRules::imagePointForX(const DetectionBoundary& boundary, int pixelX, bool* valid)
 {
-    if (std::fabs(boundary.b) < Epsilon)
-    {
-        if (valid != nullptr)
-        {
-            *valid = false;
-        }
-        return QPointF();
-    }
-
     const float imageX = BEACON_IMAGE_TARGET_PIXEL_X - (float)pixelX;
-    const float imageY = -((boundary.a * imageX) + boundary.c) / boundary.b;
+    const float imageY = boundaryY(boundary, imageX);
     const int pixelY = roundFloatToInt(BEACON_IMAGE_TARGET_PIXEL_Y - imageY);
     const bool pointValid = pixelY >= 0 && pixelY < BEACON_IMAGE_H;
     if (valid != nullptr)
