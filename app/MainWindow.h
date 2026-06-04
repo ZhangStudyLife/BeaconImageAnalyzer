@@ -11,7 +11,6 @@
 #include <QTimer>
 #include <array>
 
-class AnnotationPanel;
 class QCheckBox;
 class QCloseEvent;
 class QComboBox;
@@ -23,6 +22,14 @@ class QSlider;
 class QSpinBox;
 class QPushButton;
 class VideoWidget;
+
+struct HoverPixelState
+{
+    bool valid = false;
+    int x = 0;
+    int y = 0;
+    int gray = 0;
+};
 
 struct CameraChannel
 {
@@ -52,8 +59,6 @@ private slots:
     void importAllCameraVideos();
     void importCameraVideo(int cameraIndex);
     void importCameraAlgorithm(int cameraIndex);
-    void saveAnnotation();
-    void loadAnnotation();
     void exportMarkedAvi();
     void exportCsv();
     void play();
@@ -83,7 +88,7 @@ private slots:
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
     void autoIdentifyCorrectionTargets();
     void jumpToRecordFrame(int frame);
-    void updateHoverPixelInfo(int x, int y, int gray, bool valid);
+    void updateHoverPixelInfo(int cameraIndex, int x, int y, int gray, bool valid);
 
 private:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -93,6 +98,7 @@ private:
     void buildMenus();
     void buildCameraPanel(QGridLayout* layout, int cameraIndex, int column);
     void loadStartupAlgorithms();
+    bool ensureStartupAlgorithmPaths();
     QString savedOrDefaultAlgorithmPath(int cameraIndex) const;
     bool loadCameraVideo(int cameraIndex, const QString& path);
     bool loadCameraAlgorithm(int cameraIndex, const QString& path);
@@ -107,6 +113,9 @@ private:
     void updateCameraInfo(const CameraChannel& camera);
     void updateAllCameraInfo();
     void updateFrameInfo();
+    void updateMiddleLampBaseline();
+    void checkMiddleLampJumpAfterPlaybackStep();
+    bool middleCameraLampDetected(bool* available = nullptr) const;
     bool findFrozenTailStartFrame(const CameraChannel& camera, int* frameIndex, QString* errorMessage) const;
     void updateAnnotationList();
     void refreshCurrentCameraUi();
@@ -119,7 +128,6 @@ private:
     double frameTime(int frame) const;
     QString viewMode() const;
     QString defaultOutputPath(int cameraIndex, const QString& suffix) const;
-    QString annotationPathForCamera(int cameraIndex) const;
     CameraChannel* currentCamera();
     const CameraChannel* currentCamera() const;
     bool isValidCameraIndex(int cameraIndex) const;
@@ -133,10 +141,9 @@ private:
     std::array<QLabel*, CameraCount> m_cameraInfoLabels = {};
     std::array<QSpinBox*, CameraCount> m_syncFrameSpins = {};
     std::array<QPushButton*, CameraCount> m_cameraSelectButtons = {};
-    AnnotationPanel* m_annotationPanel = nullptr;
+    std::array<HoverPixelState, CameraCount> m_hoverPixels = {};
     QLabel* m_videoInfoLabel = nullptr;
     QLabel* m_frameInfoLabel = nullptr;
-    QLabel* m_pixelInfoLabel = nullptr;
     QPushButton* m_playPauseButton = nullptr;
     QSlider* m_slider = nullptr;
     QSpinBox* m_frameSpin = nullptr;
@@ -144,6 +151,7 @@ private:
     QComboBox* m_viewModeCombo = nullptr;
     QComboBox* m_speedCombo = nullptr;
     QCheckBox* m_showOverlayCheck = nullptr;
+    QCheckBox* m_pauseOnMiddleLampJumpCheck = nullptr;
 
     int m_currentCameraIndex = 0;
     int m_timelineFrame = 0;
@@ -153,6 +161,8 @@ private:
     QElapsedTimer m_playbackClock;
     int m_playbackStartFrame = 0;
     bool m_updatingControls = false;
+    bool m_hasMiddleLampBaseline = false;
+    bool m_previousMiddleLampDetected = false;
 };
 
 #endif

@@ -11,7 +11,6 @@ namespace
 {
 constexpr int MarkerSize = 3;
 constexpr int CarLampLineWidth = 3;
-constexpr int DisplayBeaconLimit = 3;
 constexpr float Pi = 3.1415926f;
 
 int roundFloatToInt(float value)
@@ -72,7 +71,7 @@ void drawBeaconMarkers(QPainter& painter, const beacon_result_t& result, int saf
 {
     int drawnCount = 0;
     const int beaconCount = qMin((int)result.beacon_count, BEACON_MAX_CIRCLE_COUNT);
-    for (int i = 0; i < beaconCount && drawnCount < DisplayBeaconLimit; ++i)
+    for (int i = 0; i < beaconCount && drawnCount < BEACON_MAX_CIRCLE_COUNT; ++i)
     {
         const beacon_circle_t& beacon = result.beacons[i];
         int imageX = 0;

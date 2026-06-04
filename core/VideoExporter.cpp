@@ -63,57 +63,12 @@ bool openWriter(cv::VideoWriter* writer,
     return false;
 }
 
-QVector<ErrorCircle> recordErrorCircles(const AnnotationRecord& record)
-{
-    if (!record.errorCircles.isEmpty())
-    {
-        return record.errorCircles;
-    }
-    if (record.circleIndex >= 0)
-    {
-        return QVector<ErrorCircle>{ ErrorCircle{ record.circleIndex, -1 } };
-    }
-    return {};
-}
-
-CorrectionShape correctionFromRecord(const AnnotationRecord& record, int frame)
-{
-    CorrectionShape shape;
-    shape.name = annotationTypesDisplayName(record.types.isEmpty()
-                                                ? QStringList{ record.type }
-                                                : record.types);
-    shape.frame = frame;
-    shape.errorType = record.type.isEmpty() ? QStringLiteral("other") : record.type;
-    shape.errorTypes = record.types.isEmpty() ? QStringList{ shape.errorType } : record.types;
-    shape.errorCircles = recordErrorCircles(record);
-    shape.description = record.description;
-    shape.lineWidth = 1;
-    return shape;
-}
-
-QVector<CorrectionShape> frameCorrections(const AnnotationModel* annotations, int frame)
-{
-    QVector<CorrectionShape> corrections;
-    if (annotations == nullptr)
-    {
-        return corrections;
-    }
-
-    corrections = annotations->correctionsForFrame(frame);
-    const QVector<AnnotationRecord> records = annotations->recordsForFrame(frame);
-    for (const AnnotationRecord& record : records)
-    {
-        corrections.push_back(correctionFromRecord(record, frame));
-    }
-    return corrections;
-}
 }
 
 bool VideoExporter::exportMarkedAvi(const QString& inputPath,
                                      const QString& outputPath,
                                      double fps,
                                      const AlgorithmRunner* runner,
-                                     const AnnotationModel* annotations,
                                      const ProgressCallback& progress,
                                      QString* errorMessage) const
 {
@@ -147,7 +102,7 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
         const beacon_result_t result = activeRunner->process(gray);
         const QImage rendered = FrameRenderer::render(gray,
                                                       result,
-                                                      frameCorrections(annotations, frame),
+                                                      {},
                                                       1,
                                                       true);
         writer.write(qImageToBgrMat(rendered));

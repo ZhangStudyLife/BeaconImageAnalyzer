@@ -1,7 +1,5 @@
 #include "MainWindow.h"
 
-#include "AnnotationJson.h"
-#include "AnnotationPanel.h"
 #include "FrameRenderer.h"
 #include "VideoExporter.h"
 #include "VideoWidget.h"
@@ -27,14 +25,9 @@
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QPainter>
-#include <QPaintEvent>
 #include <QPlainTextEdit>
-#include <QPolygonF>
 #include <QProgressDialog>
 #include <QPushButton>
-#include <QRectF>
-#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSlider>
@@ -44,7 +37,6 @@
 #include <QSettings>
 #include <QTextEdit>
 #include <QVBoxLayout>
-#include <QLineF>
 
 #include <algorithm>
 #include <cmath>
@@ -130,6 +122,12 @@ QString defaultCameraAlgorithmPath(int cameraIndex)
     return QDir(baseDir).absoluteFilePath(fileName);
 }
 
+bool isOwnerComputer()
+{
+    return qEnvironmentVariable("USERNAME").compare(QStringLiteral("zyz"), Qt::CaseInsensitive) == 0 &&
+           qEnvironmentVariable("COMPUTERNAME").compare(QStringLiteral("ZYZLEGION"), Qt::CaseInsensitive) == 0;
+}
+
 QString cameraAlgorithmSettingsKey(int cameraIndex)
 {
     return QStringLiteral("cameraAlgorithms/camera%1").arg(cameraIndex);
@@ -173,6 +171,7 @@ MainWindow::MainWindow(QWidget* parent)
         targetFrame = qMax(m_timelineFrame + 1, targetFrame);
         targetFrame = qMin(targetFrame, maxFrame);
         showFrame(targetFrame);
+        checkMiddleLampJumpAfterPlaybackStep();
         if (m_timelineFrame >= maxFrame)
         {
             pause();
@@ -281,8 +280,10 @@ void MainWindow::buildUi()
     }
     m_speedCombo->setCurrentIndex(3);
 
-    m_showOverlayCheck = new QCheckBox(QStringLiteral("标注层"), controls);
+    m_showOverlayCheck = new QCheckBox(QStringLiteral("检测层"), controls);
     m_showOverlayCheck->setChecked(true);
+    m_pauseOnMiddleLampJumpCheck = new QCheckBox(QStringLiteral("中路车灯跳变暂停"), controls);
+    m_pauseOnMiddleLampJumpCheck->setToolTip(QStringLiteral("播放时检测到中间摄像头车灯有/无状态变化后自动暂停"));
 
     controlsLayout->addWidget(previousButton);
     controlsLayout->addWidget(m_playPauseButton);
@@ -293,32 +294,27 @@ void MainWindow::buildUi()
     controlsLayout->addWidget(m_viewModeCombo);
     controlsLayout->addWidget(m_speedCombo);
     controlsLayout->addWidget(m_showOverlayCheck);
+    controlsLayout->addWidget(m_pauseOnMiddleLampJumpCheck);
     workspaceLayout->addWidget(controls);
 
     m_videoInfoLabel = new QLabel(QStringLiteral("未导入视频"), workspace);
     m_videoInfoLabel->setWordWrap(true);
     m_frameInfoLabel = new QLabel(workspace);
     m_frameInfoLabel->setWordWrap(true);
-    m_pixelInfoLabel = new QLabel(QStringLiteral("像素：-"), workspace);
-    m_pixelInfoLabel->setWordWrap(true);
     workspaceLayout->addWidget(m_videoInfoLabel);
     workspaceLayout->addWidget(m_frameInfoLabel);
-    workspaceLayout->addWidget(m_pixelInfoLabel);
 
-    m_annotationPanel = new AnnotationPanel(central);
-    auto* annotationScroll = new QScrollArea(central);
-    annotationScroll->setWidgetResizable(true);
-    annotationScroll->setMinimumWidth(280);
-    annotationScroll->setMaximumWidth(340);
-    annotationScroll->setWidget(m_annotationPanel);
-
-    root->addWidget(workspace, 6);
-    root->addWidget(annotationScroll);
+    root->addWidget(workspace, 1);
 
     connect(previousButton, &QPushButton::clicked, this, &MainWindow::previousFrame);
     connect(m_playPauseButton, &QPushButton::clicked, this, &MainWindow::togglePlayPause);
     connect(nextButton, &QPushButton::clicked, this, &MainWindow::nextFrame);
-    connect(m_slider, &QSlider::sliderMoved, this, &MainWindow::showFrameFromSlider);
+    connect(m_slider, &QSlider::valueChanged, this, [this](int value) {
+        if (!m_updatingControls)
+        {
+            showFrameFromSlider(value);
+        }
+    });
     connect(m_frameSpin, &QSpinBox::editingFinished, this, &MainWindow::jumpToFrame);
     connect(m_timeSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
         if (!m_updatingControls && m_timeSpin->hasFocus())
@@ -336,46 +332,9 @@ void MainWindow::buildUi()
         m_showOverlay = checked;
         showFrame(m_timelineFrame);
     });
-
-    connect(m_annotationPanel,
-            &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
-            this,
-            &MainWindow::saveCurrentFrameCorrections);
-    connect(m_annotationPanel, &AnnotationPanel::deleteAnnotationsRequested, this, &MainWindow::deleteAnnotations);
-    connect(m_annotationPanel, &AnnotationPanel::deleteCorrectionsRequested, this, &MainWindow::deleteCorrections);
-    connect(m_annotationPanel,
-            &AnnotationPanel::batchAddCorrectionsRequested,
-            this,
-            &MainWindow::batchAddCorrections);
-    connect(m_annotationPanel,
-            &AnnotationPanel::autoMatchCorrectionFramesRequested,
-            this,
-            &MainWindow::autoMatchCorrectionFrames);
-    connect(m_annotationPanel,
-            &AnnotationPanel::batchAddCorrectionsToFramesRequested,
-            this,
-            &MainWindow::batchAddCorrectionsToFrames);
-    connect(m_annotationPanel, &AnnotationPanel::correctionToolChanged, this, [this](const QString& tool) {
-        for (VideoWidget* widget : m_videoWidgets)
-        {
-            if (widget != nullptr)
-            {
-                widget->setCorrectionTool(tool);
-            }
-        }
+    connect(m_pauseOnMiddleLampJumpCheck, &QCheckBox::toggled, this, [this]() {
+        updateMiddleLampBaseline();
     });
-    connect(m_annotationPanel, &AnnotationPanel::correctionStyleChanged, this, [this](const QColor& color, int width) {
-        for (VideoWidget* widget : m_videoWidgets)
-        {
-            if (widget != nullptr)
-            {
-                widget->setCorrectionStyle(color, width);
-            }
-        }
-    });
-    connect(m_annotationPanel, &AnnotationPanel::autoIdentifyRequested, this, &MainWindow::autoIdentifyCorrectionTargets);
-    connect(m_annotationPanel, &AnnotationPanel::recordActivated, this, &MainWindow::jumpToRecordFrame);
-
     setStyleSheet(QStringLiteral(
         "QMainWindow { background:#101318; color:#e7edf3; }"
         "QWidget { color:#e7edf3; font-size:13px; }"
@@ -447,7 +406,12 @@ void MainWindow::buildCameraPanel(QGridLayout* layout, int cameraIndex, int colu
                 selectCamera(cameraIndex);
                 addCorrectionShape(shapeType, points);
             });
-    connect(videoWidget, &VideoWidget::hoverPixelChanged, this, &MainWindow::updateHoverPixelInfo);
+    connect(videoWidget,
+            &VideoWidget::hoverPixelChanged,
+            this,
+            [this, cameraIndex](int x, int y, int gray, bool valid) {
+                updateHoverPixelInfo(cameraIndex, x, y, gray, valid);
+            });
 }
 
 void MainWindow::buildMenus()
@@ -468,10 +432,7 @@ void MainWindow::buildMenus()
         });
     }
     fileMenu->addSeparator();
-    fileMenu->addAction(QStringLiteral("保存当前摄像头标注"), this, &MainWindow::saveAnnotation);
-    fileMenu->addAction(QStringLiteral("加载当前摄像头标注"), this, &MainWindow::loadAnnotation);
-    fileMenu->addSeparator();
-    fileMenu->addAction(QStringLiteral("导出当前摄像头标注视频"), this, &MainWindow::exportMarkedAvi);
+    fileMenu->addAction(QStringLiteral("导出当前摄像头检测标记视频"), this, &MainWindow::exportMarkedAvi);
     fileMenu->addAction(QStringLiteral("导出当前摄像头检测 CSV"), this, &MainWindow::exportCsv);
 
     QMenu* playbackMenu = menuBar()->addMenu(QStringLiteral("播放"));
@@ -481,7 +442,7 @@ void MainWindow::buildMenus()
     playbackMenu->addAction(QStringLiteral("下一帧"), this, &MainWindow::nextFrame);
 
     QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
-    QAction* overlayAction = viewMenu->addAction(QStringLiteral("显示检测标注层"));
+    QAction* overlayAction = viewMenu->addAction(QStringLiteral("显示检测层"));
     overlayAction->setCheckable(true);
     overlayAction->setChecked(true);
     connect(overlayAction, &QAction::toggled, this, [this](bool checked) {
@@ -574,6 +535,7 @@ bool MainWindow::loadCameraVideo(int cameraIndex, const QString& path)
     camera.annotations.clear();
     std::memset(&camera.currentResult, 0, sizeof(camera.currentResult));
     camera.currentGray = QImage();
+    m_hoverPixels[cameraIndex] = HoverPixelState();
 
     QSpinBox* syncSpin = m_syncFrameSpins[cameraIndex];
     if (syncSpin != nullptr)
@@ -624,6 +586,11 @@ void MainWindow::importCameraAlgorithm(int cameraIndex)
 
 void MainWindow::loadStartupAlgorithms()
 {
+    if (!ensureStartupAlgorithmPaths())
+    {
+        return;
+    }
+
     QStringList failed;
     for (int i = 0; i < CameraCount; ++i)
     {
@@ -649,6 +616,64 @@ void MainWindow::loadStartupAlgorithms()
     }
 }
 
+bool MainWindow::ensureStartupAlgorithmPaths()
+{
+    if (isOwnerComputer())
+    {
+        return true;
+    }
+
+    QSettings settings;
+    const auto savedPath = [&settings](int cameraIndex) {
+        return settings.value(cameraAlgorithmSettingsKey(cameraIndex)).toString();
+    };
+
+    const QString sidePath = savedPath(0);
+    const QString middlePath = savedPath(1);
+    if (QFileInfo::exists(sidePath) && QFileInfo::exists(middlePath))
+    {
+        return true;
+    }
+
+    QMessageBox::information(this,
+                             QStringLiteral("首次配置处理代码"),
+                             QStringLiteral("首次在本机运行需要选择两份图像处理 C 文件：\n"
+                                            "1. 0/2 号左右摄像头共用的文件\n"
+                                            "2. 1 号垂直下视摄像头的文件\n"
+                                            "选择后会保存到本机配置，后续启动不再询问。"));
+
+    QString initialDir = QFileInfo(sidePath).exists()
+        ? QFileInfo(sidePath).absolutePath()
+        : QString();
+    const QString selectedSidePath = QFileDialog::getOpenFileName(this,
+                                                                  QStringLiteral("选择 0/2 号左右摄像头处理代码"),
+                                                                  initialDir,
+                                                                  QStringLiteral("C 文件 (*.c);;所有文件 (*)"));
+    if (selectedSidePath.isEmpty())
+    {
+        statusBar()->showMessage(QStringLiteral("已取消首次处理代码配置，启动时不会自动加载算法。"), 5000);
+        return false;
+    }
+
+    initialDir = QFileInfo(middlePath).exists()
+        ? QFileInfo(middlePath).absolutePath()
+        : QFileInfo(selectedSidePath).absolutePath();
+    const QString selectedMiddlePath = QFileDialog::getOpenFileName(this,
+                                                                    QStringLiteral("选择 1 号垂直下视摄像头处理代码"),
+                                                                    initialDir,
+                                                                    QStringLiteral("C 文件 (*.c);;所有文件 (*)"));
+    if (selectedMiddlePath.isEmpty())
+    {
+        statusBar()->showMessage(QStringLiteral("已取消首次处理代码配置，启动时不会自动加载算法。"), 5000);
+        return false;
+    }
+
+    settings.setValue(cameraAlgorithmSettingsKey(0), QFileInfo(selectedSidePath).absoluteFilePath());
+    settings.setValue(cameraAlgorithmSettingsKey(1), QFileInfo(selectedMiddlePath).absoluteFilePath());
+    settings.setValue(cameraAlgorithmSettingsKey(2), QFileInfo(selectedSidePath).absoluteFilePath());
+    return true;
+}
+
 QString MainWindow::savedOrDefaultAlgorithmPath(int cameraIndex) const
 {
     if (!isValidCameraIndex(cameraIndex))
@@ -661,6 +686,11 @@ QString MainWindow::savedOrDefaultAlgorithmPath(int cameraIndex) const
     if (!savedPath.isEmpty() && QFileInfo::exists(savedPath))
     {
         return savedPath;
+    }
+
+    if (!isOwnerComputer())
+    {
+        return QString();
     }
 
     const QString defaultPath = defaultCameraAlgorithmPath(cameraIndex);
@@ -803,6 +833,10 @@ void MainWindow::showFrame(int frameIndex)
     }
     updateAllCameraInfo();
     updateFrameInfo();
+    if (!m_playing)
+    {
+        updateMiddleLampBaseline();
+    }
 
     m_updatingControls = true;
     m_slider->setRange(minFrame, maxFrame);
@@ -844,16 +878,9 @@ void MainWindow::renderCamera(CameraChannel* camera)
         }
     }
 
-    QVector<CorrectionShape> corrections =
-        camera->annotations.correctionsForFrame(cameraFrameForTimeline(*camera, m_timelineFrame));
-    if (camera->index == m_currentCameraIndex && m_annotationPanel != nullptr)
-    {
-        corrections = m_annotationPanel->draftCorrections();
-    }
-
     const QImage rendered = FrameRenderer::render(displayImage,
                                                   camera->currentResult,
-                                                  corrections,
+                                                  {},
                                                   1,
                                                   m_showOverlay);
     widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1);
@@ -875,7 +902,7 @@ void MainWindow::updateCameraInfo(const CameraChannel& camera)
         : QFileInfo(camera.algorithmPath).fileName();
     if (!camera.loaded || !camera.reader.isOpen())
     {
-        label->setText(QStringLiteral("未导入视频\n处理代码：%1").arg(algorithmName));
+        label->setText(QStringLiteral("鼠标：-\n未导入视频\n处理代码：%1").arg(algorithmName));
         return;
     }
 
@@ -889,25 +916,61 @@ void MainWindow::updateCameraInfo(const CameraChannel& camera)
     }
 
     QStringList lines;
+    const HoverPixelState& hover = m_hoverPixels[camera.index];
+    if (hover.valid)
+    {
+        lines << QStringLiteral("鼠标：X=%1  Y=%2  Gray=%3").arg(hover.x).arg(hover.y).arg(hover.gray);
+    }
+    else
+    {
+        lines << QStringLiteral("鼠标：-");
+    }
     lines << QStringLiteral("帧：%1 / %2").arg(frame).arg(qMax(0, camera.reader.frameCount() - 1));
     lines << QStringLiteral("处理代码：%1").arg(algorithmName);
-    lines << QStringLiteral("识别数量：%1").arg(validCircleCount(camera.currentResult));
-    for (int i = 0; i < camera.currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
+    lines << QStringLiteral("信标灯：%1 个").arg(validCircleCount(camera.currentResult));
+    for (int i = 0; i < camera.currentResult.beacon_count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
     {
-        const beacon_circle_t& circle = camera.currentResult.circles[i];
+        const beacon_circle_t& circle = camera.currentResult.beacons[i];
         if (circle.valid == 0)
         {
             continue;
         }
-        lines << QStringLiteral("#%1  X=%2  Y=%3  面积=%4")
+        lines << QStringLiteral("  B%1  X=%2  Y=%3  R=%4  面积=%5")
                      .arg(i)
                      .arg(circle.x, 0, 'f', 2)
                      .arg(circle.y, 0, 'f', 2)
+                     .arg(circle.radius, 0, 'f', 2)
                      .arg(circleArea(circle), 0, 'f', 2);
     }
-    if (camera.currentResult.count == 0)
+    if (validCircleCount(camera.currentResult) == 0)
     {
-        lines << QStringLiteral("当前帧无有效信标灯");
+        lines << QStringLiteral("  当前帧无有效信标灯");
+    }
+
+    bool hasLamp = false;
+    for (int i = 0; i < camera.currentResult.car_lamp_count && i < BEACON_MAX_CAR_LAMP_COUNT; ++i)
+    {
+        const beacon_rect_t& lamp = camera.currentResult.car_lamps[i];
+        if (lamp.valid == 0)
+        {
+            continue;
+        }
+        if (!hasLamp)
+        {
+            lines << QStringLiteral("车灯：检测到");
+            hasLamp = true;
+        }
+        lines << QStringLiteral("  L%1  CX=%2  CY=%3  长=%4  宽=%5  角度=%6")
+                     .arg(i)
+                     .arg(lamp.cx, 0, 'f', 2)
+                     .arg(lamp.cy, 0, 'f', 2)
+                     .arg(lamp.length, 0, 'f', 2)
+                     .arg(lamp.width, 0, 'f', 2)
+                     .arg(lamp.angle, 0, 'f', 1);
+    }
+    if (!hasLamp)
+    {
+        lines << QStringLiteral("车灯：未检测到");
     }
     label->setText(lines.join(QLatin1Char('\n')));
 }
@@ -1027,6 +1090,77 @@ void MainWindow::updateFrameInfo()
     m_frameInfoLabel->setText(frameLines.join(QStringLiteral("  |  ")));
 }
 
+void MainWindow::updateMiddleLampBaseline()
+{
+    bool available = false;
+    const bool detected = middleCameraLampDetected(&available);
+    m_hasMiddleLampBaseline = available;
+    m_previousMiddleLampDetected = detected;
+}
+
+void MainWindow::checkMiddleLampJumpAfterPlaybackStep()
+{
+    if (m_pauseOnMiddleLampJumpCheck == nullptr || !m_pauseOnMiddleLampJumpCheck->isChecked())
+    {
+        updateMiddleLampBaseline();
+        return;
+    }
+
+    bool available = false;
+    const bool detected = middleCameraLampDetected(&available);
+    if (!available)
+    {
+        m_hasMiddleLampBaseline = false;
+        return;
+    }
+
+    if (m_hasMiddleLampBaseline && detected != m_previousMiddleLampDetected)
+    {
+        const int frame = cameraFrameForTimeline(m_cameras[1], m_timelineFrame);
+        pause();
+        statusBar()->showMessage(QStringLiteral("中路车灯检测状态跳变，已暂停在第 %1 帧：%2 -> %3")
+                                     .arg(frame)
+                                     .arg(m_previousMiddleLampDetected ? QStringLiteral("检测到") : QStringLiteral("未检测到"))
+                                     .arg(detected ? QStringLiteral("检测到") : QStringLiteral("未检测到")),
+                                 5000);
+    }
+
+    m_hasMiddleLampBaseline = true;
+    m_previousMiddleLampDetected = detected;
+}
+
+bool MainWindow::middleCameraLampDetected(bool* available) const
+{
+    constexpr int MiddleCameraIndex = 1;
+    if (available != nullptr)
+    {
+        *available = false;
+    }
+    if (!isValidCameraIndex(MiddleCameraIndex))
+    {
+        return false;
+    }
+
+    const CameraChannel& camera = m_cameras[MiddleCameraIndex];
+    if (!camera.loaded || !camera.reader.isOpen() || camera.currentGray.isNull())
+    {
+        return false;
+    }
+    if (available != nullptr)
+    {
+        *available = true;
+    }
+
+    for (int i = 0; i < camera.currentResult.car_lamp_count && i < BEACON_MAX_CAR_LAMP_COUNT; ++i)
+    {
+        if (camera.currentResult.car_lamps[i].valid != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void MainWindow::refreshCurrentCameraUi()
 {
     for (int i = 0; i < CameraCount; ++i)
@@ -1043,25 +1177,10 @@ void MainWindow::refreshCurrentCameraUi()
     }
 
     CameraChannel* camera = currentCamera();
-    if (camera == nullptr || m_annotationPanel == nullptr)
+    if (camera == nullptr)
     {
         return;
     }
-
-    if (!camera->loaded || !camera->reader.isOpen())
-    {
-        m_annotationPanel->setVideoFrameRange(0, 0);
-        m_annotationPanel->setCurrentContext(0, 0.0, 0);
-        m_annotationPanel->setCurrentFrameCorrections({}, true);
-        m_annotationPanel->setAnnotations({}, {});
-        return;
-    }
-
-    const int frame = cameraFrameForTimeline(*camera, m_timelineFrame);
-    m_annotationPanel->setVideoFrameRange(0, qMax(0, camera->reader.frameCount() - 1));
-    m_annotationPanel->setCurrentContext(frame, (double)frame / camera->usedFps, validCircleCount(camera->currentResult));
-    m_annotationPanel->setCurrentFrameCorrections(camera->annotations.correctionsForFrame(frame), true);
-    m_annotationPanel->setAnnotations(camera->annotations.records(), camera->annotations.corrections());
 }
 
 void MainWindow::selectCamera(int cameraIndex)
@@ -1079,68 +1198,6 @@ void MainWindow::selectCamera(int cameraIndex)
     }
 }
 
-void MainWindow::saveAnnotation()
-{
-    CameraChannel* camera = currentCamera();
-    if (camera == nullptr || !camera->loaded)
-    {
-        QMessageBox::information(this, QStringLiteral("保存标注"), QStringLiteral("请先导入当前摄像头的视频。"));
-        return;
-    }
-
-    const QString path = QFileDialog::getSaveFileName(this,
-                                                      QStringLiteral("保存当前摄像头标注"),
-                                                      annotationPathForCamera(camera->index),
-                                                      QStringLiteral("JSON 文件 (*.json);;所有文件 (*)"));
-    if (path.isEmpty())
-    {
-        return;
-    }
-
-    AnnotationVideoInfo info;
-    info.file = camera->videoPath;
-    info.width = camera->reader.width();
-    info.height = camera->reader.height();
-    info.fpsUsed = camera->usedFps;
-    info.frameCount = camera->reader.frameCount();
-
-    QString error;
-    if (!AnnotationJson::save(path, info, camera->annotations, &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("保存标注失败"), error);
-        return;
-    }
-    statusBar()->showMessage(QStringLiteral("标注已保存：%1").arg(path), 3000);
-}
-
-void MainWindow::loadAnnotation()
-{
-    CameraChannel* camera = currentCamera();
-    if (camera == nullptr || !camera->loaded)
-    {
-        QMessageBox::information(this, QStringLiteral("加载标注"), QStringLiteral("请先导入当前摄像头的视频。"));
-        return;
-    }
-
-    const QString path = QFileDialog::getOpenFileName(this,
-                                                      QStringLiteral("加载当前摄像头标注"),
-                                                      QFileInfo(annotationPathForCamera(camera->index)).absolutePath(),
-                                                      QStringLiteral("JSON 文件 (*.json);;所有文件 (*)"));
-    if (path.isEmpty())
-    {
-        return;
-    }
-
-    QString error;
-    if (!AnnotationJson::load(path, &camera->annotations, &error))
-    {
-        QMessageBox::warning(this, QStringLiteral("加载标注失败"), error);
-        return;
-    }
-    showFrame(m_timelineFrame);
-    statusBar()->showMessage(QStringLiteral("标注已加载：%1").arg(path), 3000);
-}
-
 void MainWindow::exportMarkedAvi()
 {
     CameraChannel* camera = currentCamera();
@@ -1151,7 +1208,7 @@ void MainWindow::exportMarkedAvi()
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-                                                      QStringLiteral("导出当前摄像头标注视频"),
+                                                      QStringLiteral("导出当前摄像头检测标记视频"),
                                                       defaultOutputPath(camera->index, QStringLiteral("_marked.avi")),
                                                       QStringLiteral("AVI 文件 (*.avi);;所有文件 (*)"));
     if (path.isEmpty())
@@ -1168,7 +1225,6 @@ void MainWindow::exportMarkedAvi()
                                              path,
                                              camera->usedFps,
                                              &camera->runner,
-                                             &camera->annotations,
                                              [&progress](int current, int total) {
                                                  progress.setRange(0, total);
                                                  progress.setValue(current);
@@ -1232,6 +1288,7 @@ void MainWindow::play()
     {
         return;
     }
+    updateMiddleLampBaseline();
     m_playing = true;
     resetPlaybackClock();
     m_playTimer.start(playbackIntervalMs());
@@ -1421,29 +1478,10 @@ void MainWindow::autoMatchCorrectionFrames(const QVector<int>& correctionRows,
                                            double overlapPixelThreshold)
 {
     Q_UNUSED(correctionRows);
+    Q_UNUSED(backwardMaxFrames);
+    Q_UNUSED(forwardMaxFrames);
     Q_UNUSED(positionThreshold);
     Q_UNUSED(overlapPixelThreshold);
-
-    CameraChannel* camera = currentCamera();
-    if (camera == nullptr || !camera->loaded)
-    {
-        return;
-    }
-
-    const int currentFrame = cameraFrameForTimeline(*camera, m_timelineFrame);
-    QVector<int> frames;
-    const int startFrame = qMax(0, currentFrame - qMax(0, backwardMaxFrames));
-    const int endFrame = qMin(camera->reader.frameCount() - 1, currentFrame + qMax(0, forwardMaxFrames));
-    for (int frame = startFrame; frame <= endFrame; ++frame)
-    {
-        if (frame != currentFrame)
-        {
-            frames.push_back(frame);
-        }
-    }
-
-    m_annotationPanel->setAutoMatchedBatchFrames(frames);
-    statusBar()->showMessage(QStringLiteral("已生成批量候选帧：%1 帧").arg(frames.size()), 3000);
 }
 
 void MainWindow::batchAddCorrectionsToFrames(const QVector<int>& correctionRows, const QVector<int>& frames)
@@ -1522,69 +1560,12 @@ void MainWindow::deleteCorrections(const QVector<int>& rows)
 
 void MainWindow::addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points)
 {
-    CameraChannel* camera = currentCamera();
-    if (camera == nullptr || !camera->loaded || points.isEmpty())
-    {
-        return;
-    }
-
-    m_annotationPanel->applyDrawnCorrectionShape(shapeType, points);
-    renderCamera(camera);
+    Q_UNUSED(shapeType);
+    Q_UNUSED(points);
 }
 
 void MainWindow::autoIdentifyCorrectionTargets()
 {
-    CameraChannel* camera = currentCamera();
-    if (camera == nullptr || !camera->loaded)
-    {
-        return;
-    }
-
-    CorrectionShape shape;
-    if (!m_annotationPanel->activeDraftShape(&shape))
-    {
-        QMessageBox::information(this, QStringLiteral("自动识别"), QStringLiteral("请先绘制一个封闭纠错图形。"));
-        return;
-    }
-
-    QVector<int> matchedIndices;
-    for (int i = 0; i < camera->currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
-    {
-        const beacon_circle_t& circle = camera->currentResult.circles[i];
-        if (circle.valid == 0)
-        {
-            continue;
-        }
-
-        const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
-        bool contains = false;
-        if (shape.shapeType == QStringLiteral("circle") && shape.points.size() >= 2)
-        {
-            contains = QLineF(shape.points[0], imagePoint).length() <= QLineF(shape.points[0], shape.points[1]).length();
-        }
-        else if (shape.shapeType == QStringLiteral("rect") && shape.points.size() >= 2)
-        {
-            contains = QRectF(shape.points[0], shape.points[1]).normalized().contains(imagePoint);
-        }
-        else if (shape.shapeType == QStringLiteral("polygon") && shape.points.size() >= 3)
-        {
-            contains = QPolygonF(shape.points).containsPoint(imagePoint, Qt::OddEvenFill);
-        }
-
-        if (contains)
-        {
-            matchedIndices.push_back(i);
-        }
-    }
-
-    if (matchedIndices.isEmpty())
-    {
-        QMessageBox::information(this, QStringLiteral("自动识别"), QStringLiteral("封闭区域内没有已识别信标灯。"));
-        return;
-    }
-
-    m_annotationPanel->applyAutoIdentifiedErrorCircles(matchedIndices);
-    renderCamera(camera);
 }
 
 void MainWindow::jumpToRecordFrame(int frame)
@@ -1599,24 +1580,23 @@ void MainWindow::jumpToRecordFrame(int frame)
     showFrame(frame - camera->syncFrame);
 }
 
-void MainWindow::updateHoverPixelInfo(int x, int y, int gray, bool valid)
+void MainWindow::updateHoverPixelInfo(int cameraIndex, int x, int y, int gray, bool valid)
 {
-    if (!valid)
+    if (!isValidCameraIndex(cameraIndex))
     {
-        m_pixelInfoLabel->setText(QStringLiteral("像素：-"));
         return;
     }
-    m_pixelInfoLabel->setText(QStringLiteral("像素：X=%1  Y=%2  Gray=%3").arg(x).arg(y).arg(gray));
+
+    HoverPixelState& hover = m_hoverPixels[cameraIndex];
+    hover.valid = valid;
+    hover.x = x;
+    hover.y = y;
+    hover.gray = gray;
+    updateCameraInfo(m_cameras[cameraIndex]);
 }
 
 void MainWindow::updateAnnotationList()
 {
-    CameraChannel* camera = currentCamera();
-    if (camera == nullptr || m_annotationPanel == nullptr)
-    {
-        return;
-    }
-    m_annotationPanel->setAnnotations(camera->annotations.records(), camera->annotations.corrections());
 }
 
 void MainWindow::togglePlayPause()
@@ -1688,19 +1668,6 @@ QString MainWindow::defaultOutputPath(int cameraIndex, const QString& suffix) co
 
     const QFileInfo info(m_cameras[cameraIndex].videoPath);
     return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + suffix;
-}
-
-QString MainWindow::annotationPathForCamera(int cameraIndex) const
-{
-    if (!isValidCameraIndex(cameraIndex) || m_cameras[cameraIndex].videoPath.isEmpty())
-    {
-        return QString();
-    }
-
-    const QFileInfo info(m_cameras[cameraIndex].videoPath);
-    return info.absolutePath() + QLatin1Char('/') +
-           info.completeBaseName() +
-           QStringLiteral("_camera%1_annotations.json").arg(cameraIndex + 1);
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)

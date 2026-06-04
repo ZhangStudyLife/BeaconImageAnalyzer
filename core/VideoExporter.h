@@ -1,8 +1,6 @@
 #ifndef VIDEO_EXPORTER_H
 #define VIDEO_EXPORTER_H
 
-#include "AnnotationModel.h"
-
 #include <QString>
 
 #include <functional>
@@ -18,7 +16,6 @@ public:
                          const QString& outputPath,
                          double fps,
                          const AlgorithmRunner* runner,
-                         const AnnotationModel* annotations,
                          const ProgressCallback& progress,
                          QString* errorMessage) const;
 
