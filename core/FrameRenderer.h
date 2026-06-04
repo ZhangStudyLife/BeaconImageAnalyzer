@@ -2,6 +2,7 @@
 #define FRAME_RENDERER_H
 
 #include "DetectionBoundary.h"
+#include "CrossCameraBeaconTracker.h"
 #include "ImageResult.h"
 #include "AnnotationModel.h"
 
@@ -17,7 +18,9 @@ public:
                          const QVector<CorrectionShape>& corrections,
                          int scale,
                          bool showOverlay,
-                         const DetectionBoundary* boundary = nullptr);
+                         const DetectionBoundary* boundary = nullptr,
+                         int cameraIndex = -1,
+                         const TrackedBeaconPoint* trackedPoint = nullptr);
 };
 
 #endif

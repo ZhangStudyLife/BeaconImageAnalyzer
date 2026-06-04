@@ -3,6 +3,7 @@
 
 #include "AlgorithmRunner.h"
 #include "AnnotationModel.h"
+#include "CrossCameraBeaconTracker.h"
 #include "ImageResult.h"
 #include "VideoReader.h"
 
@@ -82,6 +83,7 @@ private slots:
     void deleteCorrections(const QVector<int>& rows);
     void addCorrectionShape(const QString& shapeType, const QVector<QPointF>& points);
     void autoIdentifyCorrectionTargets();
+    void startBeaconTracking();
     void jumpToRecordFrame(int frame);
     void updateHoverPixelInfo(int x, int y, int gray, bool valid);
 
@@ -142,6 +144,7 @@ private:
     QComboBox* m_viewModeCombo = nullptr;
     QComboBox* m_speedCombo = nullptr;
     QCheckBox* m_showOverlayCheck = nullptr;
+    QPushButton* m_trackBeaconButton = nullptr;
 
     int m_currentCameraIndex = 0;
     int m_timelineFrame = 0;
@@ -151,6 +154,7 @@ private:
     QElapsedTimer m_playbackClock;
     int m_playbackStartFrame = 0;
     bool m_updatingControls = false;
+    CrossCameraBeaconTracker m_beaconTracker;
 };
 
 #endif

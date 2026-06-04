@@ -7,15 +7,19 @@ namespace
 {
 constexpr DetectionBoundary FrontBoundary = {
     2U,
-    { -65.0334298f, 0.0142013f, 0.000600320f, 0.0f },
+    { 9.0000000f, -0.003202929f, 0.003202929f, 0.0f },
     1.0f,
+    -93.000f,
+    94.000f,
     DetectionBoundaryType::Front
 };
 
 constexpr DetectionBoundary RearBoundary = {
-    1U,
-    { -5.9131233f, 0.0215277f, 0.0f, 0.0f },
+    2U,
+    { -19.0000000f, 0.001830245f, -0.001830245f, 0.0f },
     -1.0f,
+    -93.000f,
+    94.000f,
     DetectionBoundaryType::Rear
 };
 
@@ -46,6 +50,15 @@ void copyLegacyCircles(beacon_result_t* result)
 
 float boundaryY(const DetectionBoundary& boundary, float x)
 {
+    if (x < boundary.xMin)
+    {
+        x = boundary.xMin;
+    }
+    else if (x > boundary.xMax)
+    {
+        x = boundary.xMax;
+    }
+
     const float x2 = x * x;
     const float x3 = x2 * x;
     float y = boundary.c[0] + boundary.c[1] * x;

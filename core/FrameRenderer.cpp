@@ -1,5 +1,7 @@
 #include "FrameRenderer.h"
 
+#include "CameraBoundaryMapping.h"
+
 #include <QFont>
 #include <QLineF>
 #include <QPainter>
@@ -13,6 +15,7 @@ constexpr int MarkerSize = 3;
 constexpr int CarLampLineWidth = 3;
 constexpr int DisplayBeaconLimit = 3;
 constexpr float Pi = 3.1415926f;
+constexpr int CenterCameraIndex = 1;
 
 int roundFloatToInt(float value)
 {
@@ -123,6 +126,24 @@ void drawCarLampMarkers(QPainter& painter, const beacon_result_t& result, int sa
     }
 }
 
+void drawTrackedPoint(QPainter& painter, const TrackedBeaconPoint* trackedPoint, int cameraIndex, int safeScale)
+{
+    if (trackedPoint == nullptr || !trackedPoint->valid || trackedPoint->cameraIndex != cameraIndex)
+    {
+        return;
+    }
+
+    const int x = roundFloatToInt((float)trackedPoint->imagePoint.x());
+    const int y = roundFloatToInt((float)trackedPoint->imagePoint.y());
+    const QColor color(0, 255, 120);
+    drawBrush(painter, x, y, 5, safeScale, color);
+    for (int d = -6; d <= 6; ++d)
+    {
+        fillScaledPixel(painter, x + d, y, safeScale, color);
+        fillScaledPixel(painter, x, y + d, safeScale, color);
+    }
+}
+
 void drawDetectionBoundary(QPainter& painter, const DetectionBoundary* boundary, int safeScale)
 {
     if (boundary == nullptr)
@@ -146,6 +167,42 @@ void drawDetectionBoundary(QPainter& painter, const DetectionBoundary* boundary,
         }
 
         drawBrush(painter, pixelX, (int)point.y(), 1, safeScale, color);
+    }
+}
+
+void drawDashedPoint(QPainter& painter, int imageX, int imageY, int sourceX, int safeScale, const QColor& color)
+{
+    if ((sourceX / 4) % 2 != 0)
+    {
+        return;
+    }
+    drawBrush(painter, imageX, imageY, 1, safeScale, color);
+}
+
+void drawMappedBoundaryCurves(QPainter& painter, int cameraIndex, int safeScale)
+{
+    if (cameraIndex != CenterCameraIndex)
+    {
+        return;
+    }
+
+    for (int x = 0; x < BEACON_IMAGE_W; ++x)
+    {
+        const QPointF frontPoint = CameraBoundaryMapping::frontBoundaryToCenter((float)x);
+        drawDashedPoint(painter,
+                        roundFloatToInt((float)frontPoint.x()),
+                        roundFloatToInt((float)frontPoint.y()),
+                        x,
+                        safeScale,
+                        QColor(255, 255, 0));
+
+        const QPointF rearPoint = CameraBoundaryMapping::rearBoundaryToCenter((float)x);
+        drawDashedPoint(painter,
+                        roundFloatToInt((float)rearPoint.x()),
+                        roundFloatToInt((float)rearPoint.y()),
+                        x,
+                        safeScale,
+                        QColor(0, 255, 255));
     }
 }
 
@@ -280,7 +337,9 @@ QImage FrameRenderer::render(const QImage& grayImage,
                              const QVector<CorrectionShape>& corrections,
                              int scale,
                              bool showOverlay,
-                             const DetectionBoundary* boundary)
+                             const DetectionBoundary* boundary,
+                             int cameraIndex,
+                             const TrackedBeaconPoint* trackedPoint)
 {
     const int safeScale = qMax(1, scale);
     QImage base = grayImage.convertToFormat(QImage::Format_RGB32);
@@ -303,8 +362,10 @@ QImage FrameRenderer::render(const QImage& grayImage,
     painter.setPen(Qt::NoPen);
     painter.setBrush(Qt::NoBrush);
     drawDetectionBoundary(painter, boundary, safeScale);
+    drawMappedBoundaryCurves(painter, cameraIndex, safeScale);
     drawBeaconMarkers(painter, result, safeScale);
     drawCarLampMarkers(painter, result, safeScale);
+    drawTrackedPoint(painter, trackedPoint, cameraIndex, safeScale);
 
     QPen correctionPen;
     correctionPen.setWidth(1);

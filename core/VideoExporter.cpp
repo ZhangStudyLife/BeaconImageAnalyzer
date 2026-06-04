@@ -156,7 +156,8 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
                                                       frameCorrections(annotations, frame),
                                                       1,
                                                       true,
-                                                      boundary);
+                                                      boundary,
+                                                      cameraIndex);
         writer.write(qImageToBgrMat(rendered));
 
         if (progress && !progress(frame + 1, reader.frameCount()))

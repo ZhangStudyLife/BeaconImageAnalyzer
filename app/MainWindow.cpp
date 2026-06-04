@@ -273,6 +273,9 @@ void MainWindow::buildUi()
     }
     m_speedCombo->setCurrentIndex(3);
 
+    m_trackBeaconButton = new QPushButton(QStringLiteral("追踪灯"), controls);
+    m_trackBeaconButton->setToolTip(QStringLiteral("从当前帧最大信标灯开始跨摄像头追踪"));
+
     m_showOverlayCheck = new QCheckBox(QStringLiteral("标注层"), controls);
     m_showOverlayCheck->setChecked(true);
 
@@ -285,6 +288,7 @@ void MainWindow::buildUi()
     controlsLayout->addWidget(m_viewModeCombo);
     controlsLayout->addWidget(m_speedCombo);
     controlsLayout->addWidget(m_showOverlayCheck);
+    controlsLayout->addWidget(m_trackBeaconButton);
     workspaceLayout->addWidget(controls);
 
     m_videoInfoLabel = new QLabel(QStringLiteral("未导入视频"), workspace);
@@ -328,6 +332,7 @@ void MainWindow::buildUi()
         m_showOverlay = checked;
         showFrame(m_timelineFrame);
     });
+    connect(m_trackBeaconButton, &QPushButton::clicked, this, &MainWindow::startBeaconTracking);
 
     connect(m_annotationPanel,
             &AnnotationPanel::saveCurrentFrameCorrectionsRequested,
@@ -739,6 +744,20 @@ void MainWindow::showFrame(int frameIndex)
                                                              DetectionBoundaryRules::boundaryForCameraIndex(camera.index));
     }
 
+    if (m_beaconTracker.active())
+    {
+        std::array<beacon_result_t, CameraCount> results = {};
+        for (int i = 0; i < CameraCount; ++i)
+        {
+            results[(size_t)i] = m_cameras[(size_t)i].currentResult;
+        }
+        QString trackError;
+        if (!m_beaconTracker.update(results, m_timelineFrame, &trackError))
+        {
+            QMessageBox::warning(this, QStringLiteral("追踪灯"), trackError);
+        }
+    }
+
     refreshCurrentCameraUi();
     for (CameraChannel& camera : m_cameras)
     {
@@ -794,12 +813,15 @@ void MainWindow::renderCamera(CameraChannel* camera)
         corrections = m_annotationPanel->draftCorrections();
     }
 
+    const TrackedBeaconPoint trackedPoint = m_beaconTracker.currentPointForCamera(camera->index);
     const QImage rendered = FrameRenderer::render(displayImage,
                                                   camera->currentResult,
                                                   corrections,
                                                   1,
                                                   m_showOverlay,
-                                                  DetectionBoundaryRules::boundaryForCameraIndex(camera->index));
+                                                  DetectionBoundaryRules::boundaryForCameraIndex(camera->index),
+                                                  camera->index,
+                                                  &trackedPoint);
     widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1);
     widget->setPixelSourceImage(camera->currentGray);
     widget->setImage(rendered);
@@ -964,6 +986,7 @@ void MainWindow::updateFrameInfo()
             frameLines << QStringLiteral("%1 当前帧：%2").arg(camera.name).arg(cameraFrameForTimeline(camera, m_timelineFrame));
         }
     }
+    frameLines << m_beaconTracker.statusText();
     m_frameInfoLabel->setText(frameLines.join(QStringLiteral("  |  ")));
 }
 
@@ -1529,6 +1552,35 @@ void MainWindow::autoIdentifyCorrectionTargets()
 
     m_annotationPanel->applyAutoIdentifiedErrorCircles(matchedIndices);
     renderCamera(camera);
+}
+
+void MainWindow::startBeaconTracking()
+{
+    if (!hasAnyVideo())
+    {
+        QMessageBox::information(this, QStringLiteral("追踪灯"), QStringLiteral("请先导入视频。"));
+        return;
+    }
+
+    std::array<beacon_result_t, CameraCount> results = {};
+    for (int i = 0; i < CameraCount; ++i)
+    {
+        results[(size_t)i] = m_cameras[(size_t)i].currentResult;
+    }
+
+    QString error;
+    if (!m_beaconTracker.start(results, m_timelineFrame, &error))
+    {
+        QMessageBox::warning(this, QStringLiteral("追踪灯"), error);
+        return;
+    }
+
+    for (CameraChannel& camera : m_cameras)
+    {
+        renderCamera(&camera);
+    }
+    updateFrameInfo();
+    statusBar()->showMessage(m_beaconTracker.statusText(), 3000);
 }
 
 void MainWindow::jumpToRecordFrame(int frame)

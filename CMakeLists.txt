@@ -44,6 +44,8 @@ add_executable(BeaconImageAnalyzer
     core/ImageResult.h
     core/DetectionBoundary.h
     core/DetectionBoundary.cpp
+    core/CrossCameraBeaconTracker.h
+    core/CrossCameraBeaconTracker.cpp
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
     core/FrameRenderer.h

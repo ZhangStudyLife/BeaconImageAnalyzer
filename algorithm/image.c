@@ -35,7 +35,7 @@ typedef struct
 #define BEACON_CAR_LAMP_THRESHOLD     200
 
 /* Connected-component area filters. */
-#define BEACON_MIN_COMPONENT_AREA     8
+#define BEACON_MIN_COMPONENT_AREA     3
 #define BEACON_MAX_COMPONENT_AREA     5000
 #define BEACON_MIN_LAMP_AREA          24
 #define BEACON_MAX_LAMP_AREA          1200
@@ -60,39 +60,24 @@ typedef struct
 #define BEACON_EDGE_LAMP_MARGIN       2
 #define BEACON_EDGE_LAMP_MIN_SPAN     5
 #define BEACON_MAX_BEACON_AREA        260
-#define BEACON_MAX_BEACON_ELONGATION  2.8f
+#define BEACON_MAX_BEACON_ELONGATION  5.0f
 #define BEACON_TOP_BEACON_Y           24.0f
 #define BEACON_TOP_BEACON_MIN_AREA    3
-#define BEACON_TOP_BEACON_MAX_AREA    150
-#define BEACON_TOP_BEACON_MAX_ELONGATION 3.4f
+#define BEACON_TOP_BEACON_MAX_AREA    260
+#define BEACON_TOP_BEACON_MAX_ELONGATION 5.0f
 #define BEACON_MID_BEACON_Y           56.0f
-#define BEACON_MID_BEACON_MAX_AREA    150
-#define BEACON_LAMP_RESIDUE_ELONGATION 1.65f
-#define BEACON_LAMP_RESIDUE_DISTANCE  24.0f
-#define BEACON_EDGE_BEACON_MIN_AREA   8
-#define BEACON_EDGE_BEACON_MAX_AREA   90
-#define BEACON_EDGE_BEACON_MAX_SPAN   18
+#define BEACON_MID_BEACON_MAX_AREA    260
+#define BEACON_EDGE_BEACON_MIN_AREA   3
+#define BEACON_EDGE_BEACON_MAX_AREA   200
+#define BEACON_EDGE_BEACON_MAX_SPAN   30
+#define BEACON_EDGE_BEACON_BACKGROUND_MAX 200
 #define BEACON_EDGE_BEACON_MARGIN     1
-#define BEACON_NO_LAMP_SMALL_AREA     80
-#define BEACON_NO_LAMP_SMALL_ELONGATION 1.5f
-#define BEACON_DARK_SMALL_BACKGROUND_MAX 30
 #define BEACON_LOCAL_CONTRAST_AREA    40
-#define BEACON_LAMP_TINY_Y            40.0f
-#define BEACON_LAMP_TINY_MAX_AREA     6
-#define BEACON_LAMP_TINY_BACKGROUND_MAX 30
-#define BEACON_LAMP_MICRO_MAX_AREA    8
-#define BEACON_LAMP_MICRO_BACKGROUND_MAX 25
 #define BEACON_LOCAL_RING_PAD         3
 #define BEACON_LOCAL_BACKGROUND_MAX   50
 #define BEACON_NEW_SLOT_MIN_AREA      3
-#define BEACON_NEW_SLOT_MAX_ELONGATION 3.4f
+#define BEACON_NEW_SLOT_MAX_ELONGATION 5.0f
 #define BEACON_NEW_SLOT_EDGE_MARGIN   1
-#define BEACON_LAMP_CONTEXT_FRAMES    12
-#define BEACON_NEW_SLOT_FRAMES_AFTER_LAMP 120
-#define BEACON_LAMP_LOST_BEACON_MIN_Y 100.0f
-#define BEACON_LAMP_NEW_SLOT_NEAR_AREA 28
-#define BEACON_LAMP_NEW_SLOT_DISTANCE 32.0f
-#define BEACON_LAMP_NEW_SLOT_EDGE_MARGIN 4
 #define BEACON_TRACKED_SLOT_LIMIT     4
 #define BEACON_DUPLICATE_DISTANCE     5.0f
 #define BEACON_TRACK_MATCH_DISTANCE   36.0f
@@ -149,11 +134,7 @@ static const unsigned char (*g_current_image)[BEACON_IMAGE_W] = 0;
 static unsigned char g_has_current_lamp = 0;
 static unsigned char g_had_lamp_previous = 0;
 static unsigned char g_has_lamp_track = 0;
-static unsigned char g_seen_lamp = 0;
-static unsigned char g_new_slot_frames = 0;
-static unsigned char g_lamp_context_frames = 0;
 static unsigned char g_beacon_pass_threshold = BEACON_BINARY_THRESHOLD;
-static component_t g_current_lamp;
 
 static float squaref_local(float value)
 {
@@ -173,15 +154,11 @@ static void beacon_image_init(void)
     memset(g_beacon_candidates, 0, sizeof(g_beacon_candidates));
     memset(g_lamp_mask_components, 0, sizeof(g_lamp_mask_components));
     memset(g_last_beacons, 0, sizeof(g_last_beacons));
-    memset(&g_current_lamp, 0, sizeof(g_current_lamp));
     g_beacon_candidate_count = 0;
     g_lamp_mask_component_count = 0;
     g_has_last_beacons = 0;
     g_had_lamp_previous = 0;
     g_has_lamp_track = 0;
-    g_seen_lamp = 0;
-    g_new_slot_frames = 0;
-    g_lamp_context_frames = 0;
     g_current_stamp = 0;
 }
 
@@ -636,23 +613,10 @@ static unsigned char is_beacon_candidate(const component_t *comp)
     }
     if (g_beacon_pass_threshold < BEACON_BEACON_LOW_THRESHOLD)
     {
-        if (g_has_current_lamp != 0 &&
-            (comp->cy >= BEACON_LAMP_TINY_Y ||
-             comp->area > BEACON_LAMP_TINY_MAX_AREA ||
-             background > BEACON_LAMP_TINY_BACKGROUND_MAX))
-        {
-            return 0;
-        }
-        if (g_beacon_pass_threshold < BEACON_BEACON_TINY_THRESHOLD &&
-            (comp->area > BEACON_LAMP_MICRO_MAX_AREA ||
-             background > BEACON_LAMP_MICRO_BACKGROUND_MAX))
-        {
-            return 0;
-        }
         min_area = BEACON_TOP_BEACON_MIN_AREA;
-        if (max_area > BEACON_LOCAL_CONTRAST_AREA)
+        if (max_area > 200)
         {
-            max_area = BEACON_LOCAL_CONTRAST_AREA;
+            max_area = 200;
         }
     }
 
@@ -661,9 +625,8 @@ static unsigned char is_beacon_candidate(const component_t *comp)
         return 0;
     }
     if (g_beacon_pass_threshold < BEACON_BEACON_LOW_THRESHOLD &&
-        (comp->area > BEACON_LOCAL_CONTRAST_AREA ||
-         local_background_average(comp, BEACON_LOCAL_RING_PAD) >
-             BEACON_LOCAL_BACKGROUND_MAX))
+        local_background_average(comp, BEACON_LOCAL_RING_PAD) >
+            BEACON_LOCAL_BACKGROUND_MAX)
     {
         return 0;
     }
@@ -675,14 +638,7 @@ static unsigned char is_beacon_candidate(const component_t *comp)
     }
     if (touches_edge != 0 &&
         g_has_current_lamp == 0 &&
-        background > BEACON_LOCAL_BACKGROUND_MAX)
-    {
-        return 0;
-    }
-    if (g_has_current_lamp == 0 &&
-        comp->area < BEACON_NO_LAMP_SMALL_AREA &&
-        comp->elongation > BEACON_NO_LAMP_SMALL_ELONGATION &&
-        (g_seen_lamp != 0 || background > BEACON_DARK_SMALL_BACKGROUND_MAX))
+        background > BEACON_EDGE_BEACON_BACKGROUND_MAX)
     {
         return 0;
     }
@@ -696,18 +652,7 @@ static unsigned char is_beacon_candidate(const component_t *comp)
     {
         return 0;
     }
-    if (g_has_current_lamp != 0 &&
-        comp->elongation > BEACON_LAMP_RESIDUE_ELONGATION)
-    {
-        float dx = comp->cx - g_current_lamp.cx;
-        float dy = comp->cy - g_current_lamp.cy;
-        if (dx * dx + dy * dy <=
-            BEACON_LAMP_RESIDUE_DISTANCE * BEACON_LAMP_RESIDUE_DISTANCE)
-        {
-            return 0;
-        }
-    }
-    if ((touches_edge != 0 || comp->area <= BEACON_LOCAL_CONTRAST_AREA) &&
+    if (comp->area <= BEACON_LOCAL_CONTRAST_AREA &&
         background > BEACON_LOCAL_BACKGROUND_MAX)
     {
         return 0;
@@ -832,12 +777,9 @@ static void find_beacon_candidates(
     threshold_image(image, BEACON_BEACON_TINY_THRESHOLD, 1);
     find_beacon_candidates_pass();
 
-    if (g_has_current_lamp != 0)
-    {
-        g_beacon_pass_threshold = BEACON_BEACON_MICRO_THRESHOLD;
-        threshold_image(image, BEACON_BEACON_MICRO_THRESHOLD, 1);
-        find_beacon_candidates_pass();
-    }
+    g_beacon_pass_threshold = BEACON_BEACON_MICRO_THRESHOLD;
+    threshold_image(image, BEACON_BEACON_MICRO_THRESHOLD, 1);
+    find_beacon_candidates_pass();
 }
 
 static void copy_beacons_to_legacy(beacon_result_t *result)
@@ -860,9 +802,6 @@ static void copy_beacons_to_legacy(beacon_result_t *result)
 
 static unsigned char can_fill_new_beacon_slot(const beacon_candidate_t *candidate)
 {
-    float dx;
-    float dy;
-
     if (candidate == 0 || candidate->valid == 0)
     {
         return 0;
@@ -885,37 +824,6 @@ static unsigned char can_fill_new_beacon_slot(const beacon_candidate_t *candidat
     if (candidate->circle.radius <= 0.0f)
     {
         return 0;
-    }
-    if (g_has_current_lamp == 0 &&
-        g_seen_lamp != 0 &&
-        g_has_last_beacons == 0 &&
-        candidate->image_y >= BEACON_LAMP_LOST_BEACON_MIN_Y)
-    {
-        return 0;
-    }
-    if (g_has_current_lamp != 0 || g_lamp_context_frames > 0)
-    {
-        dx = candidate->image_x - g_current_lamp.cx;
-        dy = candidate->image_y - g_current_lamp.cy;
-        if (candidate->image_x <= BEACON_LAMP_NEW_SLOT_EDGE_MARGIN ||
-            candidate->image_x >=
-                (float)(BEACON_IMAGE_W - 1 - BEACON_LAMP_NEW_SLOT_EDGE_MARGIN))
-        {
-            return 0;
-        }
-        if (g_new_slot_frames == 0 &&
-            candidate->image_y >= BEACON_TOP_BEACON_Y)
-        {
-            return 0;
-        }
-        if (g_has_current_lamp != 0 &&
-            candidate->image_y >= BEACON_TOP_BEACON_Y &&
-            candidate->area > BEACON_LAMP_NEW_SLOT_NEAR_AREA &&
-            dx * dx + dy * dy <
-                BEACON_LAMP_NEW_SLOT_DISTANCE * BEACON_LAMP_NEW_SLOT_DISTANCE)
-        {
-            return 0;
-        }
     }
     return 1;
 }
@@ -982,7 +890,7 @@ static void write_beacons(beacon_result_t *result)
         }
     }
 
-    out_index = (g_has_last_beacons != 0 && g_has_current_lamp != 0) ? 1 : 0;
+    out_index = 0;
     for (i = 0; i < g_beacon_candidate_count; i++)
     {
         if (g_beacon_candidates[i].valid == 0 ||
@@ -990,8 +898,7 @@ static void write_beacons(beacon_result_t *result)
         {
             continue;
         }
-        if ((g_has_last_beacons != 0 ||
-             (g_seen_lamp != 0 && g_has_current_lamp == 0)) &&
+        if (g_has_last_beacons != 0 &&
             can_fill_new_beacon_slot(&g_beacon_candidates[i]) == 0)
         {
             continue;
@@ -1030,10 +937,6 @@ static void write_beacons(beacon_result_t *result)
 
     result->beacon_count = (unsigned char)highest_slot;
     copy_beacons_to_legacy(result);
-    if (g_new_slot_frames > 0)
-    {
-        g_new_slot_frames--;
-    }
 }
 
 static void beacon_image_process(
@@ -1060,20 +963,10 @@ static void beacon_image_process(
     threshold_image(image, BEACON_CAR_LAMP_THRESHOLD, 0);
     has_lamp = find_car_lamp(&lamp);
     g_has_current_lamp = has_lamp;
-    if (has_lamp != 0)
-    {
-        g_seen_lamp = 1;
-        g_lamp_context_frames = BEACON_LAMP_CONTEXT_FRAMES;
-    }
-    else if (g_lamp_context_frames > 0)
-    {
-        g_lamp_context_frames--;
-    }
     if (has_lamp != 0 && g_had_lamp_previous == 0)
     {
         g_has_last_beacons = 0;
         memset(g_last_beacons, 0, sizeof(g_last_beacons));
-        g_new_slot_frames = BEACON_NEW_SLOT_FRAMES_AFTER_LAMP;
     }
     g_had_lamp_previous = has_lamp;
     if (has_lamp == 0)
@@ -1085,7 +978,6 @@ static void beacon_image_process(
     {
         g_has_lamp_track = 1;
     }
-    g_current_lamp = lamp;
 
     build_all_lamp_masks(&lamp);
     write_car_lamp(&lamp, result);

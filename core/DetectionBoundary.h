@@ -18,6 +18,8 @@ struct DetectionBoundary
     unsigned char degree = 0U;
     float c[4] = {};
     float keepSign = 1.0f;
+    float xMin = 0.0f;
+    float xMax = 0.0f;
     DetectionBoundaryType type = DetectionBoundaryType::None;
 };
 
