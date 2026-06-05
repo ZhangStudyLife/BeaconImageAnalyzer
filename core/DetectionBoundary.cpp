@@ -16,8 +16,8 @@ constexpr DetectionBoundary FrontBoundary = {
 
 constexpr DetectionBoundary RearBoundary = {
     2U,
-    { -19.0000000f, 0.001830245f, -0.001830245f, 0.0f },
-    -1.0f,
+    { 14.0000000f, -7.0f / 4371.0f, 7.0f / 4371.0f, 0.0f },
+    1.0f,
     -93.000f,
     94.000f,
     DetectionBoundaryType::Rear

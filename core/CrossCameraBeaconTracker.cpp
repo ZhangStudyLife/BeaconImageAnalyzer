@@ -70,7 +70,7 @@ bool mapBoundaryToCenter(int sourceCameraIndex, const QPointF& sourcePoint, QPoi
     }
     if (sourceCameraIndex == TRACKER_REAR_CAMERA_INDEX)
     {
-        const float sourceX = (float)BEACON_IMAGE_W - (float)sourcePoint.x();
+        const float sourceX = (float)sourcePoint.x();
         *centerPoint = CameraBoundaryMapping::rearBoundaryToCenter(sourceX);
         return true;
     }
@@ -240,7 +240,7 @@ QString CrossCameraBeaconTracker::statusText() const
         return QStringLiteral("追踪：未启动");
     }
     const TrackedBeaconPoint& point = m_history.back();
-    return QStringLiteral("追踪：摄像头 %1  X=%2  Y=%3")
+    return QStringLiteral("追踪：摄像头 %1  像素X=%2  像素Y=%3")
         .arg(point.cameraIndex + 1)
         .arg(point.imagePoint.x(), 0, 'f', 1)
         .arg(point.imagePoint.y(), 0, 'f', 1);

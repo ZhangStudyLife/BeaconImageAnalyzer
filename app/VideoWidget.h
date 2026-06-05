@@ -18,7 +18,7 @@ public:
     explicit VideoWidget(QWidget* parent = nullptr);
     void setImage(const QImage& image);
     void setPixelSourceImage(const QImage& image);
-    void setFrameGeometry(const QSize& originalSize, int displayScale);
+    void setFrameGeometry(const QSize& originalSize, int displayScale, int cameraIndex = -1);
     void setCorrectionTool(const QString& tool);
     void setCorrectionStyle(const QColor& color, int lineWidth);
     void setSelected(bool selected);
@@ -51,6 +51,7 @@ private:
     QSize m_originalSize;
     QPoint m_lastHoverWidgetPoint;
     int m_displayScale = 1;
+    int m_cameraIndex = -1;
     QString m_correctionTool = QStringLiteral("select");
     QColor m_correctionColor = QColor(255, 80, 80);
     int m_correctionLineWidth = 2;

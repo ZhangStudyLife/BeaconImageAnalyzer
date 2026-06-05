@@ -1,5 +1,7 @@
 #include "VideoWidget.h"
 
+#include "CameraFrameTransform.h"
+
 #include <QImage>
 #include <QEvent>
 #include <QGraphicsDropShadowEffect>
@@ -49,10 +51,11 @@ void VideoWidget::setPixelSourceImage(const QImage& image)
     }
 }
 
-void VideoWidget::setFrameGeometry(const QSize& originalSize, int displayScale)
+void VideoWidget::setFrameGeometry(const QSize& originalSize, int displayScale, int cameraIndex)
 {
     m_originalSize = originalSize;
     m_displayScale = qMax(1, displayScale);
+    m_cameraIndex = cameraIndex;
 }
 
 void VideoWidget::setCorrectionTool(const QString& tool)
@@ -334,13 +337,15 @@ bool VideoWidget::widgetToImagePoint(const QPoint& widgetPoint, QPointF* imagePo
     }
 
     const QPointF local = QPointF(widgetPoint) - displayRect.topLeft();
-    const double x = qBound(0.0,
-                            local.x() * (double)m_originalSize.width() / displayRect.width(),
-                            (double)m_originalSize.width() - 1.0);
-    const double y = qBound(0.0,
-                            local.y() * (double)m_originalSize.height() / displayRect.height(),
-                            (double)m_originalSize.height() - 1.0);
-    *imagePoint = QPointF(x, y);
+    const double displayX = qBound(0.0,
+                                   local.x() * (double)m_originalSize.width() / displayRect.width(),
+                                   (double)m_originalSize.width() - 1.0);
+    const double displayY = qBound(0.0,
+                                   local.y() * (double)m_originalSize.height() / displayRect.height(),
+                                   (double)m_originalSize.height() - 1.0);
+    *imagePoint = CameraFrameTransform::displayToImagePoint(QPointF(displayX, displayY),
+                                                            m_originalSize,
+                                                            m_cameraIndex);
     return true;
 }
 
@@ -390,9 +395,11 @@ QVector<QPointF> VideoWidget::previewDisplayPoints() const
     const QRectF displayRect = imageDisplayRect();
     for (const QPointF& point : m_previewPoints)
     {
+        const QPointF displayPoint =
+            CameraFrameTransform::imageToDisplayPoint(point, m_originalSize, m_cameraIndex);
         points.push_back(displayRect.topLeft() +
-                         QPointF(point.x() * displayRect.width() / (double)m_originalSize.width(),
-                                 point.y() * displayRect.height() / (double)m_originalSize.height()));
+                         QPointF(displayPoint.x() * displayRect.width() / (double)m_originalSize.width(),
+                                 displayPoint.y() * displayRect.height() / (double)m_originalSize.height()));
     }
     return points;
 }

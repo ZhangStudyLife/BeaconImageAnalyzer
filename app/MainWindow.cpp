@@ -738,7 +738,7 @@ void MainWindow::showFrame(int frameIndex)
             continue;
         }
 
-        camera.currentGray = CameraFrameTransform::applyForCameraIndex(gray, camera.index);
+        camera.currentGray = gray;
         const beacon_result_t rawResult = camera.runner.process(camera.currentGray);
         camera.currentResult = DetectionBoundaryRules::apply(rawResult,
                                                              DetectionBoundaryRules::boundaryForCameraIndex(camera.index));
@@ -815,16 +815,17 @@ void MainWindow::renderCamera(CameraChannel* camera)
 
     const TrackedBeaconPoint trackedPoint = m_beaconTracker.currentPointForCamera(camera->index);
     const ExpectedBeaconSearchArea expectedSearchArea = m_beaconTracker.expectedSearchAreaForCamera(camera->index);
-    const QImage rendered = FrameRenderer::render(displayImage,
-                                                  camera->currentResult,
-                                                  corrections,
-                                                  1,
-                                                  m_showOverlay,
-                                                  DetectionBoundaryRules::boundaryForCameraIndex(camera->index),
-                                                  camera->index,
-                                                  &trackedPoint,
-                                                  &expectedSearchArea);
-    widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1);
+    QImage rendered = FrameRenderer::render(displayImage,
+                                            camera->currentResult,
+                                            corrections,
+                                            1,
+                                            m_showOverlay,
+                                            DetectionBoundaryRules::boundaryForCameraIndex(camera->index),
+                                            camera->index,
+                                            &trackedPoint,
+                                            &expectedSearchArea);
+    rendered = CameraFrameTransform::applyDisplayForCameraIndex(rendered, camera->index);
+    widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1, camera->index);
     widget->setPixelSourceImage(camera->currentGray);
     widget->setImage(rendered);
     widget->setSelected(camera->index == m_currentCameraIndex);
@@ -863,10 +864,11 @@ void MainWindow::updateCameraInfo(const CameraChannel& camera)
         {
             continue;
         }
-        lines << QStringLiteral("#%1  X=%2  Y=%3  面积=%4")
+        const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
+        lines << QStringLiteral("#%1  像素X=%2  像素Y=%3  面积=%4")
                      .arg(i)
-                     .arg(circle.x, 0, 'f', 2)
-                     .arg(circle.y, 0, 'f', 2)
+                     .arg(imagePoint.x(), 0, 'f', 2)
+                     .arg(imagePoint.y(), 0, 'f', 2)
                      .arg(circleArea(circle), 0, 'f', 2);
     }
     if (camera.currentResult.count == 0)
