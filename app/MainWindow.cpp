@@ -43,6 +43,7 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QStyle>
+#include <QSettings>
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QLineF>
@@ -127,6 +128,18 @@ QString cameraBuildDir(const QString& name)
 {
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("imported_algorithms/%1").arg(name));
 }
+
+QString defaultCameraAlgorithmPath(int cameraIndex)
+{
+    const QString baseDir = QStringLiteral("D:/HDUASC-SmartCar-21st-FlyOverMinefield/CYT2BL3_Image/project/code/Image");
+    const QString fileName = cameraIndex == 1 ? QStringLiteral("image_down.c") : QStringLiteral("image.c");
+    return QDir(baseDir).absoluteFilePath(fileName);
+}
+
+QString cameraAlgorithmSettingsKey(int cameraIndex)
+{
+    return QStringLiteral("cameraAlgorithms/camera%1").arg(cameraIndex);
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -173,6 +186,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     selectCamera(0);
+    loadStartupAlgorithms();
     showFrame(0);
 }
 
@@ -619,6 +633,55 @@ void MainWindow::importCameraAlgorithm(int cameraIndex)
     loadCameraAlgorithm(cameraIndex, path);
 }
 
+void MainWindow::loadStartupAlgorithms()
+{
+    QStringList failed;
+    for (int i = 0; i < CameraCount; ++i)
+    {
+        const QString path = savedOrDefaultAlgorithmPath(i);
+        if (path.isEmpty())
+        {
+            continue;
+        }
+
+        CameraChannel& camera = m_cameras[i];
+        QString error;
+        if (!camera.runner.loadSourceFile(path, cameraBuildDir(QStringLiteral("camera_%1").arg(i + 1)), &error))
+        {
+            failed << QStringLiteral("%1：%2").arg(camera.name, error);
+            continue;
+        }
+        camera.algorithmPath = camera.runner.sourcePath();
+    }
+
+    if (!failed.isEmpty())
+    {
+        statusBar()->showMessage(QStringLiteral("默认处理代码加载失败：%1").arg(failed.join(QStringLiteral("；"))), 8000);
+    }
+}
+
+QString MainWindow::savedOrDefaultAlgorithmPath(int cameraIndex) const
+{
+    if (!isValidCameraIndex(cameraIndex))
+    {
+        return QString();
+    }
+
+    QSettings settings;
+    const QString savedPath = settings.value(cameraAlgorithmSettingsKey(cameraIndex)).toString();
+    if (!savedPath.isEmpty() && QFileInfo::exists(savedPath))
+    {
+        return savedPath;
+    }
+
+    const QString defaultPath = defaultCameraAlgorithmPath(cameraIndex);
+    if (QFileInfo::exists(defaultPath))
+    {
+        return defaultPath;
+    }
+    return QString();
+}
+
 bool MainWindow::loadCameraAlgorithm(int cameraIndex, const QString& path)
 {
     if (!isValidCameraIndex(cameraIndex))
@@ -635,6 +698,8 @@ bool MainWindow::loadCameraAlgorithm(int cameraIndex, const QString& path)
     }
 
     camera.algorithmPath = camera.runner.sourcePath();
+    QSettings settings;
+    settings.setValue(cameraAlgorithmSettingsKey(cameraIndex), camera.algorithmPath);
     showFrame(m_timelineFrame);
     statusBar()->showMessage(QStringLiteral("已导入摄像头 %1 处理代码").arg(cameraIndex + 1), 3000);
     return true;
@@ -839,9 +904,12 @@ void MainWindow::updateCameraInfo(const CameraChannel& camera)
     }
 
     QLabel* label = m_cameraInfoLabels[camera.index];
+    const QString algorithmName = camera.algorithmPath.isEmpty()
+        ? QStringLiteral("未加载")
+        : QFileInfo(camera.algorithmPath).fileName();
     if (!camera.loaded || !camera.reader.isOpen())
     {
-        label->setText(QStringLiteral("未导入视频"));
+        label->setText(QStringLiteral("未导入视频\n处理代码：%1").arg(algorithmName));
         return;
     }
 
@@ -856,6 +924,7 @@ void MainWindow::updateCameraInfo(const CameraChannel& camera)
 
     QStringList lines;
     lines << QStringLiteral("帧：%1 / %2").arg(frame).arg(qMax(0, camera.reader.frameCount() - 1));
+    lines << QStringLiteral("处理代码：%1").arg(algorithmName);
     lines << QStringLiteral("识别数量：%1").arg(validCircleCount(camera.currentResult));
     for (int i = 0; i < camera.currentResult.count && i < BEACON_MAX_CIRCLE_COUNT; ++i)
     {

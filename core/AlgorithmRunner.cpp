@@ -141,6 +141,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     arguments << QStringLiteral("-shared")
               << QStringLiteral("-O2")
               << QStringLiteral("-std=c11")
+              << QStringLiteral("-DBEACON_DESKTOP_STANDALONE")
               << QStringLiteral("-I") << sourceInfo.absolutePath()
               << QStringLiteral("-I") << projectAlgorithmIncludeDir()
               << QStringLiteral("-o") << outputPath

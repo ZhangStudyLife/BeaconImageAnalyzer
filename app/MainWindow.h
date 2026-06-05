@@ -94,6 +94,8 @@ private:
     void buildUi();
     void buildMenus();
     void buildCameraPanel(QGridLayout* layout, int cameraIndex, int column);
+    void loadStartupAlgorithms();
+    QString savedOrDefaultAlgorithmPath(int cameraIndex) const;
     bool loadCameraVideo(int cameraIndex, const QString& path);
     bool loadCameraAlgorithm(int cameraIndex, const QString& path);
     bool hasAnyVideo() const;

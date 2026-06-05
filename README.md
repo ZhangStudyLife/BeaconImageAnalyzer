@@ -25,6 +25,18 @@ uint8 *image_get_frame_buffer(void);
 
 检测结果通过 `g_image_beacons`、`g_image_beacon_count`、`g_image_car_lamps`、`g_image_car_lamp_count` 输出，相关结构体定义位于 `algorithm/image.h`。
 
+## 默认三路算法加载
+
+软件启动时会自动为三个窗口加载并动态编译以下处理代码：
+
+- 摄像头 0 / 左窗口：`D:\HDUASC-SmartCar-21st-FlyOverMinefield\CYT2BL3_Image\project\code\Image\image.c`
+- 摄像头 1 / 中间窗口：`D:\HDUASC-SmartCar-21st-FlyOverMinefield\CYT2BL3_Image\project\code\Image\image_down.c`
+- 摄像头 2 / 右窗口：`D:\HDUASC-SmartCar-21st-FlyOverMinefield\CYT2BL3_Image\project\code\Image\image.c`
+
+如果通过 `文件 / 导入摄像头 N 处理代码` 手动导入过某个窗口的 `.c` 文件，软件会记住该窗口的导入路径；下次启动时优先使用记住的路径。如果记住的文件不存在，则回退到上面的默认路径。
+
+只修改 D 盘这两份算法 `.c` 文件时，不需要执行 `tools/build.ps1`。启动软件时会重新动态编译当前文件；如果软件已经打开，则重新导入对应窗口的处理代码，或重启软件后生效。只有修改本项目 `E:\BeaconImageAnalyzer` 内的 C++/Qt 上位机代码时，才需要重新执行 `tools/build.ps1` 构建软件。
+
 ## 构建
 
 本机预期工具链：
