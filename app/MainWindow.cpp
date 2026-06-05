@@ -814,6 +814,7 @@ void MainWindow::renderCamera(CameraChannel* camera)
     }
 
     const TrackedBeaconPoint trackedPoint = m_beaconTracker.currentPointForCamera(camera->index);
+    const ExpectedBeaconSearchArea expectedSearchArea = m_beaconTracker.expectedSearchAreaForCamera(camera->index);
     const QImage rendered = FrameRenderer::render(displayImage,
                                                   camera->currentResult,
                                                   corrections,
@@ -821,7 +822,8 @@ void MainWindow::renderCamera(CameraChannel* camera)
                                                   m_showOverlay,
                                                   DetectionBoundaryRules::boundaryForCameraIndex(camera->index),
                                                   camera->index,
-                                                  &trackedPoint);
+                                                  &trackedPoint,
+                                                  &expectedSearchArea);
     widget->setFrameGeometry(QSize(camera->reader.width(), camera->reader.height()), 1);
     widget->setPixelSourceImage(camera->currentGray);
     widget->setImage(rendered);

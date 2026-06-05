@@ -144,6 +144,60 @@ void drawTrackedPoint(QPainter& painter, const TrackedBeaconPoint* trackedPoint,
     }
 }
 
+void drawExpectedSearchArea(QPainter& painter,
+                            const ExpectedBeaconSearchArea* searchArea,
+                            int cameraIndex,
+                            int safeScale)
+{
+    if (searchArea == nullptr || !searchArea->valid || searchArea->cameraIndex != cameraIndex)
+    {
+        return;
+    }
+
+    const QColor color(0, 255, 255);
+    const int centerX = roundFloatToInt((float)searchArea->center.x());
+    const int centerY = roundFloatToInt((float)searchArea->center.y());
+    const int radius = qMax(1, roundFloatToInt(searchArea->radius));
+    const int radius2 = radius * radius;
+    const int band = qMax(1, radius / 10);
+    const int inner = qMax(0, radius - band);
+    const int outer = radius + band;
+    const int inner2 = inner * inner;
+    const int outer2 = outer * outer;
+
+    for (int y = centerY - outer; y <= centerY + outer; ++y)
+    {
+        for (int x = centerX - outer; x <= centerX + outer; ++x)
+        {
+            const int dx = x - centerX;
+            const int dy = y - centerY;
+            const int d2 = dx * dx + dy * dy;
+            if (d2 < inner2 || d2 > outer2)
+            {
+                continue;
+            }
+            if (((x + y) / 4) % 2 != 0)
+            {
+                continue;
+            }
+            fillScaledPixel(painter, x, y, safeScale, color);
+        }
+    }
+
+    for (int d = -radius; d <= radius; ++d)
+    {
+        if ((d / 4) % 2 != 0)
+        {
+            continue;
+        }
+        if (d * d <= radius2)
+        {
+            fillScaledPixel(painter, centerX + d, centerY, safeScale, color);
+            fillScaledPixel(painter, centerX, centerY + d, safeScale, color);
+        }
+    }
+}
+
 void drawDetectionBoundary(QPainter& painter, const DetectionBoundary* boundary, int safeScale)
 {
     if (boundary == nullptr)
@@ -339,7 +393,8 @@ QImage FrameRenderer::render(const QImage& grayImage,
                              bool showOverlay,
                              const DetectionBoundary* boundary,
                              int cameraIndex,
-                             const TrackedBeaconPoint* trackedPoint)
+                             const TrackedBeaconPoint* trackedPoint,
+                             const ExpectedBeaconSearchArea* expectedSearchArea)
 {
     const int safeScale = qMax(1, scale);
     QImage base = grayImage.convertToFormat(QImage::Format_RGB32);
@@ -363,6 +418,7 @@ QImage FrameRenderer::render(const QImage& grayImage,
     painter.setBrush(Qt::NoBrush);
     drawDetectionBoundary(painter, boundary, safeScale);
     drawMappedBoundaryCurves(painter, cameraIndex, safeScale);
+    drawExpectedSearchArea(painter, expectedSearchArea, cameraIndex, safeScale);
     drawBeaconMarkers(painter, result, safeScale);
     drawCarLampMarkers(painter, result, safeScale);
     drawTrackedPoint(painter, trackedPoint, cameraIndex, safeScale);

@@ -1,6 +1,7 @@
 #include "CrossCameraBeaconTracker.h"
 
 #include "CameraBoundaryMapping.h"
+#include "DetectionBoundary.h"
 
 #include <QtGlobal>
 #include <cmath>
@@ -11,6 +12,7 @@
 #define TRACKER_RADIUS_MATCH_SCALE           3.0f
 #define TRACKER_CROSS_CAMERA_MATCH_RADIUS    30.0f
 #define TRACKER_MAX_MISSING_FRAMES           3
+#define TRACKER_EDGE_EXIT_MARGIN             8.0f
 #define TRACKER_FRONT_CAMERA_INDEX           0
 #define TRACKER_CENTER_CAMERA_INDEX          1
 #define TRACKER_REAR_CAMERA_INDEX            2
@@ -27,6 +29,15 @@ float distanceSquared(const QPointF& lhs, const QPointF& rhs)
     const float dx = (float)(lhs.x() - rhs.x());
     const float dy = (float)(lhs.y() - rhs.y());
     return dx * dx + dy * dy;
+}
+
+int roundFloatToInt(float value)
+{
+    if (value >= 0.0f)
+    {
+        return (int)(value + 0.5f);
+    }
+    return (int)(value - 0.5f);
 }
 
 float candidateScore(float area, float radius)
@@ -59,11 +70,38 @@ bool mapBoundaryToCenter(int sourceCameraIndex, const QPointF& sourcePoint, QPoi
     }
     if (sourceCameraIndex == TRACKER_REAR_CAMERA_INDEX)
     {
-        const float sourceX = (float)sourcePoint.x();
+        const float sourceX = (float)BEACON_IMAGE_W - (float)sourcePoint.x();
         *centerPoint = CameraBoundaryMapping::rearBoundaryToCenter(sourceX);
         return true;
     }
     return false;
+}
+
+bool isNearImageEdge(const QPointF& point)
+{
+    return point.x() <= TRACKER_EDGE_EXIT_MARGIN ||
+           point.x() >= (float)(BEACON_IMAGE_W - 1) - TRACKER_EDGE_EXIT_MARGIN ||
+           point.y() <= TRACKER_EDGE_EXIT_MARGIN ||
+           point.y() >= (float)(BEACON_IMAGE_H - 1) - TRACKER_EDGE_EXIT_MARGIN;
+}
+
+bool isNearCropBoundary(int cameraIndex, const QPointF& point)
+{
+    const DetectionBoundary* boundary = DetectionBoundaryRules::boundaryForCameraIndex(cameraIndex);
+    if (boundary == nullptr)
+    {
+        return false;
+    }
+
+    bool valid = false;
+    const QPointF boundaryPoint =
+        DetectionBoundaryRules::imagePointForX(*boundary, roundFloatToInt((float)point.x()), &valid);
+    return valid && qAbs(boundaryPoint.y() - point.y()) <= TRACKER_EDGE_EXIT_MARGIN;
+}
+
+bool isNearExitEdge(int cameraIndex, const QPointF& point)
+{
+    return isNearImageEdge(point) || isNearCropBoundary(cameraIndex, point);
 }
 }
 
@@ -71,6 +109,7 @@ void CrossCameraBeaconTracker::reset()
 {
     m_history.clear();
     m_predictedPoint = TrackedBeaconPoint();
+    m_expectedSearchArea = ExpectedBeaconSearchArea();
     m_active = false;
     m_missingFrameCount = 0;
 }
@@ -126,6 +165,7 @@ bool CrossCameraBeaconTracker::update(const std::array<beacon_result_t, CameraCo
     {
         appendPoint(nextPoint);
         m_predictedPoint = TrackedBeaconPoint();
+        m_expectedSearchArea = ExpectedBeaconSearchArea();
         m_missingFrameCount = 0;
         return true;
     }
@@ -134,6 +174,7 @@ bool CrossCameraBeaconTracker::update(const std::array<beacon_result_t, CameraCo
     {
         appendPoint(nextPoint);
         m_predictedPoint = TrackedBeaconPoint();
+        m_expectedSearchArea = ExpectedBeaconSearchArea();
         m_missingFrameCount = 0;
         return true;
     }
@@ -152,7 +193,15 @@ bool CrossCameraBeaconTracker::update(const std::array<beacon_result_t, CameraCo
     m_active = false;
     if (errorMessage != nullptr)
     {
-        *errorMessage = QStringLiteral("追踪失败：当前帧未找到可匹配的同一信标灯。");
+        if (m_expectedSearchArea.valid)
+        {
+            *errorMessage = QStringLiteral("追踪失败：目标疑似从摄像头 %1 边缘消失，已映射到中摄期望位置，但中摄期望范围内没有找到同一信标灯。")
+                .arg(m_expectedSearchArea.sourceCameraIndex + 1);
+        }
+        else
+        {
+            *errorMessage = QStringLiteral("追踪失败：当前帧未找到可匹配的同一信标灯。");
+        }
     }
     return false;
 }
@@ -173,6 +222,15 @@ TrackedBeaconPoint CrossCameraBeaconTracker::currentPointForCamera(int cameraInd
         return TrackedBeaconPoint();
     }
     return m_history.back();
+}
+
+ExpectedBeaconSearchArea CrossCameraBeaconTracker::expectedSearchAreaForCamera(int cameraIndex) const
+{
+    if (m_active || !m_expectedSearchArea.valid || m_expectedSearchArea.cameraIndex != cameraIndex)
+    {
+        return ExpectedBeaconSearchArea();
+    }
+    return m_expectedSearchArea;
 }
 
 QString CrossCameraBeaconTracker::statusText() const
@@ -283,7 +341,7 @@ bool CrossCameraBeaconTracker::updateInCurrentCamera(const QVector<Candidate>& c
 
 bool CrossCameraBeaconTracker::updateAcrossCamera(const std::array<beacon_result_t, CameraCount>& results,
                                                   int timelineFrame,
-                                                  TrackedBeaconPoint* nextPoint) const
+                                                  TrackedBeaconPoint* nextPoint)
 {
     if (nextPoint == nullptr || m_history.isEmpty())
     {
@@ -291,11 +349,32 @@ bool CrossCameraBeaconTracker::updateAcrossCamera(const std::array<beacon_result
     }
 
     const TrackedBeaconPoint& lastPoint = m_history.back();
-    QPointF mappedCenter;
-    if (!mapBoundaryToCenter(lastPoint.cameraIndex, lastPoint.imagePoint, &mappedCenter))
+    if (lastPoint.cameraIndex != TRACKER_FRONT_CAMERA_INDEX &&
+        lastPoint.cameraIndex != TRACKER_REAR_CAMERA_INDEX)
     {
         return false;
     }
+
+    const QPointF predictedPoint = predictedImagePoint(timelineFrame);
+    const bool lastPointNearEdge = isNearExitEdge(lastPoint.cameraIndex, lastPoint.imagePoint);
+    const bool predictedPointNearEdge = isNearExitEdge(lastPoint.cameraIndex, predictedPoint);
+    if (!lastPointNearEdge && !predictedPointNearEdge)
+    {
+        return false;
+    }
+
+    const QPointF sourcePoint = predictedPointNearEdge ? predictedPoint : lastPoint.imagePoint;
+    QPointF mappedCenter;
+    if (!mapBoundaryToCenter(lastPoint.cameraIndex, sourcePoint, &mappedCenter))
+    {
+        return false;
+    }
+
+    m_expectedSearchArea.cameraIndex = TRACKER_CENTER_CAMERA_INDEX;
+    m_expectedSearchArea.sourceCameraIndex = lastPoint.cameraIndex;
+    m_expectedSearchArea.center = mappedCenter;
+    m_expectedSearchArea.radius = TRACKER_CROSS_CAMERA_MATCH_RADIUS;
+    m_expectedSearchArea.valid = true;
 
     const QVector<Candidate> centerCandidates =
         candidatesForCamera(results[(size_t)TRACKER_CENTER_CAMERA_INDEX], TRACKER_CENTER_CAMERA_INDEX);
@@ -320,6 +399,7 @@ bool CrossCameraBeaconTracker::updateAcrossCamera(const std::array<beacon_result
         return false;
     }
 
+    m_expectedSearchArea = ExpectedBeaconSearchArea();
     nextPoint->cameraIndex = best.cameraIndex;
     nextPoint->frame = timelineFrame;
     nextPoint->imagePoint = best.imagePoint;

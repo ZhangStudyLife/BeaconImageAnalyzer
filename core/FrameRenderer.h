@@ -20,7 +20,8 @@ public:
                          bool showOverlay,
                          const DetectionBoundary* boundary = nullptr,
                          int cameraIndex = -1,
-                         const TrackedBeaconPoint* trackedPoint = nullptr);
+                         const TrackedBeaconPoint* trackedPoint = nullptr,
+                         const ExpectedBeaconSearchArea* expectedSearchArea = nullptr);
 };
 
 #endif

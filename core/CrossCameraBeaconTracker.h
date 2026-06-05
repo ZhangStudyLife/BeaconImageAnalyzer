@@ -19,6 +19,15 @@ struct TrackedBeaconPoint
     bool valid = false;
 };
 
+struct ExpectedBeaconSearchArea
+{
+    int cameraIndex = -1;
+    int sourceCameraIndex = -1;
+    QPointF center;
+    float radius = 0.0f;
+    bool valid = false;
+};
+
 class CrossCameraBeaconTracker
 {
 public:
@@ -29,6 +38,7 @@ public:
     bool update(const std::array<beacon_result_t, CameraCount>& results, int timelineFrame, QString* errorMessage);
     bool active() const;
     TrackedBeaconPoint currentPointForCamera(int cameraIndex) const;
+    ExpectedBeaconSearchArea expectedSearchAreaForCamera(int cameraIndex) const;
     QString statusText() const;
 
 private:
@@ -48,12 +58,13 @@ private:
                                TrackedBeaconPoint* nextPoint) const;
     bool updateAcrossCamera(const std::array<beacon_result_t, CameraCount>& results,
                             int timelineFrame,
-                            TrackedBeaconPoint* nextPoint) const;
+                            TrackedBeaconPoint* nextPoint);
     QPointF predictedImagePoint(int timelineFrame) const;
     void appendPoint(const TrackedBeaconPoint& point);
 
     QVector<TrackedBeaconPoint> m_history;
     TrackedBeaconPoint m_predictedPoint;
+    ExpectedBeaconSearchArea m_expectedSearchArea;
     bool m_active = false;
     int m_missingFrameCount = 0;
 };
