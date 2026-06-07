@@ -7,7 +7,7 @@ namespace
 {
 constexpr DetectionBoundary FrontBoundary = {
     2U,
-    { 9.0000000f, -0.003202929f, 0.003202929f, 0.0f },
+    { 6.0f, -13.0f / 8742.0f, 13.0f / 8742.0f, 0.0f },
     1.0f,
     -93.000f,
     94.000f,
@@ -16,7 +16,7 @@ constexpr DetectionBoundary FrontBoundary = {
 
 constexpr DetectionBoundary RearBoundary = {
     2U,
-    { 14.0000000f, -7.0f / 4371.0f, 7.0f / 4371.0f, 0.0f },
+    { 6.0f, -13.0f / 8742.0f, 13.0f / 8742.0f, 0.0f },
     1.0f,
     -93.000f,
     94.000f,

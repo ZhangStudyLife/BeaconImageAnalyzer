@@ -11,7 +11,7 @@
 #define TRACKER_BASE_MATCH_RADIUS            14.0f
 #define TRACKER_RADIUS_MATCH_SCALE           3.0f
 #define TRACKER_CROSS_CAMERA_MATCH_RADIUS    30.0f
-#define TRACKER_MAX_MISSING_FRAMES           3
+#define TRACKER_MAX_MISSING_FRAMES           5
 #define TRACKER_EDGE_EXIT_MARGIN             8.0f
 #define TRACKER_FRONT_CAMERA_INDEX           0
 #define TRACKER_CENTER_CAMERA_INDEX          1

@@ -133,7 +133,12 @@ QString defaultCameraAlgorithmPath(int cameraIndex)
 {
     const QString baseDir = QStringLiteral("D:/HDUASC-SmartCar-21st-FlyOverMinefield/CYT2BL3_Image/project/code/Image");
     const QString fileName = cameraIndex == 1 ? QStringLiteral("image_down.c") : QStringLiteral("image.c");
-    return QDir(baseDir).absoluteFilePath(fileName);
+    const QString externalPath = QDir(baseDir).absoluteFilePath(fileName);
+    if (QFileInfo::exists(externalPath))
+    {
+        return externalPath;
+    }
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../algorithm/image.c"));
 }
 
 QString cameraAlgorithmSettingsKey(int cameraIndex)

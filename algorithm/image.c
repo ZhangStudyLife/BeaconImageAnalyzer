@@ -97,6 +97,11 @@ typedef struct
 #define BEACON_LAMP_NEW_SLOT_NEAR_AREA 28
 #define BEACON_LAMP_NEW_SLOT_DISTANCE 32.0f
 #define BEACON_LAMP_NEW_SLOT_EDGE_MARGIN 4
+#define BEACON_LAMP_SPLIT_MIN_SOURCE_ELONGATION 2.4f
+#define BEACON_LAMP_SPLIT_MIN_SIDE_WIDTH 6
+#define BEACON_LAMP_SPLIT_MIN_SIDE_AREA 18
+#define BEACON_LAMP_SPLIT_BEACON_MAX_SPAN 16
+#define BEACON_LAMP_SPLIT_BEACON_MAX_ELONGATION 1.8f
 #define BEACON_TRACKED_SLOT_LIMIT     4
 #define BEACON_DUPLICATE_DISTANCE     5.0f
 #define BEACON_TRACK_MATCH_DISTANCE   36.0f
@@ -486,6 +491,203 @@ static float lamp_score(const component_t *comp)
     return (float)comp->area * comp->elongation;
 }
 
+static component_t component_from_threshold_box(
+    const component_t *source,
+    int min_x,
+    int max_x,
+    unsigned char threshold)
+{
+    int x;
+    int y;
+    int sum_x = 0;
+    int sum_y = 0;
+    float sum_xx = 0.0f;
+    float sum_yy = 0.0f;
+    float sum_xy = 0.0f;
+    component_t comp;
+
+    memset(&comp, 0, sizeof(comp));
+    comp.min_x = BEACON_IMAGE_W;
+    comp.min_y = BEACON_IMAGE_H;
+    if (source == 0 || g_current_image == 0)
+    {
+        return comp;
+    }
+
+    if (min_x < source->min_x) min_x = source->min_x;
+    if (max_x > source->max_x) max_x = source->max_x;
+    if (min_x > max_x)
+    {
+        return comp;
+    }
+
+    for (y = source->min_y; y <= source->max_y; y++)
+    {
+        for (x = min_x; x <= max_x; x++)
+        {
+            if (g_current_image[y][x] < threshold)
+            {
+                continue;
+            }
+            comp.area++;
+            sum_x += x;
+            sum_y += y;
+            sum_xx += (float)x * (float)x;
+            sum_yy += (float)y * (float)y;
+            sum_xy += (float)x * (float)y;
+            if (x < comp.min_x) comp.min_x = x;
+            if (x > comp.max_x) comp.max_x = x;
+            if (y < comp.min_y) comp.min_y = y;
+            if (y > comp.max_y) comp.max_y = y;
+        }
+    }
+
+    if (comp.area > 0)
+    {
+        float inv_area = 1.0f / (float)comp.area;
+        float var_x;
+        float var_y;
+        float cov_xy;
+        float trace;
+        float det;
+        float disc;
+        float eig_major;
+        float eig_minor;
+
+        comp.cx = (float)sum_x * inv_area;
+        comp.cy = (float)sum_y * inv_area;
+        var_x = sum_xx * inv_area - comp.cx * comp.cx;
+        var_y = sum_yy * inv_area - comp.cy * comp.cy;
+        cov_xy = sum_xy * inv_area - comp.cx * comp.cy;
+        trace = var_x + var_y;
+        det = var_x * var_y - cov_xy * cov_xy;
+        disc = trace * trace * 0.25f - det;
+        if (disc < 0.0f)
+        {
+            disc = 0.0f;
+        }
+        eig_major = trace * 0.5f + sqrtf(disc);
+        eig_minor = trace * 0.5f - sqrtf(disc);
+        if (eig_minor < 0.0f)
+        {
+            eig_minor = 0.0f;
+        }
+
+        comp.major = 4.0f * sqrtf(eig_major + 0.0001f);
+        comp.minor = 4.0f * sqrtf(eig_minor + 0.0001f);
+        if (comp.minor < 1.0f)
+        {
+            comp.minor = 1.0f;
+        }
+        comp.elongation = comp.major / comp.minor;
+        comp.angle = 0.5f * atan2f(2.0f * cov_xy, var_x - var_y) * 180.0f / PI_F;
+        comp.radius = sqrtf((float)comp.area / PI_F);
+        comp.valid = 1;
+    }
+
+    return comp;
+}
+
+static unsigned char split_beacon_from_lamp(component_t *lamp)
+{
+    int x;
+    int best_x = -1;
+    int best_count = 0;
+    int source_w;
+    component_t left;
+    component_t right;
+    component_t *beacon_side;
+    component_t *lamp_side;
+
+    if (lamp == 0 ||
+        lamp->valid == 0 ||
+        g_current_image == 0 ||
+        lamp->elongation < BEACON_LAMP_SPLIT_MIN_SOURCE_ELONGATION)
+    {
+        return 0;
+    }
+
+    source_w = lamp->max_x - lamp->min_x + 1;
+    if (source_w <
+        BEACON_LAMP_SPLIT_MIN_SIDE_WIDTH * 2 + 1)
+    {
+        return 0;
+    }
+
+    for (x = lamp->min_x + BEACON_LAMP_SPLIT_MIN_SIDE_WIDTH;
+         x <= lamp->max_x - BEACON_LAMP_SPLIT_MIN_SIDE_WIDTH;
+         x++)
+    {
+        int y;
+        int count = 0;
+        for (y = lamp->min_y; y <= lamp->max_y; y++)
+        {
+            if (g_current_image[y][x] >= BEACON_CAR_LAMP_THRESHOLD)
+            {
+                count++;
+            }
+        }
+        if (best_x < 0 || count < best_count)
+        {
+            best_x = x;
+            best_count = count;
+        }
+    }
+
+    if (best_x < 0)
+    {
+        return 0;
+    }
+
+    left = component_from_threshold_box(
+        lamp,
+        lamp->min_x,
+        best_x - 1,
+        BEACON_CAR_LAMP_THRESHOLD);
+    right = component_from_threshold_box(
+        lamp,
+        best_x + 1,
+        lamp->max_x,
+        BEACON_CAR_LAMP_THRESHOLD);
+    if (left.area < BEACON_LAMP_SPLIT_MIN_SIDE_AREA ||
+        right.area < BEACON_LAMP_SPLIT_MIN_SIDE_AREA)
+    {
+        return 0;
+    }
+
+    if (left.elongation <= BEACON_LAMP_SPLIT_BEACON_MAX_ELONGATION &&
+        right.elongation > left.elongation)
+    {
+        beacon_side = &left;
+        lamp_side = &right;
+    }
+    else if (right.elongation <= BEACON_LAMP_SPLIT_BEACON_MAX_ELONGATION &&
+             left.elongation > right.elongation)
+    {
+        beacon_side = &right;
+        lamp_side = &left;
+    }
+    else
+    {
+        return 0;
+    }
+
+    if ((beacon_side->max_x - beacon_side->min_x + 1) >
+            BEACON_LAMP_SPLIT_BEACON_MAX_SPAN ||
+        (beacon_side->max_y - beacon_side->min_y + 1) >
+            BEACON_LAMP_SPLIT_BEACON_MAX_SPAN)
+    {
+        return 0;
+    }
+    if (!is_lamp_candidate(lamp_side))
+    {
+        return 0;
+    }
+
+    *lamp = *lamp_side;
+    return 1;
+}
+
 static unsigned char find_car_lamp(component_t *best_lamp)
 {
     unsigned char x;
@@ -515,6 +717,7 @@ static unsigned char find_car_lamp(component_t *best_lamp)
             {
                 continue;
             }
+            (void)split_beacon_from_lamp(&comp);
 
             if (g_lamp_mask_component_count <
                 (unsigned char)(BEACON_MAX_CAR_LAMP_COUNT + 3))
@@ -692,7 +895,7 @@ static unsigned char is_beacon_candidate(const component_t *comp)
     if (g_has_current_lamp == 0 &&
         comp->area < BEACON_NO_LAMP_SMALL_AREA &&
         comp->elongation > BEACON_NO_LAMP_SMALL_ELONGATION &&
-        (g_seen_lamp != 0 || background > BEACON_DARK_SMALL_BACKGROUND_MAX))
+        (g_lamp_context_frames > 0 || background > BEACON_DARK_SMALL_BACKGROUND_MAX))
     {
         return 0;
     }
