@@ -57,14 +57,16 @@ private:
                                int timelineFrame,
                                TrackedBeaconPoint* nextPoint) const;
     bool updateAcrossCamera(const std::array<beacon_result_t, CameraCount>& results,
+                            const TrackedBeaconPoint& sourcePoint,
                             int timelineFrame,
-                            TrackedBeaconPoint* nextPoint);
-    QPointF predictedImagePoint(int timelineFrame) const;
+                            TrackedBeaconPoint* nextPoint) const;
+    bool isNearCropBoundary(int cameraIndex, const QPointF& point, QPointF* boundaryPoint) const;
+    Candidate findNearestCandidate(const QVector<Candidate>& candidates,
+                                   const QPointF& center,
+                                   float radius) const;
     void appendPoint(const TrackedBeaconPoint& point);
 
     QVector<TrackedBeaconPoint> m_history;
-    TrackedBeaconPoint m_predictedPoint;
-    ExpectedBeaconSearchArea m_expectedSearchArea;
     bool m_active = false;
     int m_missingFrameCount = 0;
 };

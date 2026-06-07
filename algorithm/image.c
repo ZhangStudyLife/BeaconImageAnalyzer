@@ -84,6 +84,10 @@ typedef struct
 #define BEACON_LAMP_TINY_Y            40.0f
 #define BEACON_LAMP_TINY_MAX_AREA     200
 #define BEACON_LAMP_TINY_BACKGROUND_MAX 30
+#define BEACON_LAMP_TINY_FAR_MAX_AREA 12
+#define BEACON_LAMP_TINY_FAR_MAX_SPAN 6
+#define BEACON_LAMP_TINY_FAR_DISTANCE 48.0f
+#define BEACON_LAMP_TINY_FAR_MAX_Y    100.0f
 #define BEACON_LAMP_MICRO_MAX_AREA    200
 #define BEACON_LAMP_MICRO_BACKGROUND_MAX 25
 #define BEACON_LOCAL_RING_PAD         3
@@ -816,6 +820,56 @@ static void write_car_lamp(const component_t *lamp, beacon_result_t *result)
     result->car_lamp_count = 1;
 }
 
+static unsigned char is_far_tiny_component_from_lamp(
+    const component_t *comp,
+    int background,
+    int bbox_span)
+{
+    float dx;
+    float dy;
+
+    if (comp == 0 || g_has_current_lamp == 0)
+    {
+        return 0;
+    }
+    if (comp->area > BEACON_LAMP_TINY_FAR_MAX_AREA ||
+        bbox_span > BEACON_LAMP_TINY_FAR_MAX_SPAN ||
+        comp->cy >= BEACON_LAMP_TINY_FAR_MAX_Y ||
+        background > BEACON_LAMP_TINY_BACKGROUND_MAX)
+    {
+        return 0;
+    }
+
+    dx = comp->cx - g_current_lamp.cx;
+    dy = comp->cy - g_current_lamp.cy;
+    return (dx * dx + dy * dy >=
+            BEACON_LAMP_TINY_FAR_DISTANCE * BEACON_LAMP_TINY_FAR_DISTANCE) ? 1 : 0;
+}
+
+static unsigned char is_far_tiny_candidate_from_lamp(
+    const beacon_candidate_t *candidate,
+    int bbox_span)
+{
+    float dx;
+    float dy;
+
+    if (candidate == 0 || g_has_current_lamp == 0)
+    {
+        return 0;
+    }
+    if (candidate->area > BEACON_LAMP_TINY_FAR_MAX_AREA ||
+        bbox_span > BEACON_LAMP_TINY_FAR_MAX_SPAN ||
+        candidate->image_y >= BEACON_LAMP_TINY_FAR_MAX_Y)
+    {
+        return 0;
+    }
+
+    dx = candidate->image_x - g_current_lamp.cx;
+    dy = candidate->image_y - g_current_lamp.cy;
+    return (dx * dx + dy * dy >=
+            BEACON_LAMP_TINY_FAR_DISTANCE * BEACON_LAMP_TINY_FAR_DISTANCE) ? 1 : 0;
+}
+
 static unsigned char is_beacon_candidate(const component_t *comp)
 {
     int bbox_w = comp->max_x - comp->min_x + 1;
@@ -857,7 +911,8 @@ static unsigned char is_beacon_candidate(const component_t *comp)
         if (g_has_current_lamp != 0 &&
             (comp->cy >= BEACON_LAMP_TINY_Y ||
              comp->area > BEACON_LAMP_TINY_MAX_AREA ||
-             background > BEACON_LAMP_TINY_BACKGROUND_MAX))
+             background > BEACON_LAMP_TINY_BACKGROUND_MAX) &&
+            is_far_tiny_component_from_lamp(comp, background, bbox_span) == 0)
         {
             return 0;
         }
@@ -1075,6 +1130,7 @@ static unsigned char can_fill_new_beacon_slot(const beacon_candidate_t *candidat
 {
     float dx;
     float dy;
+    int bbox_span;
 
     if (candidate == 0 || candidate->valid == 0)
     {
@@ -1110,6 +1166,7 @@ static unsigned char can_fill_new_beacon_slot(const beacon_candidate_t *candidat
     {
         dx = candidate->image_x - g_current_lamp.cx;
         dy = candidate->image_y - g_current_lamp.cy;
+        bbox_span = (int)(candidate->circle.radius * 2.0f + 1.0f);
         if (candidate->image_x <= BEACON_LAMP_NEW_SLOT_EDGE_MARGIN ||
             candidate->image_x >=
                 (float)(BEACON_IMAGE_W - 1 - BEACON_LAMP_NEW_SLOT_EDGE_MARGIN))
@@ -1117,7 +1174,8 @@ static unsigned char can_fill_new_beacon_slot(const beacon_candidate_t *candidat
             return 0;
         }
         if (g_new_slot_frames == 0 &&
-            candidate->image_y >= BEACON_TOP_BEACON_Y)
+            candidate->image_y >= BEACON_TOP_BEACON_Y &&
+            is_far_tiny_candidate_from_lamp(candidate, bbox_span) == 0)
         {
             return 0;
         }
