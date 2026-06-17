@@ -9,6 +9,9 @@
 #include <QRectF>
 #include <QtMath>
 
+#include <algorithm>
+#include <numeric>
+
 namespace
 {
 QString correctionType(const CorrectionShape& shape)
@@ -215,15 +218,38 @@ QImage FrameRenderer::render(const QImage& grayImage,
     }
 
     const int carLampCount = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
-    if (carLampCount >= 2 &&
-        result.car_lamps[0].valid != 0 &&
-        result.car_lamps[1].valid != 0)
+    QVector<QPointF> carLampPoints;
+    for (int i = 0; i < carLampCount; ++i)
+    {
+        if (result.car_lamps[i].valid != 0)
+        {
+            carLampPoints.push_back(displayPointForCircle(result.car_lamps[i], safeScale));
+        }
+    }
+    if (carLampPoints.size() >= 2)
     {
         QPen linkPen(QColor(255, 215, 0));
         linkPen.setWidth(qMax(1, safeScale / 2));
         painter.setPen(linkPen);
-        painter.drawLine(displayPointForCircle(result.car_lamps[0], safeScale),
-                         displayPointForCircle(result.car_lamps[1], safeScale));
+        if (carLampPoints.size() >= 4)
+        {
+            const QPointF center = std::accumulate(carLampPoints.cbegin(),
+                                                   carLampPoints.cend(),
+                                                   QPointF(0.0, 0.0)) /
+                                   (double)carLampPoints.size();
+            std::sort(carLampPoints.begin(), carLampPoints.end(), [&center](const QPointF& left, const QPointF& right) {
+                return qAtan2(left.y() - center.y(), left.x() - center.x()) <
+                       qAtan2(right.y() - center.y(), right.x() - center.x());
+            });
+            for (int i = 0; i < carLampPoints.size(); ++i)
+            {
+                painter.drawLine(carLampPoints[i], carLampPoints[(i + 1) % carLampPoints.size()]);
+            }
+        }
+        else
+        {
+            painter.drawLine(carLampPoints[0], carLampPoints[1]);
+        }
     }
     for (int i = 0; i < carLampCount; ++i)
     {

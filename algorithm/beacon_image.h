@@ -9,7 +9,7 @@ extern "C" {
 #define BEACON_IMAGE_H 120
 #define BEACON_MAX_CIRCLE_COUNT 8
 #define BEACON_MAX_BEACON_COUNT 8
-#define BEACON_MAX_CAR_LAMP_COUNT 2
+#define BEACON_MAX_CAR_LAMP_COUNT 4
 
 typedef struct
 {
