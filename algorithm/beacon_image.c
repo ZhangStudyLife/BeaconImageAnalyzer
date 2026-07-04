@@ -26,6 +26,10 @@ void beacon_image_init(void)
     memset(g_visited, 0, sizeof(g_visited));
 }
 
+void beacon_image_reset_temporal(void)
+{
+}
+
 static void clear_result(beacon_result_t *result)
 {
     int i;

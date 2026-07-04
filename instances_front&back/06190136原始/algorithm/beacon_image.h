@@ -37,22 +37,13 @@ typedef struct
     unsigned char beacon_count;
     beacon_rect_t car_lamps[BEACON_MAX_CAR_LAMP_COUNT];
     unsigned char car_lamp_count;
-    beacon_circle_t temporal_beacons[BEACON_MAX_BEACON_COUNT];
-    unsigned char temporal_beacon_count;
-    beacon_rect_t temporal_car_lamps[BEACON_MAX_CAR_LAMP_COUNT];
-    unsigned char temporal_car_lamp_count;
 } beacon_result_t;
 
 void beacon_image_init(void);
-void beacon_image_reset_temporal(void);
 
 void beacon_image_process(
     const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
     beacon_result_t *result
-);
-
-unsigned char beacon_image_debug_threshold(
-    const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W]
 );
 
 void beacon_image_debug_binary(

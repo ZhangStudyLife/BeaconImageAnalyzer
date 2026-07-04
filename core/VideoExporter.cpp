@@ -125,6 +125,29 @@ void writeCsvTarget(QTextStream& stream,
            << QString::number(circle.x, 'f', 3) << ','
            << QString::number(circle.y, 'f', 3) << ','
            << QString::number(circle.radius, 'f', 3) << ','
+           << ','
+           << ','
+           << groupId << '\n';
+}
+
+void writeCsvRectTarget(QTextStream& stream,
+                        int frame,
+                        double timeSec,
+                        const QString& targetType,
+                        int index,
+                        const beacon_rect_t& rect,
+                        const QString& groupId)
+{
+    stream << frame << ','
+           << QString::number(timeSec, 'f', 3) << ','
+           << targetType << ','
+           << index << ','
+           << (int)rect.valid << ','
+           << QString::number(rect.cx, 'f', 3) << ','
+           << QString::number(rect.cy, 'f', 3) << ','
+           << QString::number(rect.length, 'f', 3) << ','
+           << QString::number(rect.width, 'f', 3) << ','
+           << QString::number(rect.angle, 'f', 3) << ','
            << groupId << '\n';
 }
 }
@@ -156,6 +179,7 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
 
     AlgorithmRunner fallbackRunner;
     const AlgorithmRunner* activeRunner = runner != nullptr ? runner : &fallbackRunner;
+    activeRunner->resetTemporal();
     for (int frame = 0; frame < reader.frameCount(); ++frame)
     {
         QImage gray;
@@ -210,10 +234,11 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
     }
 
     QTextStream stream(&file);
-    stream << "frame,time_sec,target_type,index,valid,x,y,radius,group_id\n";
+    stream << "frame,time_sec,target_type,index,valid,x,y,radius_or_length,width,angle,group_id\n";
 
     AlgorithmRunner fallbackRunner;
     const AlgorithmRunner* activeRunner = runner != nullptr ? runner : &fallbackRunner;
+    activeRunner->resetTemporal();
     for (int frame = 0; frame < reader.frameCount(); ++frame)
     {
         QImage gray;
@@ -242,12 +267,12 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
         const int carLampCount = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
         for (int i = 0; i < carLampCount; ++i)
         {
-            const beacon_circle_t& circle = result.car_lamps[i];
-            if (circle.valid == 0)
+            const beacon_rect_t& rect = result.car_lamps[i];
+            if (rect.valid == 0)
             {
                 continue;
             }
-            writeCsvTarget(stream, frame, timeSec, QStringLiteral("car_lamp"), i, circle, QStringLiteral("car0"));
+            writeCsvRectTarget(stream, frame, timeSec, QStringLiteral("car_lamp"), i, rect, QStringLiteral("car0"));
         }
 
         if (progress && !progress(frame + 1, reader.frameCount()))

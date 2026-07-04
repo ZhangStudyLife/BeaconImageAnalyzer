@@ -91,6 +91,7 @@ bool copyGrayToAlgorithmImage(const QImage& grayImage,
 AlgorithmRunner::AlgorithmRunner()
 {
     beacon_image_init();
+    beacon_image_reset_temporal();
 }
 
 AlgorithmRunner::~AlgorithmRunner()
@@ -129,6 +130,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
         m_library.unload();
     }
     m_initFn = nullptr;
+    m_resetTemporalFn = nullptr;
     m_processFn = nullptr;
     m_binaryFn = nullptr;
 
@@ -168,6 +170,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     }
 
     m_initFn = reinterpret_cast<InitFn>(m_library.resolve("beacon_image_init"));
+    m_resetTemporalFn = reinterpret_cast<ResetTemporalFn>(m_library.resolve("beacon_image_reset_temporal"));
     m_processFn = reinterpret_cast<ProcessFn>(m_library.resolve("beacon_image_process"));
     m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
     if (m_processFn == nullptr)
@@ -184,6 +187,10 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     {
         m_initFn();
     }
+    if (m_resetTemporalFn != nullptr)
+    {
+        m_resetTemporalFn();
+    }
     m_sourcePath = sourceInfo.absoluteFilePath();
     return true;
 }
@@ -196,6 +203,19 @@ QString AlgorithmRunner::sourcePath() const
 bool AlgorithmRunner::usesDynamicLibrary() const
 {
     return m_processFn != nullptr;
+}
+
+void AlgorithmRunner::resetTemporal() const
+{
+    if (m_resetTemporalFn != nullptr)
+    {
+        m_resetTemporalFn();
+        return;
+    }
+    if (m_processFn == nullptr)
+    {
+        beacon_image_reset_temporal();
+    }
 }
 
 beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const

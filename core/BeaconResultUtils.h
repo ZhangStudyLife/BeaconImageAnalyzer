@@ -23,6 +23,19 @@ inline int validCircleCount(const beacon_circle_t* circles, int count)
     return validCount;
 }
 
+inline int validRectCount(const beacon_rect_t* rects, int count)
+{
+    int validCount = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        if (rects[i].valid != 0)
+        {
+            ++validCount;
+        }
+    }
+    return validCount;
+}
+
 inline int legacyCircleCount(const beacon_result_t& result)
 {
     return validCircleCount(result.circles, boundedCount(result.count, BEACON_MAX_CIRCLE_COUNT));
@@ -35,8 +48,20 @@ inline int nativeBeaconCount(const beacon_result_t& result)
 
 inline int carLampCount(const beacon_result_t& result)
 {
-    return validCircleCount(result.car_lamps,
-                            boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT));
+    return validRectCount(result.car_lamps,
+                          boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT));
+}
+
+inline int temporalBeaconCount(const beacon_result_t& result)
+{
+    return validCircleCount(result.temporal_beacons,
+                            boundedCount(result.temporal_beacon_count, BEACON_MAX_BEACON_COUNT));
+}
+
+inline int temporalCarLampCount(const beacon_result_t& result)
+{
+    return validRectCount(result.temporal_car_lamps,
+                          boundedCount(result.temporal_car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT));
 }
 
 inline bool usesLegacyBeacons(const beacon_result_t& result)

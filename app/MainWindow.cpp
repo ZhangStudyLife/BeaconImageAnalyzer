@@ -1611,7 +1611,7 @@ void MainWindow::renderInstance(AnalyzerInstance* instance)
 
     if (m_liveMode && !m_liveFrame.isNull())
     {
-        const beacon_result_t result = instance->runner.process(m_liveFrame);
+        const beacon_result_t result = processCausalFrame(instance, m_currentFrame, m_liveFrame);
         renderInstance(instance, m_liveFrame, result, m_currentFrame);
         return;
     }
@@ -1628,8 +1628,84 @@ void MainWindow::renderInstance(AnalyzerInstance* instance)
     {
         return;
     }
-    const beacon_result_t result = instance->runner.process(gray);
+    const beacon_result_t result = processCausalFrame(instance, frameIndex, gray);
     renderInstance(instance, gray, result, frameIndex);
+}
+
+void MainWindow::resetInstanceTemporal(AnalyzerInstance* instance)
+{
+    if (instance == nullptr)
+    {
+        return;
+    }
+    instance->runner.resetTemporal();
+    instance->temporalFrameCache.clear();
+    instance->temporalLastFrame = -1;
+}
+
+bool MainWindow::rebuildTemporalCacheToFrame(AnalyzerInstance* instance,
+                                             int targetFrame,
+                                             QString* errorMessage)
+{
+    if (instance == nullptr || !m_reader.isOpen())
+    {
+        return false;
+    }
+
+    resetInstanceTemporal(instance);
+    for (int frame = 0; frame <= targetFrame; ++frame)
+    {
+        QImage frameImage;
+        QString readError;
+        if (!m_reader.readFrame(frame, &frameImage, &readError))
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = readError;
+            }
+            return false;
+        }
+        const beacon_result_t result = instance->runner.process(frameImage);
+        instance->temporalFrameCache.insert(frame, result);
+        instance->temporalLastFrame = frame;
+    }
+    return true;
+}
+
+beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
+                                               int frameIndex,
+                                               const QImage& gray)
+{
+    beacon_result_t empty = {};
+    if (instance == nullptr || gray.isNull())
+    {
+        return empty;
+    }
+
+    if (instance->temporalFrameCache.contains(frameIndex))
+    {
+        return instance->temporalFrameCache.value(frameIndex);
+    }
+
+    if (m_liveMode || frameIndex == instance->temporalLastFrame + 1)
+    {
+        if (frameIndex != instance->temporalLastFrame + 1)
+        {
+            resetInstanceTemporal(instance);
+        }
+        const beacon_result_t result = instance->runner.process(gray);
+        instance->temporalFrameCache.insert(frameIndex, result);
+        instance->temporalLastFrame = frameIndex;
+        return result;
+    }
+
+    QString error;
+    if (rebuildTemporalCacheToFrame(instance, frameIndex, &error))
+    {
+        return instance->temporalFrameCache.value(frameIndex);
+    }
+
+    return instance->runner.process(gray);
 }
 
 void MainWindow::renderInstance(AnalyzerInstance* instance,
@@ -1689,14 +1765,22 @@ void MainWindow::renderAllDisplayedInstances(const QImage& gray,
             continue;
         }
 
+        beacon_result_t result = {};
+        bool hasResult = false;
         for (const auto& item : results)
         {
             if (item.first == instance)
             {
-                renderInstance(instance, gray, item.second, m_currentFrame);
+                result = item.second;
+                hasResult = true;
                 break;
             }
         }
+        if (!hasResult)
+        {
+            result = processCausalFrame(instance, m_currentFrame, gray);
+        }
+        renderInstance(instance, gray, result, m_currentFrame);
     }
     updateCurrentVideoWidget();
 }
@@ -1708,6 +1792,7 @@ void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QStr
         return;
     }
 
+    const bool wasLiveMode = m_liveMode;
     pause();
     m_liveMode = true;
     m_liveFrame = gray.convertToFormat(QImage::Format_Grayscale8);
@@ -1715,6 +1800,13 @@ void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QStr
     m_livePeerName = peerName;
     ++m_liveFrameIndex;
     m_currentFrame = qMax(0, m_liveFrameIndex);
+    if (!wasLiveMode)
+    {
+        for (AnalyzerInstance* instance : m_instances)
+        {
+            resetInstanceTemporal(instance);
+        }
+    }
 
     QVector<QPair<AnalyzerInstance*, beacon_result_t>> results;
     for (AnalyzerInstance* instance : m_instances)
@@ -1723,7 +1815,7 @@ void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QStr
         {
             continue;
         }
-        const beacon_result_t result = instance->runner.process(m_liveFrame);
+        const beacon_result_t result = processCausalFrame(instance, m_currentFrame, m_liveFrame);
         instance->currentResult = result;
         results.push_back(qMakePair(instance, result));
     }
@@ -2524,6 +2616,10 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
     m_currentVideoPath = path;
     m_currentFrame = fallbackFrame;
     m_liveMode = false;
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        resetInstanceTemporal(instance);
+    }
 
     m_slider->setRange(0, qMax(0, m_reader.frameCount() - 1));
     m_frameSpin->setRange(0, qMax(0, m_reader.frameCount() - 1));
@@ -2907,7 +3003,7 @@ void MainWindow::showFrame(int frameIndex)
         {
             continue;
         }
-        const beacon_result_t result = instance->runner.process(gray);
+        const beacon_result_t result = processCausalFrame(instance, frameIndex, gray);
         instance->currentResult = result;
         results.push_back(qMakePair(instance, result));
     }
@@ -3046,17 +3142,19 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
     const int carLampLimit = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
     for (int i = 0; i < carLampLimit; ++i)
     {
-        const beacon_circle_t& circle = result.car_lamps[i];
-        if (circle.valid == 0)
+        const beacon_rect_t& rect = result.car_lamps[i];
+        if (rect.valid == 0)
         {
             continue;
         }
-        const double area = 3.14159265358979323846 * circle.radius * circle.radius;
-        text += QStringLiteral("车灯 #%1  X=%2  Y=%3  R=%4  Area=%5\n")
+        const double area = rect.length * rect.width;
+        text += QStringLiteral("车灯 #%1  CX=%2  CY=%3  L=%4  W=%5  Angle=%6  Area=%7\n")
                     .arg(i)
-                    .arg(circle.x, 0, 'f', 2)
-                    .arg(circle.y, 0, 'f', 2)
-                    .arg(circle.radius, 0, 'f', 2)
+                    .arg(rect.cx, 0, 'f', 2)
+                    .arg(rect.cy, 0, 'f', 2)
+                    .arg(rect.length, 0, 'f', 2)
+                    .arg(rect.width, 0, 'f', 2)
+                    .arg(rect.angle, 0, 'f', 2)
                     .arg(area, 0, 'f', 2);
     }
 
@@ -3407,7 +3505,8 @@ bool MainWindow::processFrameForBatch(int frame, beacon_result_t* result, QStrin
         return false;
     }
 
-    *result = m_runner.process(gray);
+    MainWindow* self = const_cast<MainWindow*>(this);
+    *result = self->processCausalFrame(self->currentInstance(), frame, gray);
     return true;
 }
 

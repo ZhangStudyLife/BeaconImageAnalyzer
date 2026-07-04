@@ -8,6 +8,7 @@
 #include "beacon_image.h"
 
 #include <QMainWindow>
+#include <QHash>
 #include <QPair>
 #include <QTimer>
 
@@ -40,6 +41,8 @@ struct AnalyzerInstance
     int segmentEndFrame = -1;
     beacon_result_t currentResult = {};
     beacon_result_t previousAutoPauseResult = {};
+    QHash<int, beacon_result_t> temporalFrameCache;
+    int temporalLastFrame = -1;
     int previousAutoPauseFrame = -1;
     bool hasPreviousAutoPauseResult = false;
     QVector<int> pendingAutoBatchRows;
@@ -132,6 +135,9 @@ private:
     void renderAllDisplayedInstances();
     void renderAllDisplayedInstances(const QImage& gray,
                                      const QVector<QPair<AnalyzerInstance*, beacon_result_t>>& results);
+    void resetInstanceTemporal(AnalyzerInstance* instance);
+    beacon_result_t processCausalFrame(AnalyzerInstance* instance, int frameIndex, const QImage& gray);
+    bool rebuildTemporalCacheToFrame(AnalyzerInstance* instance, int targetFrame, QString* errorMessage);
     void showLiveFrame(const QImage& gray, quint16 localPort, const QString& peerName);
     int slotForInstance(int instanceId) const;
     int slotAtGlobalPos(const QPoint& globalPos) const;

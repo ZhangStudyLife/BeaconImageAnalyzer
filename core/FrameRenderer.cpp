@@ -9,9 +9,6 @@
 #include <QRectF>
 #include <QtMath>
 
-#include <algorithm>
-#include <numeric>
-
 namespace
 {
 QString correctionType(const CorrectionShape& shape)
@@ -163,6 +160,54 @@ QPointF displayPointForCircle(const beacon_circle_t& circle, int safeScale)
     const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(circle.x, circle.y);
     return QPointF(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
 }
+
+QPointF displayPointForRectCenter(const beacon_rect_t& rect, int safeScale)
+{
+    const QPointF imagePoint = FrameRenderer::algorithmToImagePoint(rect.cx, rect.cy);
+    return QPointF(imagePoint.x() * safeScale, imagePoint.y() * safeScale);
+}
+
+QPolygonF displayPolygonForRect(const beacon_rect_t& rect, int safeScale)
+{
+    const QPointF center = displayPointForRectCenter(rect, safeScale);
+    const qreal halfLength = qMax(1.0, (double)rect.length * safeScale * 0.5);
+    const qreal halfWidth = qMax(1.0, (double)rect.width * safeScale * 0.5);
+    const qreal radians = qDegreesToRadians((double)rect.angle);
+    const QPointF major(qCos(radians) * halfLength, qSin(radians) * halfLength);
+    const QPointF minor(-qSin(radians) * halfWidth, qCos(radians) * halfWidth);
+
+    QPolygonF polygon;
+    polygon << center - major - minor
+            << center + major - minor
+            << center + major + minor
+            << center - major + minor;
+    return polygon;
+}
+
+void drawTargetRect(QPainter& painter,
+                    const beacon_rect_t& rect,
+                    const QColor& rectColor,
+                    const QString& label,
+                    int safeScale)
+{
+    const QPointF center = displayPointForRectCenter(rect, safeScale);
+    const QPolygonF polygon = displayPolygonForRect(rect, safeScale);
+
+    QPen rectPen(rectColor);
+    rectPen.setWidth(qMax(1, safeScale / 2));
+    painter.setPen(rectPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPolygon(polygon);
+    painter.drawLine(QPointF(center.x() - safeScale, center.y()),
+                     QPointF(center.x() + safeScale, center.y()));
+    painter.drawLine(QPointF(center.x(), center.y() - safeScale),
+                     QPointF(center.x(), center.y() + safeScale));
+
+    painter.setPen(QColor(255, 235, 80));
+    painter.drawText(QPointF(center.x() + 2 * safeScale,
+                             center.y() - 2 * safeScale),
+                     label);
+}
 }
 
 QPointF FrameRenderer::algorithmToImagePoint(float x, float y)
@@ -218,52 +263,49 @@ QImage FrameRenderer::render(const QImage& grayImage,
     }
 
     const int carLampCount = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
-    QVector<QPointF> carLampPoints;
     for (int i = 0; i < carLampCount; ++i)
     {
-        if (result.car_lamps[i].valid != 0)
-        {
-            carLampPoints.push_back(displayPointForCircle(result.car_lamps[i], safeScale));
-        }
-    }
-    if (carLampPoints.size() >= 2)
-    {
-        QPen linkPen(QColor(255, 215, 0));
-        linkPen.setWidth(qMax(1, safeScale / 2));
-        painter.setPen(linkPen);
-        if (carLampPoints.size() >= 4)
-        {
-            const QPointF center = std::accumulate(carLampPoints.cbegin(),
-                                                   carLampPoints.cend(),
-                                                   QPointF(0.0, 0.0)) /
-                                   (double)carLampPoints.size();
-            std::sort(carLampPoints.begin(), carLampPoints.end(), [&center](const QPointF& left, const QPointF& right) {
-                return qAtan2(left.y() - center.y(), left.x() - center.x()) <
-                       qAtan2(right.y() - center.y(), right.x() - center.x());
-            });
-            for (int i = 0; i < carLampPoints.size(); ++i)
-            {
-                painter.drawLine(carLampPoints[i], carLampPoints[(i + 1) % carLampPoints.size()]);
-            }
-        }
-        else
-        {
-            painter.drawLine(carLampPoints[0], carLampPoints[1]);
-        }
-    }
-    for (int i = 0; i < carLampCount; ++i)
-    {
-        const beacon_circle_t& lamp = result.car_lamps[i];
+        const beacon_rect_t& lamp = result.car_lamps[i];
         if (lamp.valid == 0)
         {
             continue;
         }
 
-        drawTargetCircle(painter,
-                         lamp,
-                         QColor(255, 95, 45),
-                         QStringLiteral("CAR %1").arg(i),
-                         safeScale);
+        drawTargetRect(painter,
+                       lamp,
+                       QColor(255, 95, 45),
+                       QStringLiteral("CAR %1").arg(i),
+                       safeScale);
+    }
+
+    const int temporalBeaconCount = BeaconResultUtils::boundedCount(result.temporal_beacon_count,
+                                                                    BEACON_MAX_BEACON_COUNT);
+    for (int i = 0; i < temporalBeaconCount; ++i)
+    {
+        const beacon_circle_t& circle = result.temporal_beacons[i];
+        if (circle.valid == 0)
+        {
+            continue;
+        }
+
+        drawTargetCircle(painter, circle, QColor(255, 220, 40), QStringLiteral("KB%1").arg(i), safeScale);
+    }
+
+    const int temporalCarLampCount = BeaconResultUtils::boundedCount(result.temporal_car_lamp_count,
+                                                                     BEACON_MAX_CAR_LAMP_COUNT);
+    for (int i = 0; i < temporalCarLampCount; ++i)
+    {
+        const beacon_rect_t& lamp = result.temporal_car_lamps[i];
+        if (lamp.valid == 0)
+        {
+            continue;
+        }
+
+        drawTargetRect(painter,
+                       lamp,
+                       QColor(70, 150, 255),
+                       QStringLiteral("KCAR%1").arg(i),
+                       safeScale);
     }
 
     QPen correctionPen;
