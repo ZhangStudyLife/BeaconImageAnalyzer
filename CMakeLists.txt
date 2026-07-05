@@ -34,6 +34,8 @@ add_executable(BeaconImageAnalyzer
     app/MainWindow.cpp
     app/AiInstanceDialog.h
     app/AiInstanceDialog.cpp
+    app/LogReplayWindow.h
+    app/LogReplayWindow.cpp
     app/TcpImageWindow.h
     app/TcpImageWindow.cpp
     app/VideoWidget.h
@@ -45,6 +47,8 @@ add_executable(BeaconImageAnalyzer
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
     core/BeaconResultUtils.h
+    core/JustFloatLog.h
+    core/JustFloatLog.cpp
     core/FrameRenderer.h
     core/FrameRenderer.cpp
     core/SeekfreeImageFrameParser.h

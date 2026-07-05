@@ -66,6 +66,7 @@ private slots:
     void importAlgorithmFile();
     void openVideo();
     void configureTcpReceiver();
+    void openJustFloatLogWindow();
     void saveAnnotation();
     void loadAnnotation();
     void exportMarkedAvi();
