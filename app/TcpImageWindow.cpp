@@ -325,6 +325,7 @@ void TcpImageWindow::setFrame(const QImage& grayImage, const QString& peerName)
     ++m_frameIndex;
     AlgorithmRunner* runner = selectedRunner();
     m_result = runner->process(m_grayImage);
+    m_processProfile = runner->lastProcessProfile();
     render();
 
     if (m_autoSave)
@@ -483,7 +484,7 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
         ? QStringLiteral("实例：%1").arg(m_instanceCombo->currentText())
         : QStringLiteral("实例：未启用");
     const QString recordText = m_recording ? QStringLiteral("录像中") : QStringLiteral("未录像");
-    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | 帧 %4 | 信标 %5 | 车灯 %6 | 总目标 %7 | %8")
+    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | 帧 %4 | 信标 %5 | 车灯 %6 | 总目标 %7 | %8 | %9")
                                .arg(listenText)
                                .arg(peerText)
                                .arg(instanceText)
@@ -491,6 +492,7 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
                                .arg(BeaconResultUtils::beaconCount(result))
                                .arg(BeaconResultUtils::carLampCount(result))
                                .arg(BeaconResultUtils::totalTargetCount(result))
+                               .arg(AlgorithmProcessProfiler::formatCompact(m_processProfile))
                                .arg(recordText));
 }
 

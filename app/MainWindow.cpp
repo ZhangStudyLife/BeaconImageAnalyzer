@@ -948,6 +948,7 @@ QStatusBar {
 #define m_segmentStartFrame (currentInstance()->segmentStartFrame)
 #define m_segmentEndFrame (currentInstance()->segmentEndFrame)
 #define m_currentResult (currentInstance()->currentResult)
+#define m_currentProfile (currentInstance()->currentProfile)
 #define m_pendingAutoBatchRows (currentInstance()->pendingAutoBatchRows)
 #define m_pendingAutoMatchedCorrections (currentInstance()->pendingAutoMatchedCorrections)
 
@@ -1640,6 +1641,7 @@ void MainWindow::resetInstanceTemporal(AnalyzerInstance* instance)
     }
     instance->runner.resetTemporal();
     instance->temporalFrameCache.clear();
+    instance->temporalProfileCache.clear();
     instance->temporalLastFrame = -1;
 }
 
@@ -1666,7 +1668,9 @@ bool MainWindow::rebuildTemporalCacheToFrame(AnalyzerInstance* instance,
             return false;
         }
         const beacon_result_t result = instance->runner.process(frameImage);
+        const AlgorithmProcessProfile profile = instance->runner.lastProcessProfile();
         instance->temporalFrameCache.insert(frame, result);
+        instance->temporalProfileCache.insert(frame, profile);
         instance->temporalLastFrame = frame;
     }
     return true;
@@ -1684,6 +1688,7 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
 
     if (instance->temporalFrameCache.contains(frameIndex))
     {
+        instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
         return instance->temporalFrameCache.value(frameIndex);
     }
 
@@ -1694,18 +1699,24 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
             resetInstanceTemporal(instance);
         }
         const beacon_result_t result = instance->runner.process(gray);
+        const AlgorithmProcessProfile profile = instance->runner.lastProcessProfile();
         instance->temporalFrameCache.insert(frameIndex, result);
+        instance->temporalProfileCache.insert(frameIndex, profile);
         instance->temporalLastFrame = frameIndex;
+        instance->currentProfile = profile;
         return result;
     }
 
     QString error;
     if (rebuildTemporalCacheToFrame(instance, frameIndex, &error))
     {
+        instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
         return instance->temporalFrameCache.value(frameIndex);
     }
 
-    return instance->runner.process(gray);
+    const beacon_result_t result = instance->runner.process(gray);
+    instance->currentProfile = instance->runner.lastProcessProfile();
+    return result;
 }
 
 void MainWindow::renderInstance(AnalyzerInstance* instance,
@@ -1851,6 +1862,8 @@ void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QStr
                                   .arg(BeaconResultUtils::beaconCount(result))
                                   .arg(BeaconResultUtils::carLampCount(result))
                                   .arg(BeaconResultUtils::totalTargetCount(result)));
+    m_frameInfoLabel->setText(m_frameInfoLabel->text() + QStringLiteral("\n") +
+                              AlgorithmProcessProfiler::format(m_currentProfile, m_usedFps));
     updateTcpStatusLabel(QStringLiteral("最近收到图像：%1").arg(peerName));
 }
 
@@ -3118,6 +3131,10 @@ bool MainWindow::autoPauseTriggered(int previousFrame,
 void MainWindow::updateFrameInfo(const beacon_result_t& result)
 {
     QString text;
+    const AlgorithmProcessProfile profile = currentInstance() != nullptr
+        ? currentInstance()->currentProfile
+        : AlgorithmProcessProfile{};
+    const QString profileText = AlgorithmProcessProfiler::format(profile, m_usedFps);
     const bool useLegacyBeacons = BeaconResultUtils::usesLegacyBeacons(result);
     const beacon_circle_t* beacons = useLegacyBeacons ? result.circles : result.beacons;
     const int beaconLimit = useLegacyBeacons
@@ -3166,6 +3183,7 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
                                   .arg(BeaconResultUtils::beaconCount(result))
                                   .arg(BeaconResultUtils::carLampCount(result))
                                   .arg(BeaconResultUtils::totalTargetCount(result)));
+    m_frameInfoLabel->setText(m_frameInfoLabel->text() + QStringLiteral("\n") + profileText);
 
     if (text.isEmpty())
     {
@@ -3178,6 +3196,7 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
                          .arg(BeaconResultUtils::carLampCount(result))
                          .arg(BeaconResultUtils::totalTargetCount(result)));
     }
+    text.prepend(profileText + QStringLiteral("\n"));
     m_resultText->setPlainText(text);
     updateCurrentAnnotationInfo();
 }

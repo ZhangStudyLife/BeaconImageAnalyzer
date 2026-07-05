@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
@@ -86,6 +87,60 @@ bool copyGrayToAlgorithmImage(const QImage& grayImage,
 
     return true;
 }
+
+constexpr double McuEstimateMinScale = 80.0;
+constexpr double McuEstimateMaxScale = 240.0;
+}
+
+double AlgorithmProcessProfiler::milliseconds(const AlgorithmProcessProfile& profile)
+{
+    return profile.valid ? (double)profile.algorithmNanoseconds / 1000000.0 : 0.0;
+}
+
+double AlgorithmProcessProfiler::estimatedMcuMillisecondsMin(const AlgorithmProcessProfile& profile)
+{
+    return milliseconds(profile) * McuEstimateMinScale;
+}
+
+double AlgorithmProcessProfiler::estimatedMcuMillisecondsMax(const AlgorithmProcessProfile& profile)
+{
+    return milliseconds(profile) * McuEstimateMaxScale;
+}
+
+QString AlgorithmProcessProfiler::format(const AlgorithmProcessProfile& profile, double fps)
+{
+    if (!profile.valid)
+    {
+        return QStringLiteral("算法耗时: --");
+    }
+
+    const double pcMs = milliseconds(profile);
+    const double mcuMinMs = estimatedMcuMillisecondsMin(profile);
+    const double mcuMaxMs = estimatedMcuMillisecondsMax(profile);
+    const double frameBudgetMs = fps > 0.0 ? 1000.0 / fps : 20.0;
+    const double budgetMinPercent = frameBudgetMs > 0.0 ? mcuMinMs * 100.0 / frameBudgetMs : 0.0;
+    const double budgetMaxPercent = frameBudgetMs > 0.0 ? mcuMaxMs * 100.0 / frameBudgetMs : 0.0;
+    return QStringLiteral("PC算法耗时: %1 ms | %2MHz板端粗估: %3-%4 ms | 帧预算 %5-%6%")
+        .arg(pcMs, 0, 'f', 3)
+        .arg(TargetCoreMhz, 0, 'f', 0)
+        .arg(mcuMinMs, 0, 'f', 1)
+        .arg(mcuMaxMs, 0, 'f', 1)
+        .arg(budgetMinPercent, 0, 'f', 1)
+        .arg(budgetMaxPercent, 0, 'f', 1);
+}
+
+QString AlgorithmProcessProfiler::formatCompact(const AlgorithmProcessProfile& profile)
+{
+    if (!profile.valid)
+    {
+        return QStringLiteral("耗时 --");
+    }
+
+    return QStringLiteral("PC %1 ms | 板估@%2MHz %3-%4 ms")
+        .arg(milliseconds(profile), 0, 'f', 3)
+        .arg(TargetCoreMhz, 0, 'f', 0)
+        .arg(estimatedMcuMillisecondsMin(profile), 0, 'f', 1)
+        .arg(estimatedMcuMillisecondsMax(profile), 0, 'f', 1);
 }
 
 AlgorithmRunner::AlgorithmRunner()
@@ -223,12 +278,15 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
     beacon_result_t result;
     unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W];
     memset(&result, 0, sizeof(result));
+    m_lastProcessProfile = {};
 
     if (!copyGrayToAlgorithmImage(grayImage, image))
     {
         return result;
     }
 
+    QElapsedTimer timer;
+    timer.start();
     if (m_processFn != nullptr)
     {
         m_processFn(image, &result);
@@ -237,7 +295,14 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
     {
         beacon_image_process(image, &result);
     }
+    m_lastProcessProfile.valid = true;
+    m_lastProcessProfile.algorithmNanoseconds = timer.nsecsElapsed();
     return result;
+}
+
+AlgorithmProcessProfile AlgorithmRunner::lastProcessProfile() const
+{
+    return m_lastProcessProfile;
 }
 
 QImage AlgorithmRunner::binaryImage(const QImage& grayImage) const

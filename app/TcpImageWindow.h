@@ -86,6 +86,7 @@ private:
 
     AlgorithmRunner m_fallbackRunner;
     beacon_result_t m_result = {};
+    AlgorithmProcessProfile m_processProfile = {};
     cv::VideoWriter m_writer;
 
     QComboBox* m_addressCombo = nullptr;

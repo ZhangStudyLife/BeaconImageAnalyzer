@@ -7,6 +7,23 @@
 #include <QLibrary>
 #include <QString>
 
+struct AlgorithmProcessProfile
+{
+    bool valid = false;
+    qint64 algorithmNanoseconds = 0;
+};
+
+namespace AlgorithmProcessProfiler
+{
+constexpr double TargetCoreMhz = 160.0;
+
+double milliseconds(const AlgorithmProcessProfile& profile);
+double estimatedMcuMillisecondsMin(const AlgorithmProcessProfile& profile);
+double estimatedMcuMillisecondsMax(const AlgorithmProcessProfile& profile);
+QString format(const AlgorithmProcessProfile& profile, double fps);
+QString formatCompact(const AlgorithmProcessProfile& profile);
+}
+
 class AlgorithmRunner
 {
 public:
@@ -18,6 +35,7 @@ public:
     bool usesDynamicLibrary() const;
     void resetTemporal() const;
     beacon_result_t process(const QImage& grayImage) const;
+    AlgorithmProcessProfile lastProcessProfile() const;
     QImage binaryImage(const QImage& grayImage) const;
 
 private:
@@ -33,6 +51,7 @@ private:
     ResetTemporalFn m_resetTemporalFn = nullptr;
     ProcessFn m_processFn = nullptr;
     BinaryFn m_binaryFn = nullptr;
+    mutable AlgorithmProcessProfile m_lastProcessProfile;
 };
 
 #endif

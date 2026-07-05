@@ -40,8 +40,10 @@ struct AnalyzerInstance
     int segmentStartFrame = -1;
     int segmentEndFrame = -1;
     beacon_result_t currentResult = {};
+    AlgorithmProcessProfile currentProfile = {};
     beacon_result_t previousAutoPauseResult = {};
     QHash<int, beacon_result_t> temporalFrameCache;
+    QHash<int, AlgorithmProcessProfile> temporalProfileCache;
     int temporalLastFrame = -1;
     int previousAutoPauseFrame = -1;
     bool hasPreviousAutoPauseResult = false;
