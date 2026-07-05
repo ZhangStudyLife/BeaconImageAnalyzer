@@ -21,10 +21,13 @@
 #define COMPONENT_BOTTOM_REJECT_Y (BEACON_IMAGE_H - 1)
 #define BEACON_LOCAL_RING_INNER   3
 #define BEACON_LOCAL_RING_OUTER   8
-#define BEACON_HALO_AREA_MAX      60
-#define BEACON_HALO_BACKGROUND_MAX 24
-#define BEACON_VERTICAL_ORDER_MIN_GAP 12.0f
-#define BEACON_UPPER_OVERSIZE_RATIO 2.5f
+#define BEACON_TOP_WEAK_Y         12
+#define BEACON_TOP_WEAK_AREA_MAX  5
+#define BEACON_TOP_WEAK_GRAY_MIN  150
+#define BEACON_ISOLATED_MIN_AREA  3
+#define BEACON_ISOLATED_MAX_AREA  5
+#define BEACON_ISOLATED_GRAY_MIN  150
+#define BEACON_ISOLATED_BG_MAX    2
 #define LAMP_MASK_PAD             2
 #define LAMP_MASK_DOWN_PAD        10
 #define LAMP_NEAR_BEACON_PAD      8
@@ -34,7 +37,9 @@
 #define CAR_LAMP_MIN_ELONGATION   1.6f
 #define CAR_LAMP_MIN_LENGTH       12.0f
 #define B0_MATCH_DISTANCE         18.0f
-#define B0_SWITCH_AREA_RATIO      1.45f
+#define B0_SWITCH_AREA_RATIO      1.70f
+#define B0_SMALL_SWITCH_AREA      12.0f
+#define B0_SMALL_SWITCH_RATIO     2.50f
 #define B0_INIT_CONFIRM_FRAMES    2
 #define BEACON_MAX_MISSES         5
 #define CAR_LAMP_MAX_MISSES       3
@@ -491,17 +496,48 @@ static unsigned char local_background_average(
     return (unsigned char)(sum / count);
 }
 
-static unsigned char is_halo_noise_beacon(
+static unsigned char component_max_gray(
+    const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
+    const component_t *comp)
+{
+    int x;
+    int y;
+    unsigned char max_gray = 0;
+
+    if (image == 0 || comp == 0 || comp->valid == 0)
+    {
+        return 0;
+    }
+
+    for (y = comp->min_y; y <= comp->max_y; y++)
+    {
+        for (x = comp->min_x; x <= comp->max_x; x++)
+        {
+            if (g_binary[y][x] != 0 && image[y][x] > max_gray)
+            {
+                max_gray = image[y][x];
+            }
+        }
+    }
+    return max_gray;
+}
+
+static unsigned char is_isolated_small_beacon(
     const unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W],
     const component_t *comp)
 {
     if (comp == 0 || comp->valid == 0 ||
-        comp->area > BEACON_HALO_AREA_MAX)
+        comp->area < BEACON_ISOLATED_MIN_AREA ||
+        comp->area > BEACON_ISOLATED_MAX_AREA)
     {
         return 0;
     }
-    return (local_background_average(image, comp) >
-            BEACON_HALO_BACKGROUND_MAX) ? 1 : 0;
+    if (component_max_gray(image, comp) < BEACON_ISOLATED_GRAY_MIN)
+    {
+        return 0;
+    }
+    return (local_background_average(image, comp) <=
+            BEACON_ISOLATED_BG_MAX) ? 1 : 0;
 }
 
 static void insert_beacon_by_area(
@@ -521,14 +557,25 @@ static void insert_beacon_by_area(
     {
         return;
     }
+    if (comp->max_y >= COMPONENT_BOTTOM_REJECT_Y)
+    {
+        return;
+    }
+    if (comp->min_y < BEACON_TOP_WEAK_Y &&
+        comp->area <= BEACON_TOP_WEAK_AREA_MAX &&
+        component_max_gray(image, comp) < BEACON_TOP_WEAK_GRAY_MIN)
+    {
+        return;
+    }
 
     is_edge = is_edge_beacon_area(comp);
     is_side_edge = is_side_edge_beacon_area(comp);
-    min_area = (is_edge != 0) ?
+    min_area = (is_edge != 0 ||
+                is_isolated_small_beacon(image, comp) != 0) ?
                     BEACON_EDGE_MIN_AREA :
                     BEACON_MIN_COMPONENT_AREA;
     if (comp->min_y < BEACON_EDGE_TOP_Y &&
-        comp->area >= BEACON_TOP_EDGE_MAX_AREA)
+        comp->area > BEACON_TOP_EDGE_MAX_AREA)
     {
         return;
     }
@@ -537,10 +584,6 @@ static void insert_beacon_by_area(
         return;
     }
     if (comp->area < min_area)
-    {
-        return;
-    }
-    if (is_halo_noise_beacon(image, comp) != 0)
     {
         return;
     }
@@ -580,73 +623,6 @@ static void insert_beacon_by_area(
     circle.radius = sqrtf((float)comp->area / PI_F);
     circle.valid = 1;
     result->beacons[i + 1] = circle;
-}
-
-static float beacon_area(const beacon_circle_t *beacon)
-{
-    if (beacon == 0 || beacon->valid == 0)
-    {
-        return 0.0f;
-    }
-    return beacon->radius * beacon->radius * PI_F;
-}
-
-static void remove_beacon_at(beacon_result_t *result, int index)
-{
-    int i;
-
-    if (index < 0 || index >= result->beacon_count)
-    {
-        return;
-    }
-
-    for (i = index; i + 1 < result->beacon_count; i++)
-    {
-        result->beacons[i] = result->beacons[i + 1];
-    }
-    result->beacon_count--;
-    memset(&result->beacons[result->beacon_count], 0,
-           sizeof(result->beacons[result->beacon_count]));
-}
-
-static void filter_upper_oversized_beacons(beacon_result_t *result)
-{
-    int i;
-    int j;
-
-    for (i = 0; i < result->beacon_count; )
-    {
-        float upper_area = beacon_area(&result->beacons[i]);
-        unsigned char remove = 0;
-
-        for (j = 0; j < result->beacon_count; j++)
-        {
-            float lower_area;
-
-            if (i == j ||
-                result->beacons[i].y + BEACON_VERTICAL_ORDER_MIN_GAP >=
-                result->beacons[j].y)
-            {
-                continue;
-            }
-
-            lower_area = beacon_area(&result->beacons[j]);
-            if (upper_area > lower_area * BEACON_UPPER_OVERSIZE_RATIO)
-            {
-                remove = 1;
-                break;
-            }
-        }
-
-        if (remove != 0)
-        {
-            remove_beacon_at(result, i);
-        }
-        else
-        {
-            i++;
-        }
-    }
 }
 
 static void sync_legacy_beacons(beacon_result_t *result)
@@ -691,7 +667,6 @@ static void find_beacons(
             insert_beacon_by_area(image, &comp, lamp, result);
         }
     }
-    filter_upper_oversized_beacons(result);
     sync_legacy_beacons(result);
 }
 
@@ -700,6 +675,15 @@ static float square_distance(float ax, float ay, float bx, float by)
     float dx = ax - bx;
     float dy = ay - by;
     return dx * dx + dy * dy;
+}
+
+static float beacon_area(const beacon_circle_t *beacon)
+{
+    if (beacon == 0 || beacon->valid == 0)
+    {
+        return 0.0f;
+    }
+    return beacon->radius * beacon->radius * PI_F;
 }
 
 static void reset_track(temporal_track_t *track)
@@ -860,11 +844,20 @@ static void update_temporal_beacon(beacon_result_t *result)
         float predict_x = g_b0_track.x + g_b0_track.vx;
         float predict_y = g_b0_track.y + g_b0_track.vy;
         selected = nearest_beacon_index(result, predict_x, predict_y, gate);
-        if (selected > 0 &&
-            beacon_area(&result->beacons[0]) >
-                beacon_area(&result->beacons[selected]) * B0_SWITCH_AREA_RATIO)
+        if (selected > 0)
         {
-            selected = 0;
+            float b0_area = beacon_area(&result->beacons[0]);
+            float selected_area = beacon_area(&result->beacons[selected]);
+            float switch_ratio = B0_SWITCH_AREA_RATIO;
+            if (b0_area < B0_SMALL_SWITCH_AREA &&
+                selected_area < B0_SMALL_SWITCH_AREA)
+            {
+                switch_ratio = B0_SMALL_SWITCH_RATIO;
+            }
+            if (b0_area > selected_area * switch_ratio)
+            {
+                selected = 0;
+            }
         }
     }
     else
