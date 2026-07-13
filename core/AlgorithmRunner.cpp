@@ -188,6 +188,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     m_resetTemporalFn = nullptr;
     m_processFn = nullptr;
     m_binaryFn = nullptr;
+    m_carLampPixelAreasFn = nullptr;
 
     const QString outputPath = dynamicLibraryPath(sourceInfo.absoluteFilePath(), buildDir);
     QStringList arguments;
@@ -228,6 +229,8 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     m_resetTemporalFn = reinterpret_cast<ResetTemporalFn>(m_library.resolve("beacon_image_reset_temporal"));
     m_processFn = reinterpret_cast<ProcessFn>(m_library.resolve("beacon_image_process"));
     m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
+    m_carLampPixelAreasFn = reinterpret_cast<CarLampPixelAreasFn>(
+        m_library.resolve("beacon_image_debug_car_lamp_pixel_areas"));
     if (m_processFn == nullptr)
     {
         if (errorMessage != nullptr)
@@ -279,6 +282,7 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
     unsigned char image[BEACON_IMAGE_H][BEACON_IMAGE_W];
     memset(&result, 0, sizeof(result));
     m_lastProcessProfile = {};
+    m_lastDetectionMetrics = {};
 
     if (!copyGrayToAlgorithmImage(grayImage, image))
     {
@@ -297,12 +301,32 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
     }
     m_lastProcessProfile.valid = true;
     m_lastProcessProfile.algorithmNanoseconds = timer.nsecsElapsed();
+    if (m_carLampPixelAreasFn != nullptr)
+    {
+        unsigned short areas[BEACON_MAX_CAR_LAMP_COUNT] = {};
+        int count = m_carLampPixelAreasFn(areas);
+        if (count > BEACON_MAX_CAR_LAMP_COUNT)
+        {
+            count = BEACON_MAX_CAR_LAMP_COUNT;
+        }
+        m_lastDetectionMetrics.carLampPixelAreasAvailable = true;
+        m_lastDetectionMetrics.carLampPixelAreaCount = static_cast<unsigned char>(count);
+        for (int i = 0; i < count; ++i)
+        {
+            m_lastDetectionMetrics.carLampPixelAreas[static_cast<std::size_t>(i)] = areas[i];
+        }
+    }
     return result;
 }
 
 AlgorithmProcessProfile AlgorithmRunner::lastProcessProfile() const
 {
     return m_lastProcessProfile;
+}
+
+AlgorithmDetectionMetrics AlgorithmRunner::lastDetectionMetrics() const
+{
+    return m_lastDetectionMetrics;
 }
 
 QImage AlgorithmRunner::binaryImage(const QImage& grayImage) const

@@ -46,6 +46,8 @@ add_executable(BeaconImageAnalyzer
     core/VideoReader.cpp
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
+    core/CarPlanRunner.h
+    core/CarPlanRunner.cpp
     core/BeaconResultUtils.h
     core/JustFloatLog.h
     core/JustFloatLog.cpp

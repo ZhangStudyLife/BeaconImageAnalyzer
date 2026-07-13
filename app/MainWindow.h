@@ -7,6 +7,7 @@
 #include "VideoReader.h"
 #include "beacon_image.h"
 
+#include <QCache>
 #include <QMainWindow>
 #include <QHash>
 #include <QPair>
@@ -41,9 +42,11 @@ struct AnalyzerInstance
     int segmentEndFrame = -1;
     beacon_result_t currentResult = {};
     AlgorithmProcessProfile currentProfile = {};
+    AlgorithmDetectionMetrics currentDetectionMetrics = {};
     beacon_result_t previousAutoPauseResult = {};
     QHash<int, beacon_result_t> temporalFrameCache;
     QHash<int, AlgorithmProcessProfile> temporalProfileCache;
+    QHash<int, AlgorithmDetectionMetrics> temporalDetectionMetricsCache;
     int temporalLastFrame = -1;
     int previousAutoPauseFrame = -1;
     bool hasPreviousAutoPauseResult = false;
@@ -113,6 +116,7 @@ private:
     void buildUi();
     void buildMenus();
     bool loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame);
+    bool readFrameCached(int frameIndex, QImage* grayImage, QString* errorMessage = nullptr);
     void showFrame(int frameIndex);
     void advancePlayingInstances();
     AnalyzerInstance* currentInstance();
@@ -204,6 +208,7 @@ private:
 
     QVector<AnalyzerInstance*> m_instances;
     VideoReader m_globalReader;
+    QCache<int, QImage> m_decodedFrameCache;
     QTimer m_playTimer;
 
     VideoWidget* m_videoWidget = nullptr;

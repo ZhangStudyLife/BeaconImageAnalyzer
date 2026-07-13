@@ -3,13 +3,16 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
+#include <QtEndian>
 
 #include <array>
 #include <cmath>
+#include <cstring>
 
 namespace
 {
 constexpr int ValueCount = 38;
+constexpr int PayloadValueCount = 37;
 constexpr double InvalidSentinel = -900.0;
 
 bool isInvalidValue(double value)
@@ -110,6 +113,121 @@ bool parseValues(const QStringList& cells,
         }
     }
     return true;
+}
+
+bool parseSequentialValues(const QStringList& cells,
+                           quint64 sequence,
+                           std::array<double, ValueCount>* values,
+                           QString* errorMessage)
+{
+    if (cells.size() != PayloadValueCount && cells.size() != ValueCount)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("字段数量应为 37 或 38，实际为 %1。").arg(cells.size());
+        }
+        return false;
+    }
+
+    values->fill(0.0);
+    const int shift = cells.size() == PayloadValueCount ? 1 : 0;
+    if (shift != 0)
+    {
+        (*values)[0] = (double)sequence;
+    }
+
+    for (int i = 0; i < cells.size(); ++i)
+    {
+        double parsed = 0.0;
+        QString cell = cells[i].trimmed();
+        const int equalIndex = cell.indexOf(QLatin1Char('='));
+        if (equalIndex >= 0)
+        {
+            cell = cell.mid(equalIndex + 1).trimmed();
+        }
+        if (!parseDoubleCell(cell, &parsed))
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("第 %1 个字段不是有效浮点数。").arg(i);
+            }
+            return false;
+        }
+        (*values)[i + shift] = parsed;
+    }
+    return true;
+}
+
+bool hasVofaTail(const QByteArray& data)
+{
+    const int size = data.size();
+    return size >= 4 &&
+           (unsigned char)data[size - 4] == 0x00 &&
+           (unsigned char)data[size - 3] == 0x00 &&
+           (unsigned char)data[size - 2] == 0x80 &&
+           (unsigned char)data[size - 1] == 0x7f;
+}
+
+QByteArray withoutVofaTail(const QByteArray& data)
+{
+    QByteArray payload = data;
+    if (hasVofaTail(payload))
+    {
+        payload.chop(4);
+    }
+    return payload;
+}
+
+bool parseBinaryDatagram(const QByteArray& datagram,
+                         quint64 sequence,
+                         std::array<double, ValueCount>* values,
+                         QString* errorMessage)
+{
+    const QByteArray payload = withoutVofaTail(datagram);
+    const int floatCount = payload.size() / 4;
+    if (payload.size() % 4 != 0 ||
+        (floatCount != PayloadValueCount && floatCount != ValueCount))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("二进制长度不匹配：%1 字节。").arg(datagram.size());
+        }
+        return false;
+    }
+
+    values->fill(0.0);
+    const int shift = floatCount == PayloadValueCount ? 1 : 0;
+    if (shift != 0)
+    {
+        (*values)[0] = (double)sequence;
+    }
+
+    for (int i = 0; i < floatCount; ++i)
+    {
+        const uchar* source = reinterpret_cast<const uchar*>(payload.constData() + i * 4);
+        const quint32 bits = qFromLittleEndian<quint32>(source);
+        float value = 0.0f;
+        memcpy(&value, &bits, sizeof(value));
+        (*values)[i + shift] = (double)value;
+    }
+    return true;
+}
+
+bool parseTextDatagram(const QByteArray& datagram,
+                       quint64 sequence,
+                       std::array<double, ValueCount>* values,
+                       QString* errorMessage)
+{
+    const QString text = QString::fromUtf8(withoutVofaTail(datagram)).trimmed();
+    if (text.isEmpty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("文本 UDP 数据为空。");
+        }
+        return false;
+    }
+    return parseSequentialValues(splitCsvLine(text), sequence, values, errorMessage);
 }
 
 JustFloatBeacon makeBeacon(const std::array<double, ValueCount>& values, int offset)
@@ -260,6 +378,42 @@ bool JustFloatLog::loadCsv(const QString& path, JustFloatLog* output, QString* e
     output->m_sourcePath = QFileInfo(path).absoluteFilePath();
     output->m_rows = rows;
     return true;
+}
+
+bool JustFloatLog::parseDatagram(const QByteArray& datagram,
+                                 quint64 sequence,
+                                 JustFloatLogRow* output,
+                                 QString* errorMessage)
+{
+    if (output == nullptr)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("输出对象为空。");
+        }
+        return false;
+    }
+
+    std::array<double, ValueCount> values;
+    QString binaryError;
+    if (parseBinaryDatagram(datagram, sequence, &values, &binaryError))
+    {
+        *output = makeRow(values);
+        return true;
+    }
+
+    QString textError;
+    if (parseTextDatagram(datagram, sequence, &values, &textError))
+    {
+        *output = makeRow(values);
+        return true;
+    }
+
+    if (errorMessage != nullptr)
+    {
+        *errorMessage = QStringLiteral("%1；%2").arg(binaryError, textError);
+    }
+    return false;
 }
 
 QString JustFloatLog::sourcePath() const

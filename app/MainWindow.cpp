@@ -956,6 +956,7 @@ QStatusBar {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
+    m_decodedFrameCache.setMaxCost(64 * 1024);
     setWindowIcon(QIcon(QStringLiteral(":/img/logo.png")));
     buildUi();
     buildMenus();
@@ -1626,7 +1627,7 @@ void MainWindow::renderInstance(AnalyzerInstance* instance)
     QImage gray;
     QString error;
     const int frameIndex = qBound(0, m_currentFrame, qMax(0, m_reader.frameCount() - 1));
-    if (!m_reader.readFrame(frameIndex, &gray, &error))
+    if (!readFrameCached(frameIndex, &gray, &error))
     {
         return;
     }
@@ -1643,6 +1644,8 @@ void MainWindow::resetInstanceTemporal(AnalyzerInstance* instance)
     instance->runner.resetTemporal();
     instance->temporalFrameCache.clear();
     instance->temporalProfileCache.clear();
+    instance->temporalDetectionMetricsCache.clear();
+    instance->currentDetectionMetrics = {};
     instance->temporalLastFrame = -1;
 }
 
@@ -1655,12 +1658,33 @@ bool MainWindow::rebuildTemporalCacheToFrame(AnalyzerInstance* instance,
         return false;
     }
 
-    resetInstanceTemporal(instance);
-    for (int frame = 0; frame <= targetFrame; ++frame)
+    const int cachedLastFrame = instance->temporalLastFrame;
+    const bool hasCompletePrefix = cachedLastFrame >= 0 &&
+        instance->temporalFrameCache.size() == cachedLastFrame + 1 &&
+        instance->temporalProfileCache.size() == cachedLastFrame + 1 &&
+        instance->temporalDetectionMetricsCache.size() == cachedLastFrame + 1 &&
+        instance->temporalFrameCache.contains(0) &&
+        instance->temporalFrameCache.contains(cachedLastFrame) &&
+        instance->temporalProfileCache.contains(0) &&
+        instance->temporalProfileCache.contains(cachedLastFrame) &&
+        instance->temporalDetectionMetricsCache.contains(0) &&
+        instance->temporalDetectionMetricsCache.contains(cachedLastFrame);
+
+    int firstFrame = 0;
+    if (hasCompletePrefix && targetFrame > cachedLastFrame)
+    {
+        firstFrame = cachedLastFrame + 1;
+    }
+    else
+    {
+        resetInstanceTemporal(instance);
+    }
+
+    for (int frame = firstFrame; frame <= targetFrame; ++frame)
     {
         QImage frameImage;
         QString readError;
-        if (!m_reader.readFrame(frame, &frameImage, &readError))
+        if (!readFrameCached(frame, &frameImage, &readError))
         {
             if (errorMessage != nullptr)
             {
@@ -1670,8 +1694,10 @@ bool MainWindow::rebuildTemporalCacheToFrame(AnalyzerInstance* instance,
         }
         const beacon_result_t result = instance->runner.process(frameImage);
         const AlgorithmProcessProfile profile = instance->runner.lastProcessProfile();
+        const AlgorithmDetectionMetrics metrics = instance->runner.lastDetectionMetrics();
         instance->temporalFrameCache.insert(frame, result);
         instance->temporalProfileCache.insert(frame, profile);
+        instance->temporalDetectionMetricsCache.insert(frame, metrics);
         instance->temporalLastFrame = frame;
     }
     return true;
@@ -1690,6 +1716,7 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
     if (instance->temporalFrameCache.contains(frameIndex))
     {
         instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
+        instance->currentDetectionMetrics = instance->temporalDetectionMetricsCache.value(frameIndex);
         return instance->temporalFrameCache.value(frameIndex);
     }
 
@@ -1701,10 +1728,13 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
         }
         const beacon_result_t result = instance->runner.process(gray);
         const AlgorithmProcessProfile profile = instance->runner.lastProcessProfile();
+        const AlgorithmDetectionMetrics metrics = instance->runner.lastDetectionMetrics();
         instance->temporalFrameCache.insert(frameIndex, result);
         instance->temporalProfileCache.insert(frameIndex, profile);
+        instance->temporalDetectionMetricsCache.insert(frameIndex, metrics);
         instance->temporalLastFrame = frameIndex;
         instance->currentProfile = profile;
+        instance->currentDetectionMetrics = metrics;
         return result;
     }
 
@@ -1712,11 +1742,13 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
     if (rebuildTemporalCacheToFrame(instance, frameIndex, &error))
     {
         instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
+        instance->currentDetectionMetrics = instance->temporalDetectionMetricsCache.value(frameIndex);
         return instance->temporalFrameCache.value(frameIndex);
     }
 
     const beacon_result_t result = instance->runner.process(gray);
     instance->currentProfile = instance->runner.lastProcessProfile();
+    instance->currentDetectionMetrics = instance->runner.lastDetectionMetrics();
     return result;
 }
 
@@ -2241,10 +2273,6 @@ void MainWindow::buildUi()
     connect(jumpFrameButton, &QPushButton::clicked, this, &MainWindow::jumpToFrame);
     connect(jumpTimeButton, &QPushButton::clicked, this, &MainWindow::jumpToTime);
     connect(m_slider, &QSlider::sliderPressed, this, &MainWindow::pause);
-    connect(m_slider, &QSlider::sliderMoved, this, [this](int value) {
-        pause();
-        showFrame(value);
-    });
     connect(m_slider, &QSlider::valueChanged, this, &MainWindow::showFrameFromSlider);
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         renderAllDisplayedInstances();
@@ -2642,6 +2670,7 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
     m_currentVideoPath = path;
     m_currentFrame = fallbackFrame;
     m_liveMode = false;
+    m_decodedFrameCache.clear();
     for (AnalyzerInstance* instance : m_instances)
     {
         resetInstanceTemporal(instance);
@@ -3003,6 +3032,42 @@ void MainWindow::showFrameFromSlider(int value)
     }
 }
 
+bool MainWindow::readFrameCached(int frameIndex, QImage* grayImage, QString* errorMessage)
+{
+    if (grayImage == nullptr)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("grayImage is null");
+        }
+        return false;
+    }
+
+    if (const QImage* cached = m_decodedFrameCache.object(frameIndex))
+    {
+        *grayImage = *cached;
+        if (errorMessage != nullptr)
+        {
+            errorMessage->clear();
+        }
+        return true;
+    }
+
+    QImage decoded;
+    if (!m_reader.readFrame(frameIndex, &decoded, errorMessage))
+    {
+        return false;
+    }
+
+    const qsizetype sizeKiB = qMax<qsizetype>(1, (decoded.sizeInBytes() + 1023) / 1024);
+    if (sizeKiB <= m_decodedFrameCache.maxCost())
+    {
+        m_decodedFrameCache.insert(frameIndex, new QImage(decoded), static_cast<int>(sizeKiB));
+    }
+    *grayImage = decoded;
+    return true;
+}
+
 void MainWindow::showFrame(int frameIndex)
 {
     m_liveMode = false;
@@ -3014,7 +3079,7 @@ void MainWindow::showFrame(int frameIndex)
     frameIndex = qBound(0, frameIndex, m_reader.frameCount() - 1);
     QImage gray;
     QString error;
-    if (!m_reader.readFrame(frameIndex, &gray, &error))
+    if (!readFrameCached(frameIndex, &gray, &error))
     {
         QMessageBox::critical(this, QStringLiteral("读取帧失败"), error);
         pause();
@@ -3147,6 +3212,9 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
     const AlgorithmProcessProfile profile = currentInstance() != nullptr
         ? currentInstance()->currentProfile
         : AlgorithmProcessProfile{};
+    const AlgorithmDetectionMetrics metrics = currentInstance() != nullptr
+        ? currentInstance()->currentDetectionMetrics
+        : AlgorithmDetectionMetrics{};
     const QString profileText = AlgorithmProcessProfiler::format(profile, m_usedFps);
     const bool useLegacyBeacons = BeaconResultUtils::usesLegacyBeacons(result);
     const beacon_circle_t* beacons = useLegacyBeacons ? result.circles : result.beacons;
@@ -3160,13 +3228,13 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
         {
             continue;
         }
-        const double area = 3.14159265358979323846 * circle.radius * circle.radius;
-        text += QStringLiteral("信标 #%1  X=%2  Y=%3  R=%4  Area=%5\n")
+        const int pixelArea = qRound(3.14159265358979323846 * circle.radius * circle.radius);
+        text += QStringLiteral("信标 #%1  X=%2  Y=%3  R=%4  PixelArea=%5 px\n")
                     .arg(i)
                     .arg(circle.x, 0, 'f', 2)
                     .arg(circle.y, 0, 'f', 2)
                     .arg(circle.radius, 0, 'f', 2)
-                    .arg(area, 0, 'f', 2);
+                    .arg(pixelArea);
     }
 
     const int carLampLimit = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
@@ -3177,15 +3245,22 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
         {
             continue;
         }
-        const double area = rect.length * rect.width;
-        text += QStringLiteral("车灯 #%1  CX=%2  CY=%3  L=%4  W=%5  Angle=%6  Area=%7\n")
+        const double fitArea = rect.length * rect.width;
+        QString pixelAreaText = QStringLiteral("--");
+        if (metrics.carLampPixelAreasAvailable && i < metrics.carLampPixelAreaCount)
+        {
+            pixelAreaText = QStringLiteral("%1 px").arg(
+                metrics.carLampPixelAreas[static_cast<std::size_t>(i)]);
+        }
+        text += QStringLiteral("车灯 #%1  CX=%2  CY=%3  L=%4  W=%5  Angle=%6  PixelArea=%7  FitArea=%8\n")
                     .arg(i)
                     .arg(rect.cx, 0, 'f', 2)
                     .arg(rect.cy, 0, 'f', 2)
                     .arg(rect.length, 0, 'f', 2)
                     .arg(rect.width, 0, 'f', 2)
                     .arg(rect.angle, 0, 'f', 2)
-                    .arg(area, 0, 'f', 2);
+                    .arg(pixelAreaText)
+                    .arg(fitArea, 0, 'f', 2);
     }
 
     m_frameInfoLabel->setText(QStringLiteral("当前帧: %1 / %2\n播放时间: %3 s / %4 s\n信标: %5  车灯: %6  总目标: %7")

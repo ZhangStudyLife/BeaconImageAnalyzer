@@ -1,6 +1,7 @@
 #ifndef JUST_FLOAT_LOG_H
 #define JUST_FLOAT_LOG_H
 
+#include <QByteArray>
 #include <QString>
 #include <QVector>
 
@@ -42,6 +43,10 @@ class JustFloatLog
 {
 public:
     static bool loadCsv(const QString& path, JustFloatLog* output, QString* errorMessage = nullptr);
+    static bool parseDatagram(const QByteArray& datagram,
+                              quint64 sequence,
+                              JustFloatLogRow* output,
+                              QString* errorMessage = nullptr);
 
     QString sourcePath() const;
     int rowCount() const;

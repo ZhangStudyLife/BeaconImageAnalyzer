@@ -7,10 +7,19 @@
 #include <QLibrary>
 #include <QString>
 
+#include <array>
+
 struct AlgorithmProcessProfile
 {
     bool valid = false;
     qint64 algorithmNanoseconds = 0;
+};
+
+struct AlgorithmDetectionMetrics
+{
+    bool carLampPixelAreasAvailable = false;
+    unsigned char carLampPixelAreaCount = 0;
+    std::array<unsigned short, BEACON_MAX_CAR_LAMP_COUNT> carLampPixelAreas = {};
 };
 
 namespace AlgorithmProcessProfiler
@@ -36,6 +45,7 @@ public:
     void resetTemporal() const;
     beacon_result_t process(const QImage& grayImage) const;
     AlgorithmProcessProfile lastProcessProfile() const;
+    AlgorithmDetectionMetrics lastDetectionMetrics() const;
     QImage binaryImage(const QImage& grayImage) const;
 
 private:
@@ -44,6 +54,8 @@ private:
     using ProcessFn = void (*)(const unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W], beacon_result_t*);
     using BinaryFn = void (*)(const unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W],
                               unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W]);
+    using CarLampPixelAreasFn = unsigned char (*)(
+        unsigned short[BEACON_MAX_CAR_LAMP_COUNT]);
 
     QString m_sourcePath;
     QLibrary m_library;
@@ -51,7 +63,9 @@ private:
     ResetTemporalFn m_resetTemporalFn = nullptr;
     ProcessFn m_processFn = nullptr;
     BinaryFn m_binaryFn = nullptr;
+    CarLampPixelAreasFn m_carLampPixelAreasFn = nullptr;
     mutable AlgorithmProcessProfile m_lastProcessProfile;
+    mutable AlgorithmDetectionMetrics m_lastDetectionMetrics;
 };
 
 #endif
