@@ -1,11 +1,14 @@
 #include "LogReplayWindow.h"
 
 #include "FrameRenderer.h"
+#include "LogWaveformWindow.h"
 #include "VideoWidget.h"
 
 #include <QAbstractSocket>
+#include <QCloseEvent>
 #include <QColor>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -18,6 +21,7 @@
 #include <QNetworkInterface>
 #include <QPainter>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -200,9 +204,16 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
     m_modeCombo->addItem(QStringLiteral("UDP 实时"), QStringLiteral("udp"));
     m_importButton = new QPushButton(QStringLiteral("导入 CSV"), this);
     m_addressCombo = new QComboBox(this);
-    m_portEdit = new QLineEdit(QStringLiteral("1348"), this);
+    m_portEdit = new QLineEdit(QStringLiteral("1347"), this);
     m_portEdit->setFixedWidth(76);
     m_listenButton = new QPushButton(QStringLiteral("开始监听"), this);
+    m_recordButton = new QPushButton(QStringLiteral("开始记录"), this);
+    m_recordButton->setFixedWidth(150);
+    m_discardRecordingButton = new QPushButton(QStringLiteral("丢弃记录"), this);
+    m_discardRecordingButton->setFixedWidth(92);
+    m_discardRecordingButton->setVisible(false);
+    m_waveformButton = new QPushButton(QStringLiteral("实时波形"), this);
+    m_waveformButton->setFixedWidth(92);
     m_statusLabel = new QLabel(QStringLiteral("未导入日志"), this);
     m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_statusLabel->setWordWrap(true);
@@ -215,6 +226,9 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
     topRow->addWidget(new QLabel(QStringLiteral("端口"), this));
     topRow->addWidget(m_portEdit);
     topRow->addWidget(m_listenButton);
+    topRow->addWidget(m_recordButton);
+    topRow->addWidget(m_discardRecordingButton);
+    topRow->addWidget(m_waveformButton);
     topRow->addWidget(m_statusLabel, 1);
     topRow->addWidget(m_returnGridButton);
     root->addLayout(topRow);
@@ -320,18 +334,29 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
     }
     connect(m_resetCarPlanButton, &QPushButton::clicked, this, &LogReplayWindow::resetCarPlan);
     connect(m_modeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-        setUdpMode(m_modeCombo->currentData().toString() == QStringLiteral("udp"));
+        const bool requestedUdpMode =
+            m_modeCombo->currentData().toString() == QStringLiteral("udp");
+        if (!setUdpMode(requestedUdpMode))
+        {
+            const QSignalBlocker blocker(m_modeCombo);
+            m_modeCombo->setCurrentIndex(m_udpMode ? 1 : 0);
+        }
     });
     connect(m_listenButton, &QPushButton::clicked, this, [this]() {
         if (m_udpSocket->state() == QAbstractSocket::BoundState)
         {
-            stopUdpListening();
+            (void)stopUdpListening();
         }
         else
         {
             startUdpListening();
         }
     });
+    connect(m_recordButton, &QPushButton::clicked, this, &LogReplayWindow::toggleRecording);
+    connect(m_discardRecordingButton, &QPushButton::clicked, this, [this]() {
+        discardPendingRecording(true);
+    });
+    connect(m_waveformButton, &QPushButton::clicked, this, &LogReplayWindow::showWaveformWindow);
     connect(m_returnGridButton, &QPushButton::clicked, this, &LogReplayWindow::showAllCameras);
     connect(m_playButton, &QPushButton::clicked, this, &LogReplayWindow::togglePlayback);
     connect(m_previousButton, &QPushButton::clicked, this, [this]() {
@@ -356,11 +381,27 @@ void LogReplayWindow::populateLocalAddresses()
     }
 }
 
-void LogReplayWindow::setUdpMode(bool enabled)
+void LogReplayWindow::closeEvent(QCloseEvent* event)
+{
+    if (!ensureRecordingResolved(QStringLiteral("关闭日志窗口")))
+    {
+        event->ignore();
+        return;
+    }
+
+    QWidget::closeEvent(event);
+}
+
+bool LogReplayWindow::setUdpMode(bool enabled)
 {
     if (m_udpMode == enabled)
     {
-        return;
+        return true;
+    }
+
+    if (!enabled && !ensureRecordingResolved(QStringLiteral("切换到 CSV 回放")))
+    {
+        return false;
     }
 
     m_udpMode = enabled;
@@ -370,7 +411,7 @@ void LogReplayWindow::setUdpMode(bool enabled)
     resetCarPlanState();
     if (!m_udpMode)
     {
-        stopUdpListening();
+        (void)stopUdpListening(false);
         if (m_log.rowCount() > 0)
         {
             setCurrentRow(qBound(0, m_currentRow, m_log.rowCount() - 1));
@@ -384,8 +425,22 @@ void LogReplayWindow::setUdpMode(bool enabled)
     {
         m_statusLabel->setText(QStringLiteral("UDP 未监听"));
     }
+    if (m_waveformWindow != nullptr)
+    {
+        m_waveformWindow->setUdpMode(m_udpMode);
+        if (m_udpMode)
+        {
+            m_waveformWindow->setLiveHistory(&m_waveformHistory);
+        }
+        if (!m_udpMode)
+        {
+            m_waveformWindow->setCsvLog(m_log.rowCount() > 0 ? &m_log : nullptr);
+            m_waveformWindow->setCsvRow(m_currentRow);
+        }
+    }
     updateControlState();
     updateInfoText();
+    return true;
 }
 
 void LogReplayWindow::updateControlState()
@@ -403,12 +458,17 @@ void LogReplayWindow::updateControlState()
     m_portEdit->setEnabled(m_udpMode && !listening);
     m_listenButton->setEnabled(m_udpMode);
     m_listenButton->setText(listening ? QStringLiteral("停止监听") : QStringLiteral("开始监听"));
+    const JustFloatCsvRecorder::State recordingState = m_csvRecorder.state();
+    m_recordButton->setEnabled(recordingState != JustFloatCsvRecorder::State::Idle ||
+                               (m_udpMode && listening));
+    m_discardRecordingButton->setVisible(recordingState == JustFloatCsvRecorder::State::PendingSave);
     bool hasCarPlan = false;
     for (int slot = 0; slot < CarPlanSlotCount; ++slot)
     {
         hasCarPlan = hasCarPlan || m_carPlanRunners[slot].isLoaded();
     }
     m_resetCarPlanButton->setEnabled(hasCarPlan);
+    updateRecordingState();
 }
 
 void LogReplayWindow::startUdpListening()
@@ -437,7 +497,23 @@ void LogReplayWindow::startUdpListening()
     m_lastUdpPeer.clear();
     m_hasLiveRow = false;
     m_currentRow = -1;
+    m_udpElapsedTimer.restart();
+    m_waveformHistoryErrorShown = false;
+    QString historyError;
+    if (!m_waveformHistory.beginSession(&historyError))
+    {
+        m_waveformHistoryErrorShown = true;
+        QMessageBox::warning(this,
+                             QStringLiteral("波形历史不可用"),
+                             QStringLiteral("UDP 监听仍会继续，但本次会话无法回看完整历史。\n%1")
+                                 .arg(historyError));
+    }
     resetCarPlanState();
+    if (m_waveformWindow != nullptr)
+    {
+        m_waveformWindow->setLiveHistory(&m_waveformHistory);
+        m_waveformWindow->setUdpMode(true);
+    }
     m_statusLabel->setText(QStringLiteral("UDP 监听中：%1:%2")
                                .arg(address.toString())
                                .arg(port));
@@ -445,8 +521,13 @@ void LogReplayWindow::startUdpListening()
     updateInfoText();
 }
 
-void LogReplayWindow::stopUdpListening()
+bool LogReplayWindow::stopUdpListening(bool resolveRecording)
 {
+    if (resolveRecording && !ensureRecordingResolved(QStringLiteral("停止 UDP 监听")))
+    {
+        return false;
+    }
+
     if (m_udpSocket->state() == QAbstractSocket::BoundState)
     {
         m_udpSocket->close();
@@ -456,6 +537,7 @@ void LogReplayWindow::stopUdpListening()
         m_statusLabel->setText(QStringLiteral("UDP 已停止"));
     }
     updateControlState();
+    return true;
 }
 
 void LogReplayWindow::readPendingDatagrams()
@@ -492,6 +574,39 @@ void LogReplayWindow::readPendingDatagrams()
             continue;
         }
 
+        if (m_waveformHistory.isActive())
+        {
+            QString historyError;
+            const qint64 elapsedMs = m_udpElapsedTimer.isValid() ? m_udpElapsedTimer.elapsed() : 0;
+            if (!m_waveformHistory.append(row, elapsedMs, &historyError) &&
+                !m_waveformHistoryErrorShown)
+            {
+                m_waveformHistoryErrorShown = true;
+                QMessageBox::warning(this,
+                                     QStringLiteral("波形历史写入失败"),
+                                     QStringLiteral("UDP 监听和 CSV 记录不受影响，但本次波形历史可能不完整。\n%1")
+                                         .arg(historyError));
+            }
+        }
+
+        if (m_csvRecorder.state() == JustFloatCsvRecorder::State::Recording)
+        {
+            QString recordError;
+            if (!m_csvRecorder.append(row, &recordError))
+            {
+                QString stopError;
+                const bool stopped = m_csvRecorder.stop(&stopError);
+                if (!stopped && !stopError.isEmpty())
+                {
+                    recordError += QStringLiteral("\n%1").arg(stopError);
+                }
+                updateControlState();
+                QMessageBox::critical(this,
+                                      QStringLiteral("记录失败"),
+                                      QStringLiteral("写入临时 CSV 失败：%1").arg(recordError));
+            }
+            updateRecordingState();
+        }
         acceptUdpRow(row, QStringLiteral("%1:%2").arg(sender.toString()).arg(senderPort));
     }
 }
@@ -505,10 +620,251 @@ void LogReplayWindow::acceptUdpRow(const JustFloatLogRow& row, const QString& pe
     updateCarPlanFromLiveRow(row);
     renderCurrentRow();
     updateInfoText();
-    m_statusLabel->setText(QStringLiteral("UDP 实时 | 包 %1 | 错 %2 | 最近来源 %3")
-                               .arg(m_udpPacketCount)
-                               .arg(m_udpErrorCount)
-                               .arg(m_lastUdpPeer));
+    QString status = QStringLiteral("UDP 实时 | 包 %1 | 错 %2 | 最近来源 %3")
+                         .arg(m_udpPacketCount)
+                         .arg(m_udpErrorCount)
+                         .arg(m_lastUdpPeer);
+    if (m_csvRecorder.state() != JustFloatCsvRecorder::State::Idle)
+    {
+        status += QStringLiteral(" | 记录 %1 行").arg(m_csvRecorder.rowCount());
+    }
+    m_statusLabel->setText(status);
+}
+
+void LogReplayWindow::toggleRecording()
+{
+    switch (m_csvRecorder.state())
+    {
+    case JustFloatCsvRecorder::State::Idle:
+    {
+        if (!m_udpMode || m_udpSocket->state() != QAbstractSocket::BoundState)
+        {
+            QMessageBox::information(this,
+                                     QStringLiteral("UDP 记录"),
+                                     QStringLiteral("请先开始 UDP 监听。"));
+            return;
+        }
+
+        QString error;
+        if (!m_csvRecorder.start(&error))
+        {
+            QMessageBox::critical(this, QStringLiteral("开始记录失败"), error);
+            return;
+        }
+        break;
+    }
+
+    case JustFloatCsvRecorder::State::Recording:
+        if (!stopRecording())
+        {
+            return;
+        }
+        (void)savePendingRecording();
+        break;
+
+    case JustFloatCsvRecorder::State::PendingSave:
+        (void)savePendingRecording();
+        break;
+    }
+
+    updateControlState();
+}
+
+bool LogReplayWindow::stopRecording()
+{
+    if (m_csvRecorder.state() != JustFloatCsvRecorder::State::Recording)
+    {
+        return true;
+    }
+
+    QString error;
+    const bool stopped = m_csvRecorder.stop(&error);
+    updateControlState();
+    if (!stopped)
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("记录刷新异常"),
+                             QStringLiteral("临时文件刷新失败，但已保留现有内容，可继续尝试保存。\n%1")
+                                 .arg(error));
+    }
+    return m_csvRecorder.state() == JustFloatCsvRecorder::State::PendingSave;
+}
+
+bool LogReplayWindow::savePendingRecording()
+{
+    if (m_csvRecorder.state() != JustFloatCsvRecorder::State::PendingSave)
+    {
+        return true;
+    }
+
+    QSettings settings(QStringLiteral("BeaconImageAnalyzer"),
+                       QStringLiteral("BeaconImageAnalyzer"));
+    QString directory = settings.value(QStringLiteral("logReplay/recordDirectory")).toString();
+    if (directory.isEmpty() || !QDir(directory).exists())
+    {
+        directory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    }
+    const QString defaultName = QStringLiteral("JustFloat_%1.csv")
+                                    .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    QString path = QFileDialog::getSaveFileName(this,
+                                                QStringLiteral("保存 UDP 记录"),
+                                                QDir(directory).filePath(defaultName),
+                                                QStringLiteral("CSV (*.csv);;所有文件 (*.*)"));
+    if (path.isEmpty())
+    {
+        updateControlState();
+        return false;
+    }
+    if (QFileInfo(path).suffix().isEmpty())
+    {
+        path += QStringLiteral(".csv");
+    }
+
+    QString error;
+    if (!m_csvRecorder.saveAs(path, &error))
+    {
+        QMessageBox::critical(this, QStringLiteral("保存记录失败"), error);
+        updateControlState();
+        return false;
+    }
+
+    settings.setValue(QStringLiteral("logReplay/recordDirectory"), QFileInfo(path).absolutePath());
+    m_statusLabel->setText(QStringLiteral("记录已保存：%1").arg(QFileInfo(path).fileName()));
+    updateControlState();
+    return true;
+}
+
+bool LogReplayWindow::ensureRecordingResolved(const QString& actionName)
+{
+    const JustFloatCsvRecorder::State state = m_csvRecorder.state();
+    const bool wasRecording = state == JustFloatCsvRecorder::State::Recording;
+    if (state == JustFloatCsvRecorder::State::Idle)
+    {
+        return true;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("UDP 记录尚未保存"));
+    box.setText(state == JustFloatCsvRecorder::State::Recording
+                    ? QStringLiteral("当前正在记录，已写入 %1 行。是否先保存再%2？")
+                          .arg(m_csvRecorder.rowCount())
+                          .arg(actionName)
+                    : QStringLiteral("当前有 %1 行记录尚未保存。是否先保存再%2？")
+                          .arg(m_csvRecorder.rowCount())
+                          .arg(actionName));
+    box.setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Save);
+
+    const QMessageBox::StandardButton choice =
+        static_cast<QMessageBox::StandardButton>(box.exec());
+    if (choice == QMessageBox::Cancel)
+    {
+        return false;
+    }
+    if (choice == QMessageBox::Discard)
+    {
+        m_csvRecorder.discard();
+        updateControlState();
+        return true;
+    }
+
+    if (!stopRecording())
+    {
+        return false;
+    }
+    if (savePendingRecording())
+    {
+        return true;
+    }
+
+    if (wasRecording && m_csvRecorder.state() == JustFloatCsvRecorder::State::PendingSave)
+    {
+        QString resumeError;
+        if (m_csvRecorder.resume(&resumeError))
+        {
+            m_statusLabel->setText(QStringLiteral("保存已取消，UDP 记录继续。"));
+        }
+        else
+        {
+            QMessageBox::warning(this,
+                                 QStringLiteral("无法继续记录"),
+                                 QStringLiteral("未保存的数据仍然保留，但 UDP 记录未能恢复。\n%1")
+                                     .arg(resumeError));
+        }
+        updateControlState();
+    }
+    return false;
+}
+
+void LogReplayWindow::discardPendingRecording(bool confirm)
+{
+    if (m_csvRecorder.state() == JustFloatCsvRecorder::State::Idle)
+    {
+        return;
+    }
+
+    if (confirm &&
+        QMessageBox::question(this,
+                              QStringLiteral("丢弃 UDP 记录"),
+                              QStringLiteral("确认丢弃当前 %1 行未保存记录？")
+                                  .arg(m_csvRecorder.rowCount()),
+                              QMessageBox::Discard | QMessageBox::Cancel,
+                              QMessageBox::Cancel) != QMessageBox::Discard)
+    {
+        return;
+    }
+
+    m_csvRecorder.discard();
+    if (m_udpMode && m_udpSocket->state() == QAbstractSocket::BoundState)
+    {
+        m_statusLabel->setText(QStringLiteral("未保存的 UDP 记录已丢弃，监听继续。"));
+    }
+    updateControlState();
+}
+
+void LogReplayWindow::updateRecordingState()
+{
+    const qint64 rowCount = m_csvRecorder.rowCount();
+    switch (m_csvRecorder.state())
+    {
+    case JustFloatCsvRecorder::State::Idle:
+        m_recordButton->setText(QStringLiteral("开始记录"));
+        m_discardRecordingButton->setVisible(false);
+        break;
+    case JustFloatCsvRecorder::State::Recording:
+        m_recordButton->setText(QStringLiteral("停止记录 (%1)").arg(rowCount));
+        m_discardRecordingButton->setVisible(false);
+        break;
+    case JustFloatCsvRecorder::State::PendingSave:
+        m_recordButton->setText(QStringLiteral("保存记录 (%1)").arg(rowCount));
+        m_discardRecordingButton->setVisible(true);
+        break;
+    }
+}
+
+void LogReplayWindow::showWaveformWindow()
+{
+    bool created = false;
+    if (m_waveformWindow == nullptr)
+    {
+        m_waveformWindow = new LogWaveformWindow(this);
+        created = true;
+    }
+
+    m_waveformWindow->setLiveHistory(&m_waveformHistory);
+    m_waveformWindow->setUdpMode(m_udpMode);
+    if (!m_udpMode)
+    {
+        if (created)
+        {
+            m_waveformWindow->setCsvLog(m_log.rowCount() > 0 ? &m_log : nullptr);
+        }
+        m_waveformWindow->setCsvRow(m_currentRow);
+    }
+    m_waveformWindow->show();
+    m_waveformWindow->raise();
+    m_waveformWindow->activateWindow();
 }
 
 void LogReplayWindow::importCsv()
@@ -631,9 +987,12 @@ bool LogReplayWindow::loadCsv(const QString& path)
     m_playButton->setText(QStringLiteral("播放"));
     if (m_udpMode)
     {
+        if (!setUdpMode(false))
+        {
+            return false;
+        }
+        const QSignalBlocker blocker(m_modeCombo);
         m_modeCombo->setCurrentIndex(0);
-        m_udpMode = false;
-        stopUdpListening();
     }
     m_log = log;
     m_currentRow = -1;
@@ -646,6 +1005,11 @@ bool LogReplayWindow::loadCsv(const QString& path)
     m_statusLabel->setText(QStringLiteral("%1 | %2 行")
                                .arg(QFileInfo(path).fileName())
                                .arg(m_log.rowCount()));
+    if (m_waveformWindow != nullptr)
+    {
+        m_waveformWindow->setUdpMode(false);
+        m_waveformWindow->setCsvLog(&m_log);
+    }
     updateCameraVisibility();
     setCurrentRow(0);
     updateControlState();
@@ -770,6 +1134,10 @@ void LogReplayWindow::setCurrentRow(int row)
         m_frameSpin->setValue(m_currentRow);
     }
     updateCarPlanForCurrentRow();
+    if (m_waveformWindow != nullptr)
+    {
+        m_waveformWindow->setCsvRow(m_currentRow);
+    }
     renderCurrentRow();
     updateInfoText();
 }
@@ -935,6 +1303,16 @@ void LogReplayWindow::updateInfoText()
                 .arg(row->pitch, 0, 'f', 3)
                 .arg(row->roll, 0, 'f', 3)
                 .arg(row->yaw, 0, 'f', 3);
+    if (row->hasProjectionDistance)
+    {
+        text += QStringLiteral("投影距离: X=%1 cm  Y=%2 cm\n")
+                    .arg(row->projectionXcm, 0, 'f', 3)
+                    .arg(row->projectionYcm, 0, 'f', 3);
+    }
+    else
+    {
+        text += QStringLiteral("投影距离: 旧日志无 I38/I39\n");
+    }
     for (int slot = 0; slot < CarPlanSlotCount; ++slot)
     {
         text += carPlanInfoText(slot);

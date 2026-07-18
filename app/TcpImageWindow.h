@@ -3,7 +3,7 @@
 
 #include "AlgorithmRunner.h"
 #include "AnnotationModel.h"
-#include "SeekfreeImageFrameParser.h"
+#include "BimgImageFrameParser.h"
 #include "beacon_image.h"
 
 #include <QHash>
@@ -57,7 +57,7 @@ private:
     void acceptPendingConnections();
     void readSocketData(QTcpSocket* socket);
     void removeSocket(QTcpSocket* socket);
-    void setFrame(const QImage& grayImage, const QString& peerName);
+    void setFrame(const BimgImageFrame& frame, const QString& peerName);
     void render();
     void saveCurrentFrame();
     void chooseSaveDirectory();
@@ -70,13 +70,16 @@ private:
     AnnotationModel* selectedAnnotations() const;
 
     QTcpServer* m_server = nullptr;
-    QHash<QTcpSocket*, SeekfreeImageFrameParser*> m_parsers;
+    QHash<QTcpSocket*, BimgImageFrameParser*> m_parsers;
     QVector<TcpInstanceOption> m_instances;
 
     QString m_peerName;
     QString m_saveDir;
     QImage m_grayImage;
     QImage m_renderedImage;
+    BimgImageFrame m_streamFrame;
+    quint64 m_crcErrorCount = 0;
+    quint64 m_protocolErrorCount = 0;
     quint16 m_port = 0;
     int m_frameIndex = -1;
     bool m_paused = false;
@@ -84,7 +87,6 @@ private:
     bool m_showOverlay = true;
     bool m_recording = false;
 
-    AlgorithmRunner m_fallbackRunner;
     beacon_result_t m_result = {};
     AlgorithmProcessProfile m_processProfile = {};
     cv::VideoWriter m_writer;

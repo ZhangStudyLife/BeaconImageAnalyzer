@@ -1,0 +1,1963 @@
+[
+  {
+    "key": "beacon-threshold",
+    "label": "普通信标阈值",
+    "group": "信标阈值",
+    "values": [
+      "90",
+      "120",
+      "150"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 1,
+    "changed_percent": 5.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.24px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 -0.15px，跟踪帧 +0",
+    "effect": "降低会保留弱信标并扩大白区；升高会压制弱光和背景噪声。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.478,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.09,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "edge-threshold",
+    "label": "顶部/左右阈值",
+    "group": "信标阈值",
+    "values": [
+      "65",
+      "80",
+      "95"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "只改变顶部和左右边缘区域的灵敏度。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "track-threshold",
+    "label": "跟踪弱光恢复阈值",
+    "group": "信标阈值",
+    "values": [
+      "90",
+      "105",
+      "120"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "降低更容易续上弱轨迹；升高更不容易被附近亮点续命。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "top-threshold-y",
+    "label": "顶部低阈值边界",
+    "group": "信标阈值",
+    "values": [
+      "35",
+      "45",
+      "55"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 1,
+    "changed_percent": 5.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.19px，跟踪帧 +0",
+    "effect": "数值越大，使用边缘低阈值的顶部区域越高。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.432,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "edge-left-x",
+    "label": "左侧低阈值边界",
+    "group": "信标阈值",
+    "values": [
+      "10",
+      "19",
+      "30"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "数值越大，左侧使用边缘阈值的区域越宽。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "edge-right-x",
+    "label": "右侧低阈值边界",
+    "group": "信标阈值",
+    "values": [
+      "160",
+      "172",
+      "180"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "数值越小，右侧使用边缘阈值的区域越宽。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "beacon-min-area",
+    "label": "普通信标最小面积",
+    "group": "面积/形状",
+    "values": [
+      "4",
+      "6",
+      "10"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "降低会接受更小连通域；升高会过滤小噪点。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "beacon-edge-min-area",
+    "label": "边缘信标最小面积",
+    "group": "面积/形状",
+    "values": [
+      "1",
+      "2",
+      "4"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "控制边缘、孤立和跟踪恢复目标的最小白像素数。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "beacon-top-max-area",
+    "label": "顶部信标最大面积",
+    "group": "面积/形状",
+    "values": [
+      "35",
+      "50",
+      "80"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "降低会更严格拒绝顶部大块反光；升高会容纳膨胀信标。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "beacon-edge-max-area",
+    "label": "左右信标最大面积",
+    "group": "面积/形状",
+    "values": [
+      "40",
+      "60",
+      "90"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "降低会更严格拒绝侧边大块；升高会容纳近处或过曝信标。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "isolated-gray",
+    "label": "孤立小信标峰值",
+    "group": "背景判据",
+    "values": [
+      "100",
+      "120",
+      "150"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高要求小信标自身更亮，降低会放行较弱的小点。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "isolated-bg",
+    "label": "孤立小信标背景上限",
+    "group": "背景判据",
+    "values": [
+      "0",
+      "2",
+      "8"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高允许更亮的局部背景，但会增加噪点通过概率。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "ring-inner",
+    "label": "局部背景环内半径",
+    "group": "背景判据",
+    "values": [
+      "2",
+      "3",
+      "5"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "改变计算局部背景时避开目标核心的范围。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "ring-outer",
+    "label": "局部背景环外半径",
+    "group": "背景判据",
+    "values": [
+      "6",
+      "8",
+      "12"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "数值越大，背景平均值覆盖的邻域越广。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "near-lamp-pad",
+    "label": "车灯附近判定范围",
+    "group": "车灯邻域",
+    "values": [
+      "4",
+      "8",
+      "12"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高会把更远的目标视为车灯邻域，过滤更严格。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "near-lamp-min-area",
+    "label": "车灯附近信标最小面积",
+    "group": "车灯邻域",
+    "values": [
+      "12",
+      "21",
+      "30"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高会拒绝更多靠近车灯的小连通域。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "near-lamp-gray",
+    "label": "车灯附近信标峰值",
+    "group": "车灯邻域",
+    "values": [
+      "130",
+      "150",
+      "180"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高要求车灯附近的小信标具有更高峰值。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "near-lamp-bg",
+    "label": "车灯附近背景上限",
+    "group": "车灯邻域",
+    "values": [
+      "10",
+      "20",
+      "35"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高会允许车灯附近更亮的背景通过孤立判据。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-threshold",
+    "label": "车灯普通区域阈值",
+    "group": "车灯检测",
+    "values": [
+      "180",
+      "200",
+      "230"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "降低会扩大车灯白区；升高会压缩过曝区域并减少背景候选。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-upper-threshold",
+    "label": "车灯上部阈值",
+    "group": "车灯检测",
+    "values": [
+      "130",
+      "150",
+      "185"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "只改变图像上部车灯检测灵敏度。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-upper-y",
+    "label": "车灯上部区域高度",
+    "group": "车灯检测",
+    "values": [
+      "55",
+      "64",
+      "75"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "数值越大，使用上部低阈值的区域越高。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-bridge-gap",
+    "label": "车灯横向桥接距离",
+    "group": "车灯检测",
+    "values": [
+      "2",
+      "4",
+      "6"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高会填补更宽的横向断点，也更容易把相邻亮区粘连。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-min-area",
+    "label": "车灯最小面积",
+    "group": "车灯检测",
+    "values": [
+      "16",
+      "24",
+      "40"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高会过滤更小的车灯候选和反光。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-max-area",
+    "label": "车灯常规最大面积",
+    "group": "车灯检测",
+    "values": [
+      "80",
+      "100",
+      "180"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高会放行更大的候选，降低会更严格拒绝过曝白块。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-front-max-area",
+    "label": "前摄车灯最大面积",
+    "group": "车灯检测",
+    "values": [
+      "120",
+      "180",
+      "240"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "控制前摄允许的大型长条车灯面积上限。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-elongation",
+    "label": "车灯最小长宽比",
+    "group": "车灯检测",
+    "values": [
+      "1.4f",
+      "1.6f",
+      "2.2f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高会更偏向细长目标，减少近圆形反光。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-front-length",
+    "label": "前摄车灯最小长度",
+    "group": "车灯检测",
+    "values": [
+      "8.0f",
+      "10.0f",
+      "15.0f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高会拒绝较短的前摄车灯候选。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "car-back-length",
+    "label": "后摄车灯最小长度",
+    "group": "车灯检测",
+    "values": [
+      "10.0f",
+      "12.0f",
+      "18.0f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "仅在后摄规则下生效；升高会拒绝较短候选。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "b0-match",
+    "label": "B0 匹配距离",
+    "group": "时序跟踪",
+    "values": [
+      "12.0f",
+      "18.0f",
+      "24.0f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高更不容易断轨，但更容易关联到邻近目标。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "kalman-gate",
+    "label": "车灯关联距离",
+    "group": "时序跟踪",
+    "values": [
+      "18.0f",
+      "24.0f",
+      "30.0f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高允许车灯在相邻帧移动更远仍保持同一轨迹。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "kalman-new",
+    "label": "车灯新目标距离",
+    "group": "时序跟踪",
+    "values": [
+      "28.0f",
+      "36.0f",
+      "45.0f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "high_delta": "车灯检出帧 +0，平均长度 +0.00px",
+    "effect": "升高会减少重建轨迹，降低会更快把远跳目标当成新目标。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "b0-confirm",
+    "label": "B0 建立确认帧数",
+    "group": "时序跟踪",
+    "values": [
+      "1",
+      "2",
+      "3"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高会减少单帧误建目标，但增加首次输出延迟。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "beacon-misses",
+    "label": "信标最大丢失帧数",
+    "group": "时序跟踪",
+    "values": [
+      "1",
+      "3",
+      "5"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高会延长短暂丢失后的预测保留时间。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "position-alpha",
+    "label": "位置滤波系数",
+    "group": "时序跟踪",
+    "values": [
+      "0.50f",
+      "0.65f",
+      "0.80f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高更跟手也更抖；降低更平滑但滞后更明显。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "velocity-alpha",
+    "label": "速度滤波系数",
+    "group": "时序跟踪",
+    "values": [
+      "0.15f",
+      "0.30f",
+      "0.45f"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "升高让速度预测更灵敏，也更容易放大瞬时变化。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "area-calibration-switch",
+    "label": "面积标定开关",
+    "group": "面积标定",
+    "values": [
+      "0",
+      "1",
+      "1"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "当前源码未读取该宏，0 和 1 应产生完全相同的结果。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  },
+  {
+    "key": "camera-board",
+    "label": "前摄/后摄规则",
+    "group": "面积标定",
+    "values": [
+      "前摄",
+      "前摄",
+      "后摄"
+    ],
+    "frame": 0,
+    "source": "前摄_车灯",
+    "total_frames": 20,
+    "changed_frames": 0,
+    "changed_percent": 0.0,
+    "low_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "high_delta": "信标检出帧 +0，平均半径 +0.00px，跟踪帧 +0",
+    "effect": "切换车灯规则和对应的信标面积上下限表。",
+    "metrics": [
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      },
+      {
+        "beacon_frames": 1,
+        "beacon_detections": 1,
+        "beacon_radius": 3.241,
+        "tracked_beacon_frames": 0,
+        "track_step": 0.0,
+        "car_frames": 0,
+        "car_detections": 0,
+        "car_length": 0.0,
+        "tracked_car_frames": 0
+      }
+    ]
+  }
+]

@@ -37,16 +37,34 @@ struct JustFloatLogRow
     float roll = 0.0f;
     float yaw = 0.0f;
     JustFloatCameraFrame cameras[3];
+    float projectionXcm = 0.0f;
+    float projectionYcm = 0.0f;
+    bool hasProjectionDistance = false;
+};
+
+struct JustFloatChannelDescriptor
+{
+    int index = -1;
+    QString group;
+    QString name;
+    QString unit;
 };
 
 class JustFloatLog
 {
 public:
+    static constexpr int LegacyChannelCount = 38;
+    static constexpr int ChannelCount = 40;
+
     static bool loadCsv(const QString& path, JustFloatLog* output, QString* errorMessage = nullptr);
     static bool parseDatagram(const QByteArray& datagram,
                               quint64 sequence,
                               JustFloatLogRow* output,
                               QString* errorMessage = nullptr);
+    static const QVector<JustFloatChannelDescriptor>& channelDescriptors();
+    static bool channelValue(const JustFloatLogRow& row, int channelIndex, double* value);
+    static QString csvHeader();
+    static QString csvRow(const JustFloatLogRow& row);
 
     QString sourcePath() const;
     int rowCount() const;

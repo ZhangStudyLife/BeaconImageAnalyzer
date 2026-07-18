@@ -16,6 +16,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPen>
 #include <QPushButton>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -44,6 +46,39 @@ cv::Mat qImageToBgrMat(const QImage& image)
     cv::cvtColor(rgbMat, bgr, cv::COLOR_RGB2BGR);
     return bgr;
 }
+
+QString streamModeName(quint8 mode)
+{
+    switch (mode)
+    {
+        case 0: return QStringLiteral("Raw");
+        case 1: return QStringLiteral("Lamp Binary");
+        case 2: return QStringLiteral("Beacon Binary");
+        case 3: return QStringLiteral("Detected Overlay");
+        default: return QStringLiteral("Unknown");
+    }
+}
+
+void drawChipMarkers(QImage* image, const QVector<BimgImageMarker>& markers)
+{
+    if (image == nullptr || image->isNull())
+    {
+        return;
+    }
+
+    QPainter painter(image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    for (const BimgImageMarker& marker : markers)
+    {
+        const QColor color = marker.type == BimgMarkerType::Beacon
+                                 ? QColor(0, 255, 80)
+                                 : QColor(255, 95, 45);
+        painter.setPen(QPen(color, 1));
+        const QPoint center(marker.x, marker.y);
+        painter.drawLine(center + QPoint(-3, -3), center + QPoint(3, 3));
+        painter.drawLine(center + QPoint(-3, 3), center + QPoint(3, -3));
+    }
+}
 }
 
 TcpImageWindow::TcpImageWindow(QWidget* parent)
@@ -62,7 +97,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     configLayout->setLabelAlignment(Qt::AlignRight);
     m_addressCombo = new QComboBox(this);
     m_addressCombo->setEditable(false);
-    m_portEdit = new QLineEdit(QStringLiteral("1347"), this);
+    m_portEdit = new QLineEdit(QStringLiteral("8086"), this);
     m_listenButton = new QPushButton(QStringLiteral("开始监听"), this);
     configLayout->addRow(QStringLiteral("本机 IP"), m_addressCombo);
     configLayout->addRow(QStringLiteral("本机端口"), m_portEdit);
@@ -258,7 +293,7 @@ void TcpImageWindow::acceptPendingConnections()
             continue;
         }
 
-        auto* parser = new SeekfreeImageFrameParser;
+        auto* parser = new BimgImageFrameParser;
         m_parsers.insert(socket, parser);
         connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
             readSocketData(socket);
@@ -279,20 +314,26 @@ void TcpImageWindow::acceptPendingConnections()
 
 void TcpImageWindow::readSocketData(QTcpSocket* socket)
 {
-    SeekfreeImageFrameParser* parser = m_parsers.value(socket, nullptr);
+    BimgImageFrameParser* parser = m_parsers.value(socket, nullptr);
     if (socket == nullptr || parser == nullptr)
     {
         return;
     }
 
     const QByteArray data = socket->readAll();
-    const QVector<SeekfreeImageFrame> frames = parser->append(data);
+    const QVector<BimgImageFrame> frames = parser->append(data);
+    m_crcErrorCount = parser->crcErrorCount();
+    m_protocolErrorCount = parser->protocolErrorCount();
     const QString peerName = QStringLiteral("%1:%2")
                                  .arg(socket->peerAddress().toString())
                                  .arg(socket->peerPort());
-    for (const SeekfreeImageFrame& frame : frames)
+    for (const BimgImageFrame& frame : frames)
     {
-        setFrame(frame.image, peerName);
+        setFrame(frame, peerName);
+    }
+    if (frames.isEmpty())
+    {
+        updateStatus(m_result);
     }
 }
 
@@ -307,9 +348,9 @@ void TcpImageWindow::removeSocket(QTcpSocket* socket)
     updateStatus(m_result);
 }
 
-void TcpImageWindow::setFrame(const QImage& grayImage, const QString& peerName)
+void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerName)
 {
-    if (grayImage.isNull())
+    if (frame.image.isNull())
     {
         return;
     }
@@ -321,18 +362,35 @@ void TcpImageWindow::setFrame(const QImage& grayImage, const QString& peerName)
         return;
     }
 
-    m_grayImage = grayImage.convertToFormat(QImage::Format_Grayscale8);
+    m_streamFrame = frame;
+    m_grayImage = frame.image.convertToFormat(QImage::Format_Grayscale8);
     ++m_frameIndex;
-    AlgorithmRunner* runner = selectedRunner();
-    m_result = runner->process(m_grayImage);
-    m_processProfile = runner->lastProcessProfile();
+    if (frame.streamMode == 3U)
+    {
+        m_result = {};
+        m_processProfile = {};
+    }
+    else
+    {
+        AlgorithmRunner* runner = selectedRunner();
+        if (runner != nullptr)
+        {
+            m_result = runner->process(m_grayImage);
+            m_processProfile = runner->lastProcessProfile();
+        }
+        else
+        {
+            m_result = {};
+            m_processProfile = {};
+        }
+    }
     render();
 
     if (m_autoSave)
     {
         const QString path = defaultSavePath(QStringLiteral(".png"));
         QDir().mkpath(QFileInfo(path).absolutePath());
-        m_grayImage.save(path, "PNG");
+        m_renderedImage.save(path, "PNG");
     }
 }
 
@@ -345,7 +403,9 @@ void TcpImageWindow::render()
 
     AlgorithmRunner* runner = selectedRunner();
     QImage displayImage = m_grayImage;
-    if (m_viewModeCombo->currentData().toString() == QStringLiteral("binary"))
+    if (m_streamFrame.streamMode != 3U
+        && runner != nullptr
+        && m_viewModeCombo->currentData().toString() == QStringLiteral("binary"))
     {
         const QImage binary = runner->binaryImage(m_grayImage);
         if (!binary.isNull())
@@ -354,14 +414,28 @@ void TcpImageWindow::render()
         }
     }
 
-    QVector<CorrectionShape> corrections;
-    AnnotationModel* annotations = selectedAnnotations();
-    if (annotations != nullptr)
+    if (m_streamFrame.streamMode == 3U)
     {
-        corrections = annotations->correctionsForFrame(qMax(0, m_frameIndex));
+        m_renderedImage = displayImage.convertToFormat(QImage::Format_RGB32);
+        if (m_showOverlay)
+        {
+            drawChipMarkers(&m_renderedImage, m_streamFrame.markers);
+        }
     }
-
-    m_renderedImage = FrameRenderer::render(displayImage, m_result, corrections, 1, m_showOverlay);
+    else if (runner != nullptr)
+    {
+        QVector<CorrectionShape> corrections;
+        AnnotationModel* annotations = selectedAnnotations();
+        if (annotations != nullptr)
+        {
+            corrections = annotations->correctionsForFrame(qMax(0, m_frameIndex));
+        }
+        m_renderedImage = FrameRenderer::render(displayImage, m_result, corrections, 1, m_showOverlay);
+    }
+    else
+    {
+        m_renderedImage = displayImage.convertToFormat(QImage::Format_RGB32);
+    }
     m_videoWidget->setFrameGeometry(m_grayImage.size(), 1);
     m_videoWidget->setPixelSourceImage(m_grayImage);
     m_videoWidget->setImage(m_renderedImage);
@@ -383,7 +457,7 @@ void TcpImageWindow::saveCurrentFrame()
                                                       QStringLiteral("PNG Image (*.png)"));
     if (!path.isEmpty())
     {
-        m_grayImage.save(path, "PNG");
+        m_renderedImage.save(path, "PNG");
     }
 }
 
@@ -419,7 +493,7 @@ void TcpImageWindow::startRecording()
         return;
     }
 
-    const cv::Size size(m_grayImage.width(), m_grayImage.height());
+    const cv::Size size(m_renderedImage.width(), m_renderedImage.height());
     const int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
     if (!m_writer.open(path.toStdString(), fourcc, 50.0, size, true))
     {
@@ -480,19 +554,51 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
     const QString peerText = m_peerName.isEmpty()
         ? QStringLiteral("WiFi SPI 未连接")
         : QStringLiteral("WiFi SPI %1").arg(m_peerName);
-    const QString instanceText = m_enableInstanceCheck->isChecked()
-        ? QStringLiteral("实例：%1").arg(m_instanceCombo->currentText())
-        : QStringLiteral("实例：未启用");
     const QString recordText = m_recording ? QStringLiteral("录像中") : QStringLiteral("未录像");
-    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | 帧 %4 | 信标 %5 | 车灯 %6 | 总目标 %7 | %8 | %9")
+    int beaconMarkers = 0;
+    int lampMarkers = 0;
+    for (const BimgImageMarker& marker : m_streamFrame.markers)
+    {
+        if (marker.type == BimgMarkerType::Beacon)
+        {
+            ++beaconMarkers;
+        }
+        else if (marker.type == BimgMarkerType::CarLamp)
+        {
+            ++lampMarkers;
+        }
+    }
+    const QString frameText = m_frameIndex < 0
+        ? QStringLiteral("等待 BIMG 帧")
+        : QStringLiteral("相机 %1 | 模式 %2 | 序号 %3 | 标记 %4（信标 %5，车灯 %6）")
+              .arg(m_streamFrame.cameraId == 0U ? QStringLiteral("Front") : QStringLiteral("Back"))
+              .arg(streamModeName(m_streamFrame.streamMode))
+              .arg(m_streamFrame.sequence)
+              .arg(m_streamFrame.markers.size())
+              .arg(beaconMarkers)
+              .arg(lampMarkers);
+    QString algorithmText;
+    if (m_streamFrame.streamMode == 3U)
+    {
+        algorithmText = QStringLiteral("芯片识别结果");
+    }
+    else if (selectedRunner() == nullptr)
+    {
+        algorithmText = QStringLiteral("未启用桌面实例 | 直接显示接收图像");
+    }
+    else
+    {
+        algorithmText = QStringLiteral("桌面检测 %1 个 | %2")
+                            .arg(BeaconResultUtils::totalTargetCount(result))
+                            .arg(AlgorithmProcessProfiler::formatCompact(m_processProfile));
+    }
+    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | %4 | CRC错误 %5 | 协议错误 %6 | %7")
                                .arg(listenText)
                                .arg(peerText)
-                               .arg(instanceText)
-                               .arg(qMax(0, m_frameIndex))
-                               .arg(BeaconResultUtils::beaconCount(result))
-                               .arg(BeaconResultUtils::carLampCount(result))
-                               .arg(BeaconResultUtils::totalTargetCount(result))
-                               .arg(AlgorithmProcessProfiler::formatCompact(m_processProfile))
+                               .arg(frameText)
+                               .arg(algorithmText)
+                               .arg(m_crcErrorCount)
+                               .arg(m_protocolErrorCount)
                                .arg(recordText));
 }
 
@@ -500,7 +606,7 @@ AlgorithmRunner* TcpImageWindow::selectedRunner() const
 {
     if (!m_enableInstanceCheck->isChecked())
     {
-        return const_cast<AlgorithmRunner*>(&m_fallbackRunner);
+        return nullptr;
     }
 
     const int id = m_instanceCombo->currentData().toInt();
@@ -511,7 +617,7 @@ AlgorithmRunner* TcpImageWindow::selectedRunner() const
             return option.runner;
         }
     }
-    return const_cast<AlgorithmRunner*>(&m_fallbackRunner);
+    return nullptr;
 }
 
 AnnotationModel* TcpImageWindow::selectedAnnotations() const

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(BeaconImageAnalyzer LANGUAGES C CXX)
 
+include(CTest)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -36,6 +38,8 @@ add_executable(BeaconImageAnalyzer
     app/AiInstanceDialog.cpp
     app/LogReplayWindow.h
     app/LogReplayWindow.cpp
+    app/LogWaveformWindow.h
+    app/LogWaveformWindow.cpp
     app/TcpImageWindow.h
     app/TcpImageWindow.cpp
     app/VideoWidget.h
@@ -51,10 +55,16 @@ add_executable(BeaconImageAnalyzer
     core/BeaconResultUtils.h
     core/JustFloatLog.h
     core/JustFloatLog.cpp
+    core/JustFloatCsvRecorder.h
+    core/JustFloatCsvRecorder.cpp
+    core/WaveformHistoryStore.h
+    core/WaveformHistoryStore.cpp
+    core/WaveformViewport.h
+    core/WaveformViewport.cpp
     core/FrameRenderer.h
     core/FrameRenderer.cpp
-    core/SeekfreeImageFrameParser.h
-    core/SeekfreeImageFrameParser.cpp
+    core/BimgImageFrameParser.h
+    core/BimgImageFrameParser.cpp
     core/VideoExporter.h
     core/VideoExporter.cpp
     annotation/AnnotationModel.h
@@ -89,4 +99,48 @@ if (WIN32)
         NOMINMAX
         WIN32_LEAN_AND_MEAN
     )
+endif()
+
+if (BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+
+    add_executable(BeaconImageAnalyzerTests
+        tests/JustFloatLogTests.cpp
+        core/JustFloatLog.h
+        core/JustFloatLog.cpp
+        core/JustFloatCsvRecorder.h
+        core/JustFloatCsvRecorder.cpp
+        core/WaveformHistoryStore.h
+        core/WaveformHistoryStore.cpp
+        core/WaveformViewport.h
+        core/WaveformViewport.cpp
+    )
+
+    target_include_directories(BeaconImageAnalyzerTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+    )
+
+    target_link_libraries(BeaconImageAnalyzerTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+    )
+
+    add_test(NAME BeaconImageAnalyzerTests COMMAND BeaconImageAnalyzerTests)
+
+    add_executable(BimgImageFrameParserTests
+        tests/BimgImageFrameParserTests.cpp
+        core/BimgImageFrameParser.h
+        core/BimgImageFrameParser.cpp
+    )
+
+    target_include_directories(BimgImageFrameParserTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+    )
+
+    target_link_libraries(BimgImageFrameParserTests PRIVATE
+        Qt6::Gui
+        Qt6::Test
+    )
+
+    add_test(NAME BimgImageFrameParserTests COMMAND BimgImageFrameParserTests)
 endif()
