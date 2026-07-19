@@ -7,13 +7,17 @@
 namespace
 {
 const QByteArray Magic("BIMG", 4);
+const QByteArray ParameterMagic("BPAR", 4);
 const QByteArray SeekfreeMagic("\xaa\x02", 2);
 const QByteArray SeekfreeDotMagic("\xaa\x03", 2);
 constexpr quint8 ProtocolVersion = 1;
 constexpr quint8 HeaderSize = 28;
 constexpr quint8 MarkerSize = 6;
+constexpr quint8 ParameterHeaderSize = 28;
+constexpr quint8 ParameterEntrySize = 8;
 constexpr quint8 MaxStreamMode = 3;
 constexpr quint8 MaxMarkerCount = 16;
+constexpr quint16 MaxParameterCount = 256;
 constexpr qsizetype CrcSize = 4;
 constexpr qsizetype MaxBufferSize = 2 * 1024 * 1024;
 constexpr quint32 MaxImageSize = 1024 * 1024;
@@ -23,7 +27,7 @@ constexpr quint8 SeekfreeGrayImageType = 2;
 qsizetype nearestFrameIndex(const QByteArray& data)
 {
     qsizetype nearest = -1;
-    for (const QByteArray& magic : {Magic, SeekfreeMagic, SeekfreeDotMagic})
+    for (const QByteArray& magic : {Magic, ParameterMagic, SeekfreeMagic, SeekfreeDotMagic})
     {
         const qsizetype index = data.indexOf(magic);
         if (index >= 0 && (nearest < 0 || index < nearest))
@@ -36,7 +40,7 @@ qsizetype nearestFrameIndex(const QByteArray& data)
 
 qsizetype latestFrameIndex(const QByteArray& data)
 {
-    return qMax(data.lastIndexOf(Magic),
+    return qMax(qMax(data.lastIndexOf(Magic), data.lastIndexOf(ParameterMagic)),
                 qMax(data.lastIndexOf(SeekfreeMagic), data.lastIndexOf(SeekfreeDotMagic)));
 }
 
@@ -69,7 +73,7 @@ quint32 crc32(const char* data, qsizetype length)
 }
 }
 
-QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
+BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
 {
     if (!data.isEmpty())
     {
@@ -82,7 +86,7 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
         ++m_protocolErrorCount;
     }
 
-    QVector<BimgImageFrame> frames;
+    BimgParseBatch batch;
     while (m_buffer.size() >= SeekfreeMagic.size())
     {
         const qsizetype frameIndex = nearestFrameIndex(m_buffer);
@@ -94,6 +98,14 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
                 keep = 2;
             }
             else if (m_buffer.endsWith("BIM"))
+            {
+                keep = 3;
+            }
+            else if (m_buffer.endsWith("BP"))
+            {
+                keep = 2;
+            }
+            else if (m_buffer.endsWith("BPA"))
             {
                 keep = 3;
             }
@@ -152,7 +164,7 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
                     frame.width = width;
                     frame.height = height;
                     frame.sequence = m_seekfreeSequence++;
-                    frames.push_back(frame);
+                    batch.frames.push_back(frame);
                 }
                 else
                 {
@@ -193,6 +205,77 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
             {
                 break;
             }
+            m_buffer.remove(0, packetSize);
+            continue;
+        }
+
+        if (m_buffer.startsWith(ParameterMagic))
+        {
+            if (m_buffer.size() < ParameterHeaderSize)
+            {
+                break;
+            }
+
+            const quint8 version = (quint8)m_buffer.at(4);
+            const quint8 headerSize = (quint8)m_buffer.at(5);
+            const quint8 cameraId = (quint8)m_buffer.at(6);
+            const quint8 entrySize = (quint8)m_buffer.at(7);
+            const quint32 revision = readU32Le(m_buffer, 8);
+            const quint32 algorithmBuildId = readU32Le(m_buffer, 12);
+            const quint16 entryCount = readU16Le(m_buffer, 16);
+            const quint32 payloadSize = readU32Le(m_buffer, 20);
+            const quint32 sequence = readU32Le(m_buffer, 24);
+            const quint64 expectedPayload = (quint64)entryCount * entrySize;
+
+            if (version != ProtocolVersion || headerSize != ParameterHeaderSize
+                || cameraId > 1U || entrySize != ParameterEntrySize
+                || entryCount > MaxParameterCount || payloadSize != expectedPayload)
+            {
+                m_buffer.remove(0, 1);
+                ++m_protocolErrorCount;
+                continue;
+            }
+
+            const qsizetype packetSize = (qsizetype)ParameterHeaderSize
+                                         + (qsizetype)payloadSize + CrcSize;
+            if (packetSize > MaxBufferSize)
+            {
+                m_buffer.remove(0, 1);
+                ++m_protocolErrorCount;
+                continue;
+            }
+            if (m_buffer.size() < packetSize)
+            {
+                break;
+            }
+
+            const quint32 expectedCrc = readU32Le(m_buffer, packetSize - CrcSize);
+            const quint32 actualCrc = crc32(m_buffer.constData(), packetSize - CrcSize);
+            if (expectedCrc != actualCrc)
+            {
+                m_buffer.remove(0, packetSize);
+                ++m_crcErrorCount;
+                continue;
+            }
+
+            BimgParameterSnapshot snapshot;
+            snapshot.cameraId = cameraId;
+            snapshot.revision = revision;
+            snapshot.algorithmBuildId = algorithmBuildId;
+            snapshot.sequence = sequence;
+            snapshot.values.reserve(entryCount);
+            qsizetype entryOffset = ParameterHeaderSize;
+            for (quint16 index = 0; index < entryCount; ++index)
+            {
+                BimgParameterValue value;
+                value.id = readU16Le(m_buffer, entryOffset);
+                value.type = (quint8)m_buffer.at(entryOffset + 2);
+                value.status = (quint8)m_buffer.at(entryOffset + 3);
+                value.valueBits = readU32Le(m_buffer, entryOffset + 4);
+                snapshot.values.push_back(value);
+                entryOffset += ParameterEntrySize;
+            }
+            batch.parameterSnapshots.push_back(snapshot);
             m_buffer.remove(0, packetSize);
             continue;
         }
@@ -290,10 +373,10 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
             }
             markerOffset += MarkerSize;
         }
-        frames.push_back(frame);
+        batch.frames.push_back(frame);
         m_buffer.remove(0, packetSize);
     }
-    return frames;
+    return batch;
 }
 
 void BimgImageFrameParser::clear()

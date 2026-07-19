@@ -3,6 +3,7 @@
 
 #include "AlgorithmRunner.h"
 #include "AnnotationModel.h"
+#include "BeaconParameterDiagnostic.h"
 #include "BimgImageFrameParser.h"
 #include "beacon_image.h"
 
@@ -22,6 +23,7 @@ class QPushButton;
 class QTcpServer;
 class QTcpSocket;
 class VideoWidget;
+template<typename T> class QFutureWatcher;
 
 struct TcpInstanceOption
 {
@@ -56,6 +58,7 @@ private:
     void stopListening();
     void acceptPendingConnections();
     void readSocketData(QTcpSocket* socket);
+    void setParameterSnapshot(const BimgParameterSnapshot& snapshot);
     void removeSocket(QTcpSocket* socket);
     void setFrame(const BimgImageFrame& frame, const QString& peerName);
     void render();
@@ -64,6 +67,12 @@ private:
     void startRecording();
     void stopRecording();
     void appendRecordingFrame(const QImage& rendered);
+    void toggleRegionDiagnostic();
+    void handleDiagnosticRegion(const QString& shapeType, const QVector<QPointF>& points);
+    void finishRegionDiagnostic();
+    void resumeLiveDisplay();
+    void updateDiagnosticPanel(const BeaconDiagnosticResult& result);
+    void setDiagnosticPreview(QLabel* label, const QImage& image);
     QString defaultSavePath(const QString& suffix) const;
     void updateStatus(const beacon_result_t& result = {});
     AlgorithmRunner* selectedRunner() const;
@@ -78,6 +87,11 @@ private:
     QImage m_grayImage;
     QImage m_renderedImage;
     BimgImageFrame m_streamFrame;
+    QHash<int, BimgParameterSnapshot> m_parameterSnapshots;
+    QVector<QImage> m_recentRawFrames;
+    QVector<QImage> m_diagnosticFrames;
+    QImage m_diagnosticGrayImage;
+    QRectF m_diagnosticRegion;
     quint64 m_crcErrorCount = 0;
     quint64 m_protocolErrorCount = 0;
     quint16 m_port = 0;
@@ -86,16 +100,26 @@ private:
     bool m_autoSave = false;
     bool m_showOverlay = true;
     bool m_recording = false;
+    bool m_diagnosticFrozen = false;
 
     beacon_result_t m_result = {};
     AlgorithmProcessProfile m_processProfile = {};
     cv::VideoWriter m_writer;
+    QFutureWatcher<BeaconDiagnosticResult>* m_diagnosticWatcher = nullptr;
 
     QComboBox* m_addressCombo = nullptr;
     QLineEdit* m_portEdit = nullptr;
     QPushButton* m_listenButton = nullptr;
     QLabel* m_statusLabel = nullptr;
     VideoWidget* m_videoWidget = nullptr;
+    QWidget* m_diagnosticPanel = nullptr;
+    QLabel* m_diagnosticStateLabel = nullptr;
+    QLabel* m_diagnosticParameterLabel = nullptr;
+    QLabel* m_diagnosticEffectLabel = nullptr;
+    QLabel* m_diagnosticStatsLabel = nullptr;
+    QLabel* m_diagnosticBeforePreview = nullptr;
+    QLabel* m_diagnosticAfterPreview = nullptr;
+    QPushButton* m_diagnosticButton = nullptr;
     QPushButton* m_pauseButton = nullptr;
     QPushButton* m_recordButton = nullptr;
     QComboBox* m_viewModeCombo = nullptr;

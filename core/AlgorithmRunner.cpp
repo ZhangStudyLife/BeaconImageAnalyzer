@@ -88,6 +88,17 @@ bool copyGrayToAlgorithmImage(const QImage& grayImage,
     return true;
 }
 
+QString twoBl3HostAdapterPath()
+{
+    return QDir(projectAlgorithmIncludeDir())
+        .absoluteFilePath(QStringLiteral("2bl3_host/two_bl3_desktop_adapter.c"));
+}
+
+QString twoBl3HostIncludeDir()
+{
+    return QDir(projectAlgorithmIncludeDir()).absoluteFilePath(QStringLiteral("2bl3_host"));
+}
+
 constexpr double McuEstimateMinScale = 80.0;
 constexpr double McuEstimateMaxScale = 240.0;
 }
@@ -184,11 +195,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     {
         m_library.unload();
     }
-    m_initFn = nullptr;
-    m_resetTemporalFn = nullptr;
-    m_processFn = nullptr;
-    m_binaryFn = nullptr;
-    m_carLampPixelAreasFn = nullptr;
+    clearDynamicFunctions();
 
     const QString outputPath = dynamicLibraryPath(sourceInfo.absoluteFilePath(), buildDir);
     QStringList arguments;
@@ -225,19 +232,8 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
         return false;
     }
 
-    m_initFn = reinterpret_cast<InitFn>(m_library.resolve("beacon_image_init"));
-    m_resetTemporalFn = reinterpret_cast<ResetTemporalFn>(m_library.resolve("beacon_image_reset_temporal"));
-    m_processFn = reinterpret_cast<ProcessFn>(m_library.resolve("beacon_image_process"));
-    m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
-    m_carLampPixelAreasFn = reinterpret_cast<CarLampPixelAreasFn>(
-        m_library.resolve("beacon_image_debug_car_lamp_pixel_areas"));
-    if (m_processFn == nullptr)
+    if (!resolveDynamicFunctions(errorMessage))
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("算法库未导出 beacon_image_process。");
-        }
-        m_library.unload();
         return false;
     }
 
@@ -250,6 +246,205 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
         m_resetTemporalFn();
     }
     m_sourcePath = sourceInfo.absoluteFilePath();
+    return true;
+}
+
+bool AlgorithmRunner::loadTwoBl3Firmware(const QString& imageDirectory,
+                                         const QString& buildDir,
+                                         QString* errorMessage)
+{
+    const QDir imageDir(imageDirectory);
+    const QString imageSource = imageDir.absoluteFilePath(QStringLiteral("image.c"));
+    const QString parameterSource = imageDir.absoluteFilePath(QStringLiteral("image_params.c"));
+    const QString imageHeader = imageDir.absoluteFilePath(QStringLiteral("image.h"));
+    const QString adapterSource = twoBl3HostAdapterPath();
+    const bool sourcesAvailable = QFileInfo(imageSource).isFile()
+                                  && QFileInfo(parameterSource).isFile()
+                                  && QFileInfo(imageHeader).isFile()
+                                  && QFileInfo(adapterSource).isFile();
+    const QString packagedLibrary = QDir(QCoreApplication::applicationDirPath())
+                                        .absoluteFilePath(QStringLiteral("two_bl3_diagnostic%1")
+                                                              .arg(librarySuffix()));
+    if (!sourcesAvailable)
+    {
+        return loadTwoBl3Library(packagedLibrary, errorMessage);
+    }
+
+    const QString compiler = compilerPath();
+    if (compiler.isEmpty())
+    {
+        return loadTwoBl3Library(packagedLibrary, errorMessage);
+    }
+
+    QDir().mkpath(buildDir);
+    if (m_library.isLoaded())
+    {
+        m_library.unload();
+    }
+    clearDynamicFunctions();
+
+    const QString outputPath = dynamicLibraryPath(imageSource, buildDir);
+    const QString codeDirectory = QDir(imageDirectory).absoluteFilePath(QStringLiteral(".."));
+    QStringList arguments;
+    arguments << QStringLiteral("-shared")
+              << QStringLiteral("-O2")
+              << QStringLiteral("-std=c11")
+              << QStringLiteral("-I") << twoBl3HostIncludeDir()
+              << QStringLiteral("-I") << codeDirectory
+              << QStringLiteral("-I") << projectAlgorithmIncludeDir()
+              << QStringLiteral("-o") << outputPath
+              << imageSource
+              << parameterSource
+              << adapterSource
+              << QStringLiteral("-lm");
+
+    QProcess compilerProcess;
+    compilerProcess.start(compiler, arguments);
+    if (!compilerProcess.waitForFinished(60000)
+        || compilerProcess.exitStatus() != QProcess::NormalExit
+        || compilerProcess.exitCode() != 0)
+    {
+        if (errorMessage != nullptr)
+        {
+            const QString output = QString::fromLocal8Bit(compilerProcess.readAllStandardError())
+                                   + QString::fromLocal8Bit(compilerProcess.readAllStandardOutput());
+            *errorMessage = QStringLiteral("编译 2BL3 诊断算法失败：%1").arg(output.trimmed());
+        }
+        return false;
+    }
+
+    m_library.setFileName(outputPath);
+    if (!m_library.load())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("加载 2BL3 诊断算法失败：%1").arg(m_library.errorString());
+        }
+        return false;
+    }
+    if (!resolveDynamicFunctions(errorMessage))
+    {
+        return false;
+    }
+    if (m_initFn == nullptr || m_resetTemporalFn == nullptr || !supportsParameterTuning())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("2BL3 诊断算法缺少初始化或参数调试接口。");
+        }
+        m_library.unload();
+        clearDynamicFunctions();
+        return false;
+    }
+    m_initFn();
+    m_resetTemporalFn();
+    m_sourcePath = imageSource;
+    return true;
+}
+
+bool AlgorithmRunner::loadTwoBl3Library(const QString& libraryPath, QString* errorMessage)
+{
+    if (!QFileInfo(libraryPath).isFile())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("未找到 2BL3 固件源码或预编译诊断库：%1")
+                                .arg(libraryPath);
+        }
+        return false;
+    }
+    if (m_library.isLoaded())
+    {
+        m_library.unload();
+    }
+    clearDynamicFunctions();
+    m_library.setFileName(libraryPath);
+    if (!m_library.load())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("加载预编译 2BL3 诊断库失败：%1")
+                                .arg(m_library.errorString());
+        }
+        return false;
+    }
+    if (!resolveDynamicFunctions(errorMessage))
+    {
+        return false;
+    }
+    if (m_initFn == nullptr || m_resetTemporalFn == nullptr || !supportsParameterTuning())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("预编译 2BL3 诊断库缺少必要调试接口。");
+        }
+        m_library.unload();
+        clearDynamicFunctions();
+        return false;
+    }
+    m_initFn();
+    m_resetTemporalFn();
+    m_sourcePath = libraryPath;
+    return true;
+}
+
+QString AlgorithmRunner::defaultTwoBl3ImageDirectory()
+{
+    const QString configured = qEnvironmentVariable("BEACON_2BL3_IMAGE_DIR").trimmed();
+    if (!configured.isEmpty())
+    {
+        return QDir(configured).absolutePath();
+    }
+#ifdef BEACON_SOURCE_DIR
+    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(
+        QStringLiteral("../HDUASC-SmartCar-21st-FlyOverMinefield/"
+                       "CYT2BL3_Image/project/code/Image"));
+#else
+    return QString();
+#endif
+}
+
+void AlgorithmRunner::clearDynamicFunctions()
+{
+    m_initFn = nullptr;
+    m_resetTemporalFn = nullptr;
+    m_processFn = nullptr;
+    m_binaryFn = nullptr;
+    m_carLampPixelAreasFn = nullptr;
+    m_buildIdFn = nullptr;
+    m_parameterCountFn = nullptr;
+    m_parameterInfoFn = nullptr;
+    m_parameterGetFn = nullptr;
+    m_parameterSetFn = nullptr;
+}
+
+bool AlgorithmRunner::resolveDynamicFunctions(QString* errorMessage)
+{
+    m_initFn = reinterpret_cast<InitFn>(m_library.resolve("beacon_image_init"));
+    m_resetTemporalFn = reinterpret_cast<ResetTemporalFn>(m_library.resolve("beacon_image_reset_temporal"));
+    m_processFn = reinterpret_cast<ProcessFn>(m_library.resolve("beacon_image_process"));
+    m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
+    m_carLampPixelAreasFn = reinterpret_cast<CarLampPixelAreasFn>(
+        m_library.resolve("beacon_image_debug_car_lamp_pixel_areas"));
+    m_buildIdFn = reinterpret_cast<BuildIdFn>(m_library.resolve("beacon_image_debug_build_id"));
+    m_parameterCountFn = reinterpret_cast<ParameterCountFn>(
+        m_library.resolve("beacon_image_debug_parameter_count"));
+    m_parameterInfoFn = reinterpret_cast<ParameterInfoFn>(
+        m_library.resolve("beacon_image_debug_parameter_info"));
+    m_parameterGetFn = reinterpret_cast<ParameterGetFn>(
+        m_library.resolve("beacon_image_debug_parameter_get"));
+    m_parameterSetFn = reinterpret_cast<ParameterSetFn>(
+        m_library.resolve("beacon_image_debug_parameter_set"));
+    if (m_processFn == nullptr)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("算法库未导出 beacon_image_process。");
+        }
+        m_library.unload();
+        clearDynamicFunctions();
+        return false;
+    }
     return true;
 }
 
@@ -360,4 +555,51 @@ QImage AlgorithmRunner::binaryImage(const QImage& grayImage) const
     }
 
     return output;
+}
+
+bool AlgorithmRunner::supportsParameterTuning() const
+{
+    return m_buildIdFn != nullptr && m_parameterCountFn != nullptr
+           && m_parameterInfoFn != nullptr && m_parameterGetFn != nullptr
+           && m_parameterSetFn != nullptr;
+}
+
+quint32 AlgorithmRunner::algorithmBuildId() const
+{
+    return m_buildIdFn != nullptr ? m_buildIdFn() : 0U;
+}
+
+QVector<AlgorithmParameterInfo> AlgorithmRunner::parameterInfos() const
+{
+    QVector<AlgorithmParameterInfo> result;
+    if (!supportsParameterTuning())
+    {
+        return result;
+    }
+    const quint16 count = m_parameterCountFn();
+    result.reserve(count);
+    for (quint16 index = 0; index < count; ++index)
+    {
+        AlgorithmParameterInfo info;
+        if (m_parameterInfoFn(index, &info.id, &info.type, &info.minimum, &info.maximum) == 0)
+        {
+            result.push_back(info);
+        }
+    }
+    return result;
+}
+
+bool AlgorithmRunner::parameterValue(quint8 type, quint16 id, quint32* valueBits) const
+{
+    return valueBits != nullptr && m_parameterGetFn != nullptr
+           && m_parameterGetFn(type, id, valueBits) == 0;
+}
+
+bool AlgorithmRunner::setParameterValue(quint8 type,
+                                        quint16 id,
+                                        quint32 valueBits,
+                                        quint32* actualBits) const
+{
+    return actualBits != nullptr && m_parameterSetFn != nullptr
+           && m_parameterSetFn(type, id, valueBits, actualBits) == 0;
 }

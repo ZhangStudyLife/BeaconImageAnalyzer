@@ -4,6 +4,7 @@
 #include "FrameRenderer.h"
 #include "VideoWidget.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
@@ -11,6 +12,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFont>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QHostAddress>
 #include <QLabel>
@@ -19,9 +22,13 @@
 #include <QPainter>
 #include <QPen>
 #include <QPushButton>
+#include <QPixmap>
+#include <QStandardPaths>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QVBoxLayout>
+
+#include <QtConcurrent>
 
 #include <opencv2/imgproc.hpp>
 
@@ -109,9 +116,50 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     m_statusLabel->setWordWrap(true);
     root->addWidget(m_statusLabel);
 
+    auto* body = new QHBoxLayout;
+    body->setSpacing(10);
     m_videoWidget = new VideoWidget(this);
     m_videoWidget->setText(QStringLiteral("等待 TCP 图像"));
-    root->addWidget(m_videoWidget, 1);
+    body->addWidget(m_videoWidget, 1);
+
+    m_diagnosticPanel = new QWidget(this);
+    m_diagnosticPanel->setFixedWidth(310);
+    auto* diagnosticLayout = new QVBoxLayout(m_diagnosticPanel);
+    diagnosticLayout->setContentsMargins(10, 0, 0, 0);
+    diagnosticLayout->setSpacing(7);
+    auto* diagnosticTitle = new QLabel(QStringLiteral("区域参数诊断"), m_diagnosticPanel);
+    QFont titleFont = diagnosticTitle->font();
+    titleFont.setBold(true);
+    diagnosticTitle->setFont(titleFont);
+    diagnosticLayout->addWidget(diagnosticTitle);
+    m_diagnosticStateLabel = new QLabel(QStringLiteral("等待 Raw 图传、参数快照和至少 10 帧缓存。"), m_diagnosticPanel);
+    m_diagnosticStateLabel->setWordWrap(true);
+    diagnosticLayout->addWidget(m_diagnosticStateLabel);
+    m_diagnosticParameterLabel = new QLabel(m_diagnosticPanel);
+    m_diagnosticParameterLabel->setWordWrap(true);
+    m_diagnosticParameterLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    diagnosticLayout->addWidget(m_diagnosticParameterLabel);
+    m_diagnosticEffectLabel = new QLabel(m_diagnosticPanel);
+    m_diagnosticEffectLabel->setWordWrap(true);
+    diagnosticLayout->addWidget(m_diagnosticEffectLabel);
+    m_diagnosticStatsLabel = new QLabel(m_diagnosticPanel);
+    m_diagnosticStatsLabel->setWordWrap(true);
+    diagnosticLayout->addWidget(m_diagnosticStatsLabel);
+    diagnosticLayout->addWidget(new QLabel(QStringLiteral("修改前"), m_diagnosticPanel));
+    m_diagnosticBeforePreview = new QLabel(m_diagnosticPanel);
+    m_diagnosticBeforePreview->setAlignment(Qt::AlignCenter);
+    m_diagnosticBeforePreview->setFixedSize(282, 180);
+    m_diagnosticBeforePreview->setStyleSheet(QStringLiteral("background: #090a0b; border: 1px solid #2a3035;"));
+    diagnosticLayout->addWidget(m_diagnosticBeforePreview);
+    diagnosticLayout->addWidget(new QLabel(QStringLiteral("建议值预览"), m_diagnosticPanel));
+    m_diagnosticAfterPreview = new QLabel(m_diagnosticPanel);
+    m_diagnosticAfterPreview->setAlignment(Qt::AlignCenter);
+    m_diagnosticAfterPreview->setFixedSize(282, 180);
+    m_diagnosticAfterPreview->setStyleSheet(QStringLiteral("background: #090a0b; border: 1px solid #2a3035;"));
+    diagnosticLayout->addWidget(m_diagnosticAfterPreview);
+    diagnosticLayout->addStretch(1);
+    body->addWidget(m_diagnosticPanel);
+    root->addLayout(body, 1);
 
     auto* controls = new QHBoxLayout;
     controls->setSpacing(8);
@@ -119,6 +167,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     auto* saveButton = new QPushButton(QStringLiteral("保存当前帧"), this);
     auto* dirButton = new QPushButton(QStringLiteral("保存目录"), this);
     m_recordButton = new QPushButton(QStringLiteral("开始录像"), this);
+    m_diagnosticButton = new QPushButton(QStringLiteral("区域诊断"), this);
     m_viewModeCombo = new QComboBox(this);
     m_viewModeCombo->addItem(QStringLiteral("原图"), QStringLiteral("original"));
     m_viewModeCombo->addItem(QStringLiteral("二值图"), QStringLiteral("binary"));
@@ -132,6 +181,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     controls->addWidget(saveButton);
     controls->addWidget(dirButton);
     controls->addWidget(m_recordButton);
+    controls->addWidget(m_diagnosticButton);
     controls->addSpacing(12);
     controls->addWidget(m_viewModeCombo);
     controls->addWidget(m_enableInstanceCheck);
@@ -179,6 +229,16 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     connect(m_autoSaveCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_autoSave = checked;
     });
+    connect(m_diagnosticButton, &QPushButton::clicked, this, &TcpImageWindow::toggleRegionDiagnostic);
+    connect(m_videoWidget,
+            &VideoWidget::correctionShapeFinished,
+            this,
+            &TcpImageWindow::handleDiagnosticRegion);
+    m_diagnosticWatcher = new QFutureWatcher<BeaconDiagnosticResult>(this);
+    connect(m_diagnosticWatcher,
+            &QFutureWatcher<BeaconDiagnosticResult>::finished,
+            this,
+            &TcpImageWindow::finishRegionDiagnostic);
 
     updateStatus(m_result);
 }
@@ -321,19 +381,43 @@ void TcpImageWindow::readSocketData(QTcpSocket* socket)
     }
 
     const QByteArray data = socket->readAll();
-    const QVector<BimgImageFrame> frames = parser->append(data);
+    const BimgParseBatch batch = parser->append(data);
     m_crcErrorCount = parser->crcErrorCount();
     m_protocolErrorCount = parser->protocolErrorCount();
     const QString peerName = QStringLiteral("%1:%2")
                                  .arg(socket->peerAddress().toString())
                                  .arg(socket->peerPort());
-    for (const BimgImageFrame& frame : frames)
+    for (const BimgParameterSnapshot& snapshot : batch.parameterSnapshots)
+    {
+        setParameterSnapshot(snapshot);
+    }
+    for (const BimgImageFrame& frame : batch.frames)
     {
         setFrame(frame, peerName);
     }
-    if (frames.isEmpty())
+    if (batch.isEmpty())
     {
         updateStatus(m_result);
+    }
+}
+
+void TcpImageWindow::setParameterSnapshot(const BimgParameterSnapshot& snapshot)
+{
+    const auto existing = m_parameterSnapshots.constFind(snapshot.cameraId);
+    if (existing == m_parameterSnapshots.cend()
+        || existing->revision != snapshot.revision
+        || existing->algorithmBuildId != snapshot.algorithmBuildId)
+    {
+        m_recentRawFrames.clear();
+    }
+    m_parameterSnapshots.insert(snapshot.cameraId, snapshot);
+    if (!m_diagnosticFrozen && m_diagnosticStateLabel != nullptr)
+    {
+        m_diagnosticStateLabel->setText(
+            QStringLiteral("已同步相机 %1 参数：修订 %2，构建 ID 0x%3。")
+                .arg(snapshot.cameraId == 0U ? QStringLiteral("Front") : QStringLiteral("Back"))
+                .arg(snapshot.revision)
+                .arg(snapshot.algorithmBuildId, 8, 16, QLatin1Char('0')));
     }
 }
 
@@ -356,6 +440,20 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
     }
 
     m_peerName = peerName;
+    const QImage gray = frame.image.convertToFormat(QImage::Format_Grayscale8);
+    if (frame.protocol == ImageFrameProtocol::Bimg && frame.streamMode == 0U)
+    {
+        m_recentRawFrames.push_back(gray);
+        while (m_recentRawFrames.size() > 50)
+        {
+            m_recentRawFrames.removeFirst();
+        }
+    }
+    if (m_diagnosticFrozen)
+    {
+        updateStatus(m_result);
+        return;
+    }
     if (m_paused)
     {
         updateStatus(m_result);
@@ -363,7 +461,7 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
     }
 
     m_streamFrame = frame;
-    m_grayImage = frame.image.convertToFormat(QImage::Format_Grayscale8);
+    m_grayImage = gray;
     ++m_frameIndex;
     if (frame.streamMode == 3U)
     {
@@ -441,6 +539,180 @@ void TcpImageWindow::render()
     m_videoWidget->setImage(m_renderedImage);
     appendRecordingFrame(m_renderedImage);
     updateStatus(m_result);
+}
+
+void TcpImageWindow::toggleRegionDiagnostic()
+{
+    if (m_diagnosticWatcher != nullptr && m_diagnosticWatcher->isRunning())
+    {
+        return;
+    }
+    if (m_diagnosticFrozen)
+    {
+        resumeLiveDisplay();
+        return;
+    }
+    if (m_streamFrame.protocol != ImageFrameProtocol::Bimg || m_streamFrame.streamMode != 0U)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("区域诊断"),
+                                 QStringLiteral("请先在 2BL3 Img > Stream 中切换为 Raw。"));
+        return;
+    }
+    if (!m_parameterSnapshots.contains(m_streamFrame.cameraId))
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("区域诊断"),
+                                 QStringLiteral("尚未收到该相机的 BPAR 参数快照。"));
+        return;
+    }
+    if (m_recentRawFrames.size() < 10)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("区域诊断"),
+                                 QStringLiteral("当前只有 %1 帧 Raw 缓存，至少需要 10 帧。")
+                                     .arg(m_recentRawFrames.size()));
+        return;
+    }
+    m_diagnosticFrozen = true;
+    m_diagnosticFrames = m_recentRawFrames;
+    m_diagnosticGrayImage = m_grayImage;
+    m_diagnosticRegion = QRectF();
+    m_videoWidget->setCorrectionTool(QStringLiteral("rect"));
+    m_videoWidget->setCorrectionStyle(QColor(60, 220, 255), 2);
+    m_diagnosticButton->setText(QStringLiteral("取消诊断"));
+    m_diagnosticStateLabel->setText(
+        QStringLiteral("画面已冻结。请拖动矩形框选一个误检或漏检区域。"));
+    m_diagnosticParameterLabel->clear();
+    m_diagnosticEffectLabel->clear();
+    m_diagnosticStatsLabel->setText(QStringLiteral("将回放最近 %1 帧。")
+                                        .arg(m_diagnosticFrames.size()));
+}
+
+void TcpImageWindow::handleDiagnosticRegion(const QString& shapeType,
+                                            const QVector<QPointF>& points)
+{
+    if (!m_diagnosticFrozen || shapeType != QStringLiteral("rect") || points.size() < 2
+        || (m_diagnosticWatcher != nullptr && m_diagnosticWatcher->isRunning()))
+    {
+        return;
+    }
+
+    m_diagnosticRegion = QRectF(points[0], points[1]).normalized()
+                             .intersected(QRectF(QPointF(0, 0), m_diagnosticGrayImage.size()));
+    if (m_diagnosticRegion.width() < 2.0 || m_diagnosticRegion.height() < 2.0)
+    {
+        m_diagnosticStateLabel->setText(QStringLiteral("框选区域过小，请重新拖动。"));
+        return;
+    }
+
+    m_videoWidget->setCorrectionTool(QStringLiteral("select"));
+    m_diagnosticButton->setEnabled(false);
+    m_diagnosticStateLabel->setText(QStringLiteral("正在离线回放并搜索安全单参数方案..."));
+
+    BeaconDiagnosticRequest request;
+    request.frames = m_diagnosticFrames;
+    request.region = m_diagnosticRegion;
+    request.snapshot = m_parameterSnapshots.value(m_streamFrame.cameraId);
+    request.firmwareImageDirectory = AlgorithmRunner::defaultTwoBl3ImageDirectory();
+    request.buildDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+                                 .absoluteFilePath(QStringLiteral("2bl3-diagnostic"));
+    m_diagnosticWatcher->setFuture(QtConcurrent::run([request]() {
+        return BeaconParameterDiagnostic::analyze(request);
+    }));
+}
+
+void TcpImageWindow::finishRegionDiagnostic()
+{
+    if (m_diagnosticWatcher == nullptr)
+    {
+        return;
+    }
+    updateDiagnosticPanel(m_diagnosticWatcher->result());
+    m_diagnosticButton->setEnabled(true);
+    m_diagnosticButton->setText(QStringLiteral("继续实时"));
+}
+
+void TcpImageWindow::resumeLiveDisplay()
+{
+    m_diagnosticFrozen = false;
+    m_diagnosticFrames.clear();
+    m_diagnosticRegion = QRectF();
+    m_videoWidget->setCorrectionTool(QStringLiteral("select"));
+    m_diagnosticButton->setEnabled(true);
+    m_diagnosticButton->setText(QStringLiteral("区域诊断"));
+    if (!m_recentRawFrames.isEmpty())
+    {
+        m_grayImage = m_recentRawFrames.last();
+        AlgorithmRunner* runner = selectedRunner();
+        if (runner != nullptr)
+        {
+            m_result = runner->process(m_grayImage);
+            m_processProfile = runner->lastProcessProfile();
+        }
+        render();
+    }
+}
+
+void TcpImageWindow::updateDiagnosticPanel(const BeaconDiagnosticResult& result)
+{
+    const QString problem = result.falsePositive ? QStringLiteral("误检") : QStringLiteral("漏检");
+    m_diagnosticStateLabel->setText(QStringLiteral("%1：%2").arg(problem, result.message));
+    m_diagnosticStatsLabel->setText(
+        QStringLiteral("区域 %1 像素 | 平均灰度 %2 | 最大灰度 %3 | 回放 %4 帧")
+            .arg(result.regionPixelCount)
+            .arg(result.regionMeanGray, 0, 'f', 1)
+            .arg(result.regionMaxGray)
+            .arg(result.analyzedFrameCount));
+
+    QImage before;
+    if (!m_diagnosticGrayImage.isNull())
+    {
+        before = FrameRenderer::render(m_diagnosticGrayImage, result.beforeResult, {}, 1, true);
+        QPainter painter(&before);
+        painter.setPen(QPen(QColor(60, 220, 255), 1));
+        painter.drawRect(m_diagnosticRegion);
+    }
+    setDiagnosticPreview(m_diagnosticBeforePreview, before);
+
+    if (!result.recommendationFound)
+    {
+        m_diagnosticParameterLabel->setText(QStringLiteral("未生成参数修改建议。"));
+        m_diagnosticEffectLabel->setText(
+            QStringLiteral("曝光参数无法通过已采集帧验证；需要现场修改曝光后重新采集。"));
+        m_diagnosticAfterPreview->clear();
+        return;
+    }
+
+    m_diagnosticParameterLabel->setText(
+        QStringLiteral("%1 > %2\n%3 -> %4")
+            .arg(result.parameter.menuPath,
+                 result.parameter.name,
+                 TwoBl3ParameterCatalog::formatValue(result.parameter.type, result.currentValue),
+                 TwoBl3ParameterCatalog::formatValue(result.parameter.type, result.recommendedValue)));
+    m_diagnosticEffectLabel->setText(result.parameter.effect);
+
+    QImage after = FrameRenderer::render(m_diagnosticGrayImage, result.afterResult, {}, 1, true);
+    QPainter painter(&after);
+    painter.setPen(QPen(QColor(60, 220, 255), 1));
+    painter.drawRect(m_diagnosticRegion);
+    setDiagnosticPreview(m_diagnosticAfterPreview, after);
+}
+
+void TcpImageWindow::setDiagnosticPreview(QLabel* label, const QImage& image)
+{
+    if (label == nullptr)
+    {
+        return;
+    }
+    if (image.isNull())
+    {
+        label->clear();
+        return;
+    }
+    label->setPixmap(QPixmap::fromImage(image).scaled(label->size(),
+                                                       Qt::KeepAspectRatio,
+                                                       Qt::FastTransformation));
 }
 
 void TcpImageWindow::saveCurrentFrame()

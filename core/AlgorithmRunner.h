@@ -6,6 +6,7 @@
 #include <QImage>
 #include <QLibrary>
 #include <QString>
+#include <QVector>
 
 #include <array>
 
@@ -20,6 +21,14 @@ struct AlgorithmDetectionMetrics
     bool carLampPixelAreasAvailable = false;
     unsigned char carLampPixelAreaCount = 0;
     std::array<unsigned short, BEACON_MAX_CAR_LAMP_COUNT> carLampPixelAreas = {};
+};
+
+struct AlgorithmParameterInfo
+{
+    quint16 id = 0;
+    quint8 type = 0;
+    float minimum = 0.0f;
+    float maximum = 0.0f;
 };
 
 namespace AlgorithmProcessProfiler
@@ -40,6 +49,10 @@ public:
     ~AlgorithmRunner();
 
     bool loadSourceFile(const QString& sourcePath, const QString& buildDir, QString* errorMessage = nullptr);
+    bool loadTwoBl3Firmware(const QString& imageDirectory,
+                            const QString& buildDir,
+                            QString* errorMessage = nullptr);
+    static QString defaultTwoBl3ImageDirectory();
     QString sourcePath() const;
     bool usesDynamicLibrary() const;
     void resetTemporal() const;
@@ -47,6 +60,11 @@ public:
     AlgorithmProcessProfile lastProcessProfile() const;
     AlgorithmDetectionMetrics lastDetectionMetrics() const;
     QImage binaryImage(const QImage& grayImage) const;
+    bool supportsParameterTuning() const;
+    quint32 algorithmBuildId() const;
+    QVector<AlgorithmParameterInfo> parameterInfos() const;
+    bool parameterValue(quint8 type, quint16 id, quint32* valueBits) const;
+    bool setParameterValue(quint8 type, quint16 id, quint32 valueBits, quint32* actualBits) const;
 
 private:
     using InitFn = void (*)();
@@ -56,6 +74,15 @@ private:
                               unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W]);
     using CarLampPixelAreasFn = unsigned char (*)(
         unsigned short[BEACON_MAX_CAR_LAMP_COUNT]);
+    using BuildIdFn = quint32 (*)();
+    using ParameterCountFn = quint16 (*)();
+    using ParameterInfoFn = int (*)(quint16, quint16*, quint8*, float*, float*);
+    using ParameterGetFn = int (*)(quint8, quint16, quint32*);
+    using ParameterSetFn = int (*)(quint8, quint16, quint32, quint32*);
+
+    void clearDynamicFunctions();
+    bool resolveDynamicFunctions(QString* errorMessage);
+    bool loadTwoBl3Library(const QString& libraryPath, QString* errorMessage);
 
     QString m_sourcePath;
     QLibrary m_library;
@@ -64,6 +91,11 @@ private:
     ProcessFn m_processFn = nullptr;
     BinaryFn m_binaryFn = nullptr;
     CarLampPixelAreasFn m_carLampPixelAreasFn = nullptr;
+    BuildIdFn m_buildIdFn = nullptr;
+    ParameterCountFn m_parameterCountFn = nullptr;
+    ParameterInfoFn m_parameterInfoFn = nullptr;
+    ParameterGetFn m_parameterGetFn = nullptr;
+    ParameterSetFn m_parameterSetFn = nullptr;
     mutable AlgorithmProcessProfile m_lastProcessProfile;
     mutable AlgorithmDetectionMetrics m_lastDetectionMetrics;
 };

@@ -9,6 +9,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 . "$PSScriptRoot/env.ps1"
 $BuildScript = Join-Path $PSScriptRoot "build.ps1"
 $Exe = Join-Path $ProjectRoot "build/BeaconImageAnalyzer.exe"
+$TwoBl3DiagnosticDll = Join-Path $ProjectRoot "build/two_bl3_diagnostic.dll"
 $WindeployQt = Join-Path $MsysBin "windeployqt.exe"
 $Objdump = Join-Path $MsysBin "objdump.exe"
 $DistRoot = Join-Path $ProjectRoot "dist"
@@ -133,6 +134,9 @@ if ((Test-Path -LiteralPath $StageDir) -or (Test-Path -LiteralPath $ZipPath)) {
 
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item -LiteralPath $Exe -Destination $StageDir -Force
+if (Test-Path -LiteralPath $TwoBl3DiagnosticDll) {
+    Copy-Item -LiteralPath $TwoBl3DiagnosticDll -Destination $StageDir -Force
+}
 
 $env:Path = "$MsysBin;$env:Path"
 

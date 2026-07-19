@@ -37,10 +37,38 @@ struct BimgImageFrame
     QVector<BimgImageMarker> markers;
 };
 
+struct BimgParameterValue
+{
+    quint16 id = 0;
+    quint8 type = 0;
+    quint8 status = 0;
+    quint32 valueBits = 0;
+};
+
+struct BimgParameterSnapshot
+{
+    quint8 cameraId = 0;
+    quint32 revision = 0;
+    quint32 algorithmBuildId = 0;
+    quint32 sequence = 0;
+    QVector<BimgParameterValue> values;
+};
+
+struct BimgParseBatch
+{
+    QVector<BimgImageFrame> frames;
+    QVector<BimgParameterSnapshot> parameterSnapshots;
+
+    bool isEmpty() const
+    {
+        return frames.isEmpty() && parameterSnapshots.isEmpty();
+    }
+};
+
 class BimgImageFrameParser
 {
 public:
-    QVector<BimgImageFrame> append(const QByteArray& data);
+    BimgParseBatch append(const QByteArray& data);
     void clear();
 
     quint64 crcErrorCount() const;

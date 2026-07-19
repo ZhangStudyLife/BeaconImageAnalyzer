@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Network Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Concurrent Network Widgets)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
 
 add_library(beacon_algorithm STATIC
@@ -21,6 +21,27 @@ add_library(beacon_algorithm STATIC
 target_include_directories(beacon_algorithm PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm
 )
+
+set(TWO_BL3_IMAGE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../HDUASC-SmartCar-21st-FlyOverMinefield/CYT2BL3_Image/project/code/Image"
+    CACHE PATH "2BL3 image algorithm source directory")
+if (EXISTS "${TWO_BL3_IMAGE_DIR}/image.c" AND EXISTS "${TWO_BL3_IMAGE_DIR}/image_params.c")
+    add_library(two_bl3_diagnostic SHARED
+        "${TWO_BL3_IMAGE_DIR}/image.c"
+        "${TWO_BL3_IMAGE_DIR}/image_params.c"
+        algorithm/2bl3_host/two_bl3_desktop_adapter.c
+    )
+    target_include_directories(two_bl3_diagnostic PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/algorithm/2bl3_host
+        "${TWO_BL3_IMAGE_DIR}/.."
+        ${CMAKE_CURRENT_SOURCE_DIR}/algorithm
+    )
+    target_link_libraries(two_bl3_diagnostic PRIVATE m)
+    set_target_properties(two_bl3_diagnostic PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "two_bl3_diagnostic"
+    )
+endif()
 
 set(BEACON_APP_PLATFORM_SOURCES)
 if (WIN32)
@@ -50,6 +71,10 @@ add_executable(BeaconImageAnalyzer
     core/VideoReader.cpp
     core/AlgorithmRunner.h
     core/AlgorithmRunner.cpp
+    core/BeaconParameterDiagnostic.h
+    core/BeaconParameterDiagnostic.cpp
+    core/TwoBl3ParameterCatalog.h
+    core/TwoBl3ParameterCatalog.cpp
     core/CarPlanRunner.h
     core/CarPlanRunner.cpp
     core/BeaconResultUtils.h
@@ -85,6 +110,7 @@ target_include_directories(BeaconImageAnalyzer PRIVATE
 
 target_link_libraries(BeaconImageAnalyzer PRIVATE
     Qt6::Network
+    Qt6::Concurrent
     Qt6::Widgets
     beacon_algorithm
     ${OpenCV_LIBS}
@@ -143,4 +169,38 @@ if (BUILD_TESTING)
     )
 
     add_test(NAME BimgImageFrameParserTests COMMAND BimgImageFrameParserTests)
+
+    add_executable(TwoBl3AlgorithmRunnerTests
+        tests/TwoBl3AlgorithmRunnerTests.cpp
+        core/AlgorithmRunner.h
+        core/AlgorithmRunner.cpp
+        core/BeaconParameterDiagnostic.h
+        core/BeaconParameterDiagnostic.cpp
+        core/TwoBl3ParameterCatalog.h
+        core/TwoBl3ParameterCatalog.cpp
+        core/FrameRenderer.h
+        core/FrameRenderer.cpp
+        annotation/AnnotationModel.h
+        annotation/AnnotationModel.cpp
+    )
+
+    target_include_directories(TwoBl3AlgorithmRunnerTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/algorithm
+        ${CMAKE_CURRENT_SOURCE_DIR}/annotation
+    )
+
+    target_compile_definitions(TwoBl3AlgorithmRunnerTests PRIVATE
+        BEACON_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        BEACON_2BL3_TEST_IMAGE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../HDUASC-SmartCar-21st-FlyOverMinefield/CYT2BL3_Image/project/code/Image"
+    )
+
+    target_link_libraries(TwoBl3AlgorithmRunnerTests PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Test
+        beacon_algorithm
+    )
+
+    add_test(NAME TwoBl3AlgorithmRunnerTests COMMAND TwoBl3AlgorithmRunnerTests)
 endif()
