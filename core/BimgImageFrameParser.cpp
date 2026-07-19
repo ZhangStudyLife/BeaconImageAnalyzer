@@ -7,6 +7,8 @@
 namespace
 {
 const QByteArray Magic("BIMG", 4);
+const QByteArray SeekfreeMagic("\xaa\x02", 2);
+const QByteArray SeekfreeDotMagic("\xaa\x03", 2);
 constexpr quint8 ProtocolVersion = 1;
 constexpr quint8 HeaderSize = 28;
 constexpr quint8 MarkerSize = 6;
@@ -15,6 +17,28 @@ constexpr quint8 MaxMarkerCount = 16;
 constexpr qsizetype CrcSize = 4;
 constexpr qsizetype MaxBufferSize = 2 * 1024 * 1024;
 constexpr quint32 MaxImageSize = 1024 * 1024;
+constexpr quint8 SeekfreeHeaderSize = 8;
+constexpr quint8 SeekfreeGrayImageType = 2;
+
+qsizetype nearestFrameIndex(const QByteArray& data)
+{
+    qsizetype nearest = -1;
+    for (const QByteArray& magic : {Magic, SeekfreeMagic, SeekfreeDotMagic})
+    {
+        const qsizetype index = data.indexOf(magic);
+        if (index >= 0 && (nearest < 0 || index < nearest))
+        {
+            nearest = index;
+        }
+    }
+    return nearest;
+}
+
+qsizetype latestFrameIndex(const QByteArray& data)
+{
+    return qMax(data.lastIndexOf(Magic),
+                qMax(data.lastIndexOf(SeekfreeMagic), data.lastIndexOf(SeekfreeDotMagic)));
+}
 
 quint16 readU16Le(const QByteArray& data, qsizetype offset)
 {
@@ -53,25 +77,126 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
     }
     if (m_buffer.size() > MaxBufferSize)
     {
-        const qsizetype magicIndex = m_buffer.lastIndexOf(Magic);
-        m_buffer = magicIndex >= 0 ? m_buffer.mid(magicIndex) : QByteArray();
+        const qsizetype frameIndex = latestFrameIndex(m_buffer);
+        m_buffer = frameIndex >= 0 ? m_buffer.mid(frameIndex) : QByteArray();
         ++m_protocolErrorCount;
     }
 
     QVector<BimgImageFrame> frames;
-    while (m_buffer.size() >= Magic.size())
+    while (m_buffer.size() >= SeekfreeMagic.size())
     {
-        const qsizetype magicIndex = m_buffer.indexOf(Magic);
-        if (magicIndex < 0)
+        const qsizetype frameIndex = nearestFrameIndex(m_buffer);
+        if (frameIndex < 0)
         {
-            m_buffer = m_buffer.right(qMin<qsizetype>(m_buffer.size(), Magic.size() - 1));
+            qsizetype keep = m_buffer.endsWith('B') ? 1 : 0;
+            if (m_buffer.endsWith("BI"))
+            {
+                keep = 2;
+            }
+            else if (m_buffer.endsWith("BIM"))
+            {
+                keep = 3;
+            }
+            if ((quint8)m_buffer.back() == 0xaaU)
+            {
+                keep = qMax<qsizetype>(keep, 1);
+            }
+            m_buffer = m_buffer.right(keep);
             break;
         }
-        if (magicIndex > 0)
+        if (frameIndex > 0)
         {
-            m_buffer.remove(0, magicIndex);
+            m_buffer.remove(0, frameIndex);
             ++m_protocolErrorCount;
         }
+
+        if (m_buffer.startsWith(SeekfreeMagic))
+        {
+            if (m_buffer.size() < SeekfreeHeaderSize)
+            {
+                break;
+            }
+
+            const quint8 cameraType = (quint8)m_buffer.at(2);
+            const quint8 headerSize = (quint8)m_buffer.at(3);
+            const quint8 imageType = cameraType >> 5;
+            const bool imageOmitted = (cameraType & 0x10U) != 0U;
+            const quint8 boundaryCount = cameraType & 0x0fU;
+            const quint16 width = readU16Le(m_buffer, 4);
+            const quint16 height = readU16Le(m_buffer, 6);
+            const quint64 pixels = (quint64)width * height;
+            if (headerSize != SeekfreeHeaderSize || imageType != SeekfreeGrayImageType
+                || boundaryCount > 8U || width == 0U || height == 0U
+                || pixels > MaxImageSize)
+            {
+                m_buffer.remove(0, 1);
+                ++m_protocolErrorCount;
+                continue;
+            }
+
+            const qsizetype imageSize = imageOmitted ? 0 : (qsizetype)pixels;
+            const qsizetype packetSize = SeekfreeHeaderSize + imageSize;
+            if (m_buffer.size() < packetSize)
+            {
+                break;
+            }
+            if (!imageOmitted)
+            {
+                const QImage image = grayImageFromPayload(
+                    m_buffer.mid(SeekfreeHeaderSize, imageSize), width, height);
+                if (!image.isNull())
+                {
+                    BimgImageFrame frame;
+                    frame.image = image;
+                    frame.protocol = ImageFrameProtocol::SeekfreeAssistant;
+                    frame.width = width;
+                    frame.height = height;
+                    frame.sequence = m_seekfreeSequence++;
+                    frames.push_back(frame);
+                }
+                else
+                {
+                    ++m_protocolErrorCount;
+                }
+            }
+            m_buffer.remove(0, packetSize);
+            continue;
+        }
+
+        if (m_buffer.startsWith(SeekfreeDotMagic))
+        {
+            if (m_buffer.size() < SeekfreeHeaderSize)
+            {
+                break;
+            }
+
+            const quint8 dotType = (quint8)m_buffer.at(2);
+            const quint8 headerSize = (quint8)m_buffer.at(3);
+            const quint16 dotCount = readU16Le(m_buffer, 4);
+            const quint8 boundaryCount = dotType & 0x0fU;
+            const quint8 coordinateType = dotType >> 6;
+            const qsizetype coordinateSize = (dotType & 0x20U) != 0U ? 2 : 1;
+            const qsizetype coordinatesPerDot = coordinateType == 2U ? 2 : 1;
+            const quint64 payloadSize = (quint64)dotCount * boundaryCount
+                                        * coordinateSize * coordinatesPerDot;
+            if (headerSize != SeekfreeHeaderSize || boundaryCount == 0U
+                || boundaryCount > 8U || coordinateType > 2U
+                || payloadSize > MaxImageSize)
+            {
+                m_buffer.remove(0, 1);
+                ++m_protocolErrorCount;
+                continue;
+            }
+
+            const qsizetype packetSize = SeekfreeHeaderSize + (qsizetype)payloadSize;
+            if (m_buffer.size() < packetSize)
+            {
+                break;
+            }
+            m_buffer.remove(0, packetSize);
+            continue;
+        }
+
         if (m_buffer.size() < HeaderSize)
         {
             break;
@@ -135,6 +260,7 @@ QVector<BimgImageFrame> BimgImageFrameParser::append(const QByteArray& data)
 
         BimgImageFrame frame;
         frame.image = image;
+        frame.protocol = ImageFrameProtocol::Bimg;
         frame.streamMode = streamMode;
         frame.cameraId = cameraId;
         frame.width = width;

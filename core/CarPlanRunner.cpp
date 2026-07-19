@@ -130,11 +130,28 @@ QString headfileShim()
         "#endif\n");
 }
 
+QString projectionCenterShim()
+{
+    return QStringLiteral(
+        "#ifndef PROJECTION_CENTER_H\n"
+        "#define PROJECTION_CENTER_H\n"
+        "#include \"zf_common_typedef.h\"\n"
+        "typedef struct\n"
+        "{\n"
+        "    uint8 valid;\n"
+        "    float cx;\n"
+        "    float cy;\n"
+        "} projection_center_result_t;\n"
+        "extern projection_center_result_t g_projection_center;\n"
+        "#endif\n");
+}
+
 QString wrapperSource()
 {
     return QStringLiteral(
         "#include \"car_plan.h\"\n"
         "#include \"image_data.h\"\n"
+        "#include \"ProjectionCenter.h\"\n"
         "#include <string.h>\n"
         "\n"
         "typedef struct { unsigned char valid; float x; float y; float area; } host_beacon_t;\n"
@@ -152,6 +169,7 @@ QString wrapperSource()
         "} host_car_plan_result_t;\n"
         "\n"
         "struct image_data image_data[IMAGE_CAMERA_COUNT];\n"
+        "projection_center_result_t g_projection_center;\n"
         "\n"
         "static void clear_host_image_data(void)\n"
         "{\n"
@@ -165,10 +183,11 @@ QString wrapperSource()
         "void car_plan_instance_reset(void)\n"
         "{\n"
         "    clear_host_image_data();\n"
+        "    memset(&g_projection_center, 0, sizeof(g_projection_center));\n"
         "    CarPlan_Reset();\n"
         "}\n"
         "\n"
-        "unsigned char car_plan_instance_update(const host_camera_frame_t frames[3], host_car_plan_result_t *out)\n"
+        "unsigned char car_plan_instance_update(const host_camera_frame_t frames[3], float pitch, float roll, host_car_plan_result_t *out)\n"
         "{\n"
         "    car_plan_result_t result;\n"
         "    unsigned char camera;\n"
@@ -181,6 +200,9 @@ QString wrapperSource()
         "\n"
         "    clear_host_image_data();\n"
         "    memset(out, 0, sizeof(*out));\n"
+        "    g_projection_center.cx = -7.05f + 1.22f * roll - 0.02f * pitch;\n"
+        "    g_projection_center.cy = -25.45f + 0.01f * roll + 1.34f * pitch;\n"
+        "    g_projection_center.valid = 1;\n"
         "    for (camera = 0; camera < 3; camera++)\n"
         "    {\n"
         "        for (i = 0; i < 2; i++)\n"
@@ -243,9 +265,11 @@ bool CarPlanRunner::loadSourcePath(const QString& path, const QString& buildDir,
     const QDir build(buildDir);
     const QString shimTypedefPath = build.absoluteFilePath(QStringLiteral("zf_common_typedef.h"));
     const QString shimHeadfilePath = build.absoluteFilePath(QStringLiteral("zf_common_headfile.h"));
+    const QString shimProjectionCenterPath = build.absoluteFilePath(QStringLiteral("ProjectionCenter.h"));
     const QString wrapperPath = build.absoluteFilePath(QStringLiteral("car_plan_host_wrapper.c"));
     if (!writeTextFile(shimTypedefPath, typedefShim(), errorMessage) ||
         !writeTextFile(shimHeadfilePath, headfileShim(), errorMessage) ||
+        !writeTextFile(shimProjectionCenterPath, projectionCenterShim(), errorMessage) ||
         !writeTextFile(wrapperPath, wrapperSource(), errorMessage))
     {
         return false;
@@ -370,7 +394,7 @@ bool CarPlanRunner::update(const JustFloatLogRow& row, CarPlanResult* result) co
 
     HostResult hostResult;
     std::memset(&hostResult, 0, sizeof(hostResult));
-    m_updateFn(frames, &hostResult);
+    m_updateFn(frames, row.pitch, row.roll, &hostResult);
 
     if (result != nullptr)
     {

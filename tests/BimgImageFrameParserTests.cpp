@@ -72,6 +72,36 @@ QByteArray makeFrame(quint8 mode, quint8 camera, quint32 sequence, bool withMark
     appendU32Le(&packet, crc32(packet));
     return packet;
 }
+
+QByteArray makeSeekfreeFrame(quint16 width = 4, quint16 height = 3)
+{
+    QByteArray packet;
+    packet.append(char(0xaa));
+    packet.append(char(0x02));
+    packet.append(char(0x40));
+    packet.append(char(8));
+    appendU16Le(&packet, width);
+    appendU16Le(&packet, height);
+    for (int value = 0; value < width * height; ++value)
+    {
+        packet.append(char(value));
+    }
+    return packet;
+}
+
+QByteArray makeSeekfreeXBoundary()
+{
+    QByteArray packet;
+    packet.append(char(0xaa));
+    packet.append(char(0x03));
+    packet.append(char(0x03));
+    packet.append(char(8));
+    appendU16Le(&packet, 2);
+    packet.append(char(0x07));
+    packet.append(char(0));
+    packet.append(QByteArray::fromHex("010203040506"));
+    return packet;
+}
 }
 
 class BimgImageFrameParserTests : public QObject
@@ -82,6 +112,9 @@ private slots:
     void parsesFragmentedFrame();
     void parsesConcatenatedFrames();
     void recoversAfterGarbageAndBadCrc();
+    void parsesFragmentedSeekfreeFrame();
+    void parsesMixedProtocols();
+    void skipsSeekfreeBoundaryPacket();
 };
 
 void BimgImageFrameParserTests::parsesFragmentedFrame()
@@ -127,6 +160,46 @@ void BimgImageFrameParserTests::recoversAfterGarbageAndBadCrc()
     QCOMPARE(frames[0].sequence, quint32(10));
     QVERIFY(parser.crcErrorCount() >= 1U);
     QVERIFY(parser.protocolErrorCount() >= 1U);
+}
+
+void BimgImageFrameParserTests::parsesFragmentedSeekfreeFrame()
+{
+    BimgImageFrameParser parser;
+    QVector<BimgImageFrame> frames;
+    for (char byte : makeSeekfreeFrame())
+    {
+        frames += parser.append(QByteArray(1, byte));
+    }
+
+    QCOMPARE(frames.size(), 1);
+    QCOMPARE(frames[0].protocol, ImageFrameProtocol::SeekfreeAssistant);
+    QCOMPARE(frames[0].sequence, quint32(0));
+    QCOMPARE(frames[0].image.size(), QSize(4, 3));
+    QCOMPARE(frames[0].image.constScanLine(2)[3], uchar(11));
+}
+
+void BimgImageFrameParserTests::parsesMixedProtocols()
+{
+    BimgImageFrameParser parser;
+    const QVector<BimgImageFrame> frames = parser.append(
+        makeSeekfreeFrame() + makeFrame(2, 1, 8, false) + makeSeekfreeFrame());
+
+    QCOMPARE(frames.size(), 3);
+    QCOMPARE(frames[0].protocol, ImageFrameProtocol::SeekfreeAssistant);
+    QCOMPARE(frames[1].protocol, ImageFrameProtocol::Bimg);
+    QCOMPARE(frames[1].sequence, quint32(8));
+    QCOMPARE(frames[2].protocol, ImageFrameProtocol::SeekfreeAssistant);
+    QCOMPARE(frames[2].sequence, quint32(1));
+}
+
+void BimgImageFrameParserTests::skipsSeekfreeBoundaryPacket()
+{
+    BimgImageFrameParser parser;
+    const QVector<BimgImageFrame> frames = parser.append(
+        makeSeekfreeFrame() + makeSeekfreeXBoundary() + makeSeekfreeFrame());
+
+    QCOMPARE(frames.size(), 2);
+    QCOMPARE(parser.protocolErrorCount(), quint64(0));
 }
 
 QTEST_MAIN(BimgImageFrameParserTests)

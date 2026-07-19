@@ -69,7 +69,7 @@ private:
     };
 
     using ResetFn = void (*)();
-    using UpdateFn = unsigned char (*)(const HostCameraFrame[3], HostResult*);
+    using UpdateFn = unsigned char (*)(const HostCameraFrame[3], float, float, HostResult*);
 
     QString m_sourcePath;
     QLibrary m_library;

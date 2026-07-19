@@ -569,8 +569,11 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
         }
     }
     const QString frameText = m_frameIndex < 0
-        ? QStringLiteral("等待 BIMG 帧")
-        : QStringLiteral("相机 %1 | 模式 %2 | 序号 %3 | 标记 %4（信标 %5，车灯 %6）")
+        ? QStringLiteral("等待 BIMG / 逐飞助手图像帧")
+        : QStringLiteral("协议 %1 | 相机 %2 | 模式 %3 | 序号 %4 | 标记 %5（信标 %6，车灯 %7）")
+              .arg(m_streamFrame.protocol == ImageFrameProtocol::Bimg
+                       ? QStringLiteral("BIMG")
+                       : QStringLiteral("逐飞助手"))
               .arg(m_streamFrame.cameraId == 0U ? QStringLiteral("Front") : QStringLiteral("Back"))
               .arg(streamModeName(m_streamFrame.streamMode))
               .arg(m_streamFrame.sequence)

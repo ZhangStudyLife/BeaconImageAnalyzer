@@ -11,6 +11,12 @@ enum class BimgMarkerType : quint8
     CarLamp = 2
 };
 
+enum class ImageFrameProtocol : quint8
+{
+    Bimg,
+    SeekfreeAssistant
+};
+
 struct BimgImageMarker
 {
     BimgMarkerType type = BimgMarkerType::Beacon;
@@ -22,6 +28,7 @@ struct BimgImageMarker
 struct BimgImageFrame
 {
     QImage image;
+    ImageFrameProtocol protocol = ImageFrameProtocol::Bimg;
     quint8 streamMode = 0;
     quint8 cameraId = 0;
     quint16 width = 0;
@@ -45,6 +52,7 @@ private:
     QByteArray m_buffer;
     quint64 m_crcErrorCount = 0;
     quint64 m_protocolErrorCount = 0;
+    quint32 m_seekfreeSequence = 0;
 };
 
 #endif
