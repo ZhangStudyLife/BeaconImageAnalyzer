@@ -1,5 +1,0 @@
-BimgImageFrameParserTests 2 0
-BeaconImageAnalyzerTests 0 0
----
-BeaconImageAnalyzerTests
-BimgImageFrameParserTests
