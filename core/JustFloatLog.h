@@ -29,6 +29,14 @@ struct JustFloatCameraFrame
     JustFloatCarLamp carLamp;
 };
 
+struct JustFloatFusedCarLamp
+{
+    bool valid = false;
+    float cx = 0.0f;
+    float cy = 0.0f;
+    float angle = 0.0f;
+};
+
 struct JustFloatLogRow
 {
     double rowTime = 0.0;
@@ -37,9 +45,14 @@ struct JustFloatLogRow
     float roll = 0.0f;
     float yaw = 0.0f;
     JustFloatCameraFrame cameras[3];
-    float projectionXcm = 0.0f;
-    float projectionYcm = 0.0f;
-    bool hasProjectionDistance = false;
+    float actualVelocityX = 0.0f;
+    float actualVelocityY = 0.0f;
+    float vehicleYawDeg = 0.0f;
+    float targetForwardMps = 0.0f;
+    float targetStrafeMps = 0.0f;
+    bool hasMotionData = false;
+    JustFloatFusedCarLamp fusedCarLamp;
+    bool hasFusedCarLampData = false;
 };
 
 struct JustFloatChannelDescriptor
@@ -54,11 +67,12 @@ class JustFloatLog
 {
 public:
     static constexpr int LegacyChannelCount = 38;
-    static constexpr int ChannelCount = 40;
+    static constexpr int MotionChannelCount = 43;
+    static constexpr int ChannelCount = 47;
 
     static bool loadCsv(const QString& path, JustFloatLog* output, QString* errorMessage = nullptr);
     static bool parseDatagram(const QByteArray& datagram,
-                              quint64 sequence,
+                              double fallbackTimestampMs,
                               JustFloatLogRow* output,
                               QString* errorMessage = nullptr);
     static const QVector<JustFloatChannelDescriptor>& channelDescriptors();

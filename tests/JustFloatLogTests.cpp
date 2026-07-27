@@ -1,5 +1,6 @@
 #include "JustFloatCsvRecorder.h"
 #include "JustFloatLog.h"
+#include "VehicleMotionUtils.h"
 #include "WaveformHistoryStore.h"
 #include "WaveformViewport.h"
 
@@ -67,7 +68,7 @@ QString headerForCount(int count)
     return fields.join(QLatin1Char(','));
 }
 
-JustFloatLogRow sampleRow(bool withProjection)
+JustFloatLogRow sampleRow(bool withMotion)
 {
     JustFloatLogRow row;
     row.rowTime = 123.25;
@@ -93,9 +94,12 @@ JustFloatLogRow sampleRow(bool withProjection)
         row.cameras[camera].carLamp.length = base + 5.0f;
         row.cameras[camera].carLamp.valid = true;
     }
-    row.hasProjectionDistance = withProjection;
-    row.projectionXcm = 78.5f;
-    row.projectionYcm = -19.25f;
+    row.hasMotionData = withMotion;
+    row.actualVelocityX = 0.75f;
+    row.actualVelocityY = -1.25f;
+    row.vehicleYawDeg = 32.5f;
+    row.targetForwardMps = 1.5f;
+    row.targetStrafeMps = -0.5f;
     return row;
 }
 }
@@ -106,6 +110,7 @@ class JustFloatLogTests : public QObject
 
 private slots:
     void channelCatalogAndValues();
+    void motionCoordinateTransform();
     void parseTextDatagram_data();
     void parseTextDatagram();
     void parseBinaryDatagram_data();
@@ -116,6 +121,7 @@ private slots:
     void validateCsvHeadersAndLengths();
     void serializeAndReloadRows();
     void recorderStateAndRoundTrip();
+    void loadExternalFlightLog();
     void waveformViewportNavigation();
     void waveformHistoryQueryAndCleanup();
     void waveformHistorySparseContinuityAndGaps();
@@ -131,8 +137,13 @@ void JustFloatLogTests::channelCatalogAndValues()
         QVERIFY(!descriptors[i].group.isEmpty());
         QVERIFY(!descriptors[i].name.isEmpty());
     }
-    QCOMPARE(descriptors[38].unit, QStringLiteral("cm"));
-    QCOMPARE(descriptors[39].unit, QStringLiteral("cm"));
+    QCOMPARE(descriptors[38].unit, QStringLiteral("m/s"));
+    QCOMPARE(descriptors[39].unit, QStringLiteral("m/s"));
+    QCOMPARE(descriptors[40].unit, QStringLiteral("deg"));
+    QCOMPARE(descriptors[41].unit, QStringLiteral("m/s"));
+    QCOMPARE(descriptors[42].unit, QStringLiteral("m/s"));
+    QCOMPARE(descriptors[43].name, QStringLiteral("有效"));
+    QCOMPARE(descriptors[46].unit, QStringLiteral("deg"));
 
     JustFloatLogRow row = sampleRow(false);
     double value = 0.0;
@@ -144,34 +155,69 @@ void JustFloatLogTests::channelCatalogAndValues()
     QVERIFY(!JustFloatLog::channelValue(row, -1, &value));
     QVERIFY(!JustFloatLog::channelValue(row, 0, nullptr));
 
-    row.hasProjectionDistance = true;
+    row.hasMotionData = true;
     QVERIFY(JustFloatLog::channelValue(row, 38, &value));
-    QCOMPARE(value, static_cast<double>(row.projectionXcm));
+    QCOMPARE(value, static_cast<double>(row.actualVelocityX));
+    QVERIFY(JustFloatLog::channelValue(row, 42, &value));
+    QCOMPARE(value, static_cast<double>(row.targetStrafeMps));
+    QVERIFY(!JustFloatLog::channelValue(row, 43, &value));
+    row.hasFusedCarLampData = true;
+    row.fusedCarLamp = {true, -43.168f, -62.867f, 3.967f};
+    QVERIFY(JustFloatLog::channelValue(row, 43, &value));
+    QCOMPARE(value, 1.0);
+    QVERIFY(JustFloatLog::channelValue(row, 46, &value));
+    QCOMPARE(value, static_cast<double>(row.fusedCarLamp.angle));
+}
+
+void JustFloatLogTests::motionCoordinateTransform()
+{
+    QPointF delta = VehicleMotionUtils::velocityToCenter(1.0f, 0.0f, 0.0f);
+    QVERIFY(std::abs(delta.x() - 1.0) < 1e-9);
+    QVERIFY(std::abs(delta.y()) < 1e-9);
+
+    delta = VehicleMotionUtils::velocityToCenter(0.0f, 1.0f, 0.0f);
+    QVERIFY(std::abs(delta.x()) < 1e-9);
+    QVERIFY(std::abs(delta.y() + 1.0) < 1e-9);
+
+    delta = VehicleMotionUtils::velocityToCenter(1.2f, 0.991361737f, 3.967f);
+    QVERIFY(std::abs(delta.x() - 1.2657) < 0.0002);
+    QVERIFY(std::abs(delta.y() + 0.9060) < 0.0002);
+
+    const QPointF mapped = VehicleMotionUtils::mapPointToCenter(
+        VehicleMotionUtils::FrontCameraIndex,
+        -13.429616f,
+        -13.9388828f);
+    QVERIFY(std::abs(mapped.x() + 19.17437) < 0.0002);
+    QVERIFY(std::abs(mapped.y() + 70.04069) < 0.0002);
 }
 
 void JustFloatLogTests::parseTextDatagram_data()
 {
     QTest::addColumn<int>("count");
     QTest::addColumn<bool>("withTail");
-    QTest::addColumn<bool>("hasProjection");
+    QTest::addColumn<bool>("hasMotion");
+    QTest::addColumn<bool>("hasFused");
     QTest::addColumn<double>("expectedRowTime");
-    QTest::addColumn<double>("expectedProjectionX");
+    QTest::addColumn<double>("expectedActualVelocityX");
 
-    QTest::newRow("legacy-payload") << 37 << false << false << 500.0 << 0.0;
-    QTest::newRow("legacy-full-tail") << 38 << true << false << 0.0 << 0.0;
-    QTest::newRow("current-payload-tail") << 39 << true << true << 500.0 << 38.0;
-    QTest::newRow("current-full") << 40 << false << true << 0.0 << 38.0;
+    QTest::newRow("legacy-payload") << 37 << false << false << false << 500.0 << 0.0;
+    QTest::newRow("legacy-full-tail") << 38 << true << false << false << 0.0 << 0.0;
+    QTest::newRow("motion-payload-tail") << 42 << true << true << false << 500.0 << 38.0;
+    QTest::newRow("motion-full") << 43 << false << true << false << 0.0 << 38.0;
+    QTest::newRow("fused-payload") << 46 << false << true << true << 500.0 << 38.0;
+    QTest::newRow("fused-full-tail") << 47 << true << true << true << 0.0 << 38.0;
 }
 
 void JustFloatLogTests::parseTextDatagram()
 {
     QFETCH(int, count);
     QFETCH(bool, withTail);
-    QFETCH(bool, hasProjection);
+    QFETCH(bool, hasMotion);
+    QFETCH(bool, hasFused);
     QFETCH(double, expectedRowTime);
-    QFETCH(double, expectedProjectionX);
+    QFETCH(double, expectedActualVelocityX);
 
-    QByteArray datagram = sequentialText(count == 37 || count == 39 ? 1 : 0, count).toUtf8();
+    QByteArray datagram = sequentialText(count == 37 || count == 42 || count == 46 ? 1 : 0, count).toUtf8();
     if (withTail)
     {
         datagram += vofaTail();
@@ -182,11 +228,22 @@ void JustFloatLogTests::parseTextDatagram()
     QVERIFY2(JustFloatLog::parseDatagram(datagram, 500, &row, &error), qPrintable(error));
     QCOMPARE(row.rowTime, expectedRowTime);
     QCOMPARE(row.syncTimeMs, 37.0);
-    QCOMPARE(row.hasProjectionDistance, hasProjection);
-    if (hasProjection)
+    QCOMPARE(row.hasMotionData, hasMotion);
+    QCOMPARE(row.hasFusedCarLampData, hasFused);
+    if (hasMotion)
     {
-        QCOMPARE(static_cast<double>(row.projectionXcm), expectedProjectionX);
-        QCOMPARE(static_cast<double>(row.projectionYcm), 39.0);
+        QCOMPARE(static_cast<double>(row.actualVelocityX), expectedActualVelocityX);
+        QCOMPARE(static_cast<double>(row.actualVelocityY), 39.0);
+        QCOMPARE(static_cast<double>(row.vehicleYawDeg), 40.0);
+        QCOMPARE(static_cast<double>(row.targetForwardMps), 41.0);
+        QCOMPARE(static_cast<double>(row.targetStrafeMps), 42.0);
+    }
+    if (hasFused)
+    {
+        QVERIFY(row.fusedCarLamp.valid);
+        QCOMPARE(row.fusedCarLamp.cx, 44.0f);
+        QCOMPARE(row.fusedCarLamp.cy, 45.0f);
+        QCOMPARE(row.fusedCarLamp.angle, 46.0f);
     }
 }
 
@@ -199,11 +256,12 @@ void JustFloatLogTests::parseBinaryDatagram()
 {
     QFETCH(int, count);
     QFETCH(bool, withTail);
-    QFETCH(bool, hasProjection);
+    QFETCH(bool, hasMotion);
+    QFETCH(bool, hasFused);
     QFETCH(double, expectedRowTime);
-    QFETCH(double, expectedProjectionX);
+    QFETCH(double, expectedActualVelocityX);
 
-    QByteArray datagram = sequentialBinary(count == 37 || count == 39 ? 1 : 0, count);
+    QByteArray datagram = sequentialBinary(count == 37 || count == 42 || count == 46 ? 1 : 0, count);
     if (withTail)
     {
         datagram += vofaTail();
@@ -214,11 +272,22 @@ void JustFloatLogTests::parseBinaryDatagram()
     QVERIFY2(JustFloatLog::parseDatagram(datagram, 500, &row, &error), qPrintable(error));
     QCOMPARE(row.rowTime, expectedRowTime);
     QCOMPARE(row.syncTimeMs, 37.0);
-    QCOMPARE(row.hasProjectionDistance, hasProjection);
-    if (hasProjection)
+    QCOMPARE(row.hasMotionData, hasMotion);
+    QCOMPARE(row.hasFusedCarLampData, hasFused);
+    if (hasMotion)
     {
-        QCOMPARE(static_cast<double>(row.projectionXcm), expectedProjectionX);
-        QCOMPARE(static_cast<double>(row.projectionYcm), 39.0);
+        QCOMPARE(static_cast<double>(row.actualVelocityX), expectedActualVelocityX);
+        QCOMPARE(static_cast<double>(row.actualVelocityY), 39.0);
+        QCOMPARE(static_cast<double>(row.vehicleYawDeg), 40.0);
+        QCOMPARE(static_cast<double>(row.targetForwardMps), 41.0);
+        QCOMPARE(static_cast<double>(row.targetStrafeMps), 42.0);
+    }
+    if (hasFused)
+    {
+        QVERIFY(row.fusedCarLamp.valid);
+        QCOMPARE(row.fusedCarLamp.cx, 44.0f);
+        QCOMPARE(row.fusedCarLamp.cy, 45.0f);
+        QCOMPARE(row.fusedCarLamp.angle, 46.0f);
     }
 }
 
@@ -233,7 +302,7 @@ void JustFloatLogTests::preferTextForBinarySizedPayload()
     QVERIFY2(JustFloatLog::parseDatagram(datagram, 77, &row, &error), qPrintable(error));
     QCOMPARE(row.rowTime, 77.0);
     QCOMPARE(row.syncTimeMs, 37.0);
-    QVERIFY(!row.hasProjectionDistance);
+    QVERIFY(!row.hasMotionData);
 }
 
 void JustFloatLogTests::rejectInvalidDatagrams()
@@ -242,9 +311,10 @@ void JustFloatLogTests::rejectInvalidDatagrams()
     QString error;
     QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 36).toUtf8(), 1, &row, &error));
     QVERIFY(!error.isEmpty());
+    QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 40).toUtf8(), 1, &row, &error));
     QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 41).toUtf8(), 1, &row, &error));
 
-    QStringList fields = sequentialText(0, 40).split(QLatin1Char(','));
+    QStringList fields = sequentialText(0, 43).split(QLatin1Char(','));
     fields[12] = QStringLiteral("not-a-number");
     QVERIFY(!JustFloatLog::parseDatagram(fields.join(QLatin1Char(',')).toUtf8(), 1, &row, &error));
 
@@ -263,26 +333,40 @@ void JustFloatLogTests::loadLegacyAndCurrentCsv()
     QString error;
     QVERIFY2(JustFloatLog::loadCsv(legacyPath, &legacyLog, &error), qPrintable(error));
     QCOMPARE(legacyLog.rowCount(), 1);
-    QVERIFY(!legacyLog.rowAt(0).hasProjectionDistance);
+    QVERIFY(!legacyLog.rowAt(0).hasMotionData);
 
     const QString currentPath = directory.filePath(QStringLiteral("current.csv"));
     QVERIFY(writeTextFile(currentPath,
-                          headerForCount(40) + QLatin1Char('\n') + sequentialText(0, 40) + QLatin1Char('\n')));
+                          headerForCount(43) + QLatin1Char('\n') + sequentialText(0, 43) + QLatin1Char('\n')));
     JustFloatLog currentLog;
     QVERIFY2(JustFloatLog::loadCsv(currentPath, &currentLog, &error), qPrintable(error));
     QCOMPARE(currentLog.rowCount(), 1);
-    QVERIFY(currentLog.rowAt(0).hasProjectionDistance);
-    QCOMPARE(currentLog.rowAt(0).projectionXcm, 38.0f);
-    QCOMPARE(currentLog.rowAt(0).projectionYcm, 39.0f);
+    QVERIFY(currentLog.rowAt(0).hasMotionData);
+    QCOMPARE(currentLog.rowAt(0).actualVelocityX, 38.0f);
+    QCOMPARE(currentLog.rowAt(0).actualVelocityY, 39.0f);
+    QCOMPARE(currentLog.rowAt(0).vehicleYawDeg, 40.0f);
+    QCOMPARE(currentLog.rowAt(0).targetForwardMps, 41.0f);
+    QCOMPARE(currentLog.rowAt(0).targetStrafeMps, 42.0f);
+
+    const QString fusedPath = directory.filePath(QStringLiteral("fused.csv"));
+    QVERIFY(writeTextFile(fusedPath,
+                          headerForCount(47) + QLatin1Char('\n') + sequentialText(0, 47) + QLatin1Char('\n')));
+    JustFloatLog fusedLog;
+    QVERIFY2(JustFloatLog::loadCsv(fusedPath, &fusedLog, &error), qPrintable(error));
+    QVERIFY(fusedLog.rowAt(0).hasFusedCarLampData);
+    QVERIFY(fusedLog.rowAt(0).fusedCarLamp.valid);
+    QCOMPARE(fusedLog.rowAt(0).fusedCarLamp.cx, 44.0f);
+    QCOMPARE(fusedLog.rowAt(0).fusedCarLamp.cy, 45.0f);
+    QCOMPARE(fusedLog.rowAt(0).fusedCarLamp.angle, 46.0f);
 
     const QString headerlessPath = directory.filePath(QStringLiteral("headerless.csv"));
     QVERIFY(writeTextFile(headerlessPath,
-                          sequentialText(0, 38) + QLatin1Char('\n') + sequentialText(0, 40) + QLatin1Char('\n')));
+                          sequentialText(0, 38) + QLatin1Char('\n') + sequentialText(0, 43) + QLatin1Char('\n')));
     JustFloatLog headerlessLog;
     QVERIFY2(JustFloatLog::loadCsv(headerlessPath, &headerlessLog, &error), qPrintable(error));
     QCOMPARE(headerlessLog.rowCount(), 2);
-    QVERIFY(!headerlessLog.rowAt(0).hasProjectionDistance);
-    QVERIFY(headerlessLog.rowAt(1).hasProjectionDistance);
+    QVERIFY(!headerlessLog.rowAt(0).hasMotionData);
+    QVERIFY(headerlessLog.rowAt(1).hasMotionData);
 }
 
 void JustFloatLogTests::validateCsvHeadersAndLengths()
@@ -301,24 +385,36 @@ void JustFloatLogTests::validateCsvHeadersAndLengths()
     QVERIFY(!JustFloatLog::loadCsv(missingRequiredPath, &log, &error));
     QVERIFY(error.contains(QStringLiteral("I12")));
 
-    const QString unpairedPath = directory.filePath(QStringLiteral("unpaired.csv"));
-    QVERIFY(writeTextFile(unpairedPath,
-                          headerForCount(39) + QLatin1Char('\n') + sequentialText(0, 39) + QLatin1Char('\n')));
-    QVERIFY(!JustFloatLog::loadCsv(unpairedPath, &log, &error));
+    const QString oldProjectionPath = directory.filePath(QStringLiteral("old-projection.csv"));
+    QVERIFY(writeTextFile(oldProjectionPath,
+                          headerForCount(40) + QLatin1Char('\n') + sequentialText(0, 40) + QLatin1Char('\n')));
+    QVERIFY(!JustFloatLog::loadCsv(oldProjectionPath, &log, &error));
     QVERIFY(error.contains(QStringLiteral("I38")));
-    QVERIFY(error.contains(QStringLiteral("I39")));
+    QVERIFY(error.contains(QStringLiteral("I42")));
 
     const QString wrongLengthPath = directory.filePath(QStringLiteral("wrong-length.csv"));
-    QVERIFY(writeTextFile(wrongLengthPath, sequentialText(0, 39) + QLatin1Char('\n')));
+    QVERIFY(writeTextFile(wrongLengthPath, sequentialText(0, 42) + QLatin1Char('\n')));
     QVERIFY(!JustFloatLog::loadCsv(wrongLengthPath, &log, &error));
 
-    QStringList partialProjection = sequentialText(0, 38).split(QLatin1Char(','));
-    partialProjection << QStringLiteral("1.0") << QString();
-    const QString partialProjectionPath = directory.filePath(QStringLiteral("partial-projection.csv"));
-    QVERIFY(writeTextFile(partialProjectionPath,
-                          headerForCount(40) + QLatin1Char('\n') +
-                              partialProjection.join(QLatin1Char(',')) + QLatin1Char('\n')));
-    QVERIFY(!JustFloatLog::loadCsv(partialProjectionPath, &log, &error));
+    QStringList partialMotion = sequentialText(0, 38).split(QLatin1Char(','));
+    partialMotion << QStringLiteral("1.0")
+                  << QStringLiteral("2.0")
+                  << QString()
+                  << QStringLiteral("4.0")
+                  << QStringLiteral("5.0");
+    const QString partialMotionPath = directory.filePath(QStringLiteral("partial-motion.csv"));
+    QVERIFY(writeTextFile(partialMotionPath,
+                          headerForCount(43) + QLatin1Char('\n') +
+                              partialMotion.join(QLatin1Char(',')) + QLatin1Char('\n')));
+    QVERIFY(!JustFloatLog::loadCsv(partialMotionPath, &log, &error));
+
+    const QString partialFusedPath = directory.filePath(QStringLiteral("partial-fused.csv"));
+    QVERIFY(writeTextFile(partialFusedPath,
+                          headerForCount(46) + QLatin1Char('\n') +
+                              sequentialText(0, 46) + QLatin1Char('\n')));
+    QVERIFY(!JustFloatLog::loadCsv(partialFusedPath, &log, &error));
+    QVERIFY(error.contains(QStringLiteral("I43")));
+    QVERIFY(error.contains(QStringLiteral("I46")));
 }
 
 void JustFloatLogTests::serializeAndReloadRows()
@@ -329,13 +425,17 @@ void JustFloatLogTests::serializeAndReloadRows()
     const QString legacyCsvRow = JustFloatLog::csvRow(legacyRow);
     const QStringList legacyCells = legacyCsvRow.split(QLatin1Char(','), Qt::KeepEmptyParts);
     QCOMPARE(legacyCells.size(), JustFloatLog::ChannelCount);
-    QVERIFY(legacyCells[38].isEmpty());
-    QVERIFY(legacyCells[39].isEmpty());
+    for (int i = 38; i <= 42; ++i)
+    {
+        QVERIFY(legacyCells[i].isEmpty());
+    }
 
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("round-trip.csv"));
-    const JustFloatLogRow currentRow = sampleRow(true);
+    JustFloatLogRow currentRow = sampleRow(true);
+    currentRow.hasFusedCarLampData = true;
+    currentRow.fusedCarLamp = {true, -43.168f, -62.867f, 3.967f};
     QVERIFY(writeTextFile(path,
                           JustFloatLog::csvHeader() + QLatin1Char('\n') +
                               legacyCsvRow + QLatin1Char('\n') +
@@ -345,12 +445,19 @@ void JustFloatLogTests::serializeAndReloadRows()
     QString error;
     QVERIFY2(JustFloatLog::loadCsv(path, &log, &error), qPrintable(error));
     QCOMPARE(log.rowCount(), 2);
-    QVERIFY(!log.rowAt(0).hasProjectionDistance);
-    QVERIFY(log.rowAt(1).hasProjectionDistance);
+    QVERIFY(!log.rowAt(0).hasMotionData);
+    QVERIFY(log.rowAt(1).hasMotionData);
     QCOMPARE(log.rowAt(1).rowTime, currentRow.rowTime);
     QCOMPARE(log.rowAt(1).syncTimeMs, currentRow.syncTimeMs);
-    QCOMPARE(log.rowAt(1).projectionXcm, currentRow.projectionXcm);
-    QCOMPARE(log.rowAt(1).projectionYcm, currentRow.projectionYcm);
+    QCOMPARE(log.rowAt(1).actualVelocityX, currentRow.actualVelocityX);
+    QCOMPARE(log.rowAt(1).actualVelocityY, currentRow.actualVelocityY);
+    QCOMPARE(log.rowAt(1).vehicleYawDeg, currentRow.vehicleYawDeg);
+    QCOMPARE(log.rowAt(1).targetForwardMps, currentRow.targetForwardMps);
+    QCOMPARE(log.rowAt(1).targetStrafeMps, currentRow.targetStrafeMps);
+    QVERIFY(log.rowAt(1).hasFusedCarLampData);
+    QCOMPARE(log.rowAt(1).fusedCarLamp.cx, currentRow.fusedCarLamp.cx);
+    QCOMPARE(log.rowAt(1).fusedCarLamp.cy, currentRow.fusedCarLamp.cy);
+    QCOMPARE(log.rowAt(1).fusedCarLamp.angle, currentRow.fusedCarLamp.angle);
 }
 
 void JustFloatLogTests::recorderStateAndRoundTrip()
@@ -394,9 +501,9 @@ void JustFloatLogTests::recorderStateAndRoundTrip()
     JustFloatLog log;
     QVERIFY2(JustFloatLog::loadCsv(outputPath, &log, &error), qPrintable(error));
     QCOMPARE(log.rowCount(), 3);
-    QVERIFY(!log.rowAt(0).hasProjectionDistance);
-    QVERIFY(log.rowAt(1).hasProjectionDistance);
-    QVERIFY(log.rowAt(2).hasProjectionDistance);
+    QVERIFY(!log.rowAt(0).hasMotionData);
+    QVERIFY(log.rowAt(1).hasMotionData);
+    QVERIFY(log.rowAt(2).hasMotionData);
 
     QVERIFY(recorder.start(&error));
     QVERIFY(recorder.append(sampleRow(true), &error));
@@ -404,6 +511,28 @@ void JustFloatLogTests::recorderStateAndRoundTrip()
     QCOMPARE(recorder.state(), JustFloatCsvRecorder::State::Idle);
     QCOMPARE(recorder.rowCount(), quint64(0));
     QVERIFY(!recorder.append(sampleRow(true), &error));
+}
+
+void JustFloatLogTests::loadExternalFlightLog()
+{
+    const QString path = QString::fromLocal8Bit(qgetenv("BEACON_TEST_FLIGHT_LOG"));
+    if (path.isEmpty())
+    {
+        QSKIP("BEACON_TEST_FLIGHT_LOG is not set");
+    }
+
+    JustFloatLog log;
+    QString error;
+    QVERIFY2(JustFloatLog::loadCsv(path, &log, &error), qPrintable(error));
+    QCOMPARE(log.rowCount(), 16234);
+    const JustFloatLogRow& first = log.rowAt(0);
+    QCOMPARE(first.rowTime, 128657.0);
+    QVERIFY(first.hasMotionData);
+    QCOMPARE(first.actualVelocityX, 0.0f);
+    QCOMPARE(first.actualVelocityY, 0.0f);
+    QCOMPARE(first.vehicleYawDeg, 0.0f);
+    QCOMPARE(first.targetForwardMps, 0.0f);
+    QCOMPARE(first.targetStrafeMps, 0.0f);
 }
 
 void JustFloatLogTests::waveformViewportNavigation()
@@ -490,8 +619,8 @@ void JustFloatLogTests::waveformHistoryQueryAndCleanup()
             JustFloatLogRow row = sampleRow(i != 300);
             row.rowTime = i * 10.0 + 1.0;
             row.syncTimeMs = i * 10.0 + 1.0;
-            row.projectionXcm = i == 301 ? 999.0f : static_cast<float>(i % 40);
-            row.projectionYcm = static_cast<float>(-i % 30);
+            row.actualVelocityX = i == 301 ? 999.0f : static_cast<float>(i % 40);
+            row.actualVelocityY = static_cast<float>(-i % 30);
             QVERIFY2(history.append(row, i * 10, &error), qPrintable(error));
         }
 
@@ -559,7 +688,7 @@ void JustFloatLogTests::waveformHistorySparseContinuityAndGaps()
         JustFloatLogRow row = sampleRow(true);
         row.rowTime = i * 10.0;
         row.syncTimeMs = i * 10.0;
-        row.projectionXcm = static_cast<float>(i);
+        row.actualVelocityX = static_cast<float>(i);
         QVERIFY2(history.append(row, i * 10, &error), qPrintable(error));
     }
 
@@ -578,7 +707,7 @@ void JustFloatLogTests::waveformHistorySparseContinuityAndGaps()
         JustFloatLogRow row = sampleRow(i != 5);
         row.rowTime = i * 10.0;
         row.syncTimeMs = i * 10.0;
-        row.projectionXcm = static_cast<float>(i);
+        row.actualVelocityX = static_cast<float>(i);
         QVERIFY2(history.append(row, i * 10, &error), qPrintable(error));
     }
 

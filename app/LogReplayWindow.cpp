@@ -2,6 +2,7 @@
 
 #include "FrameRenderer.h"
 #include "LogWaveformWindow.h"
+#include "VehicleMotionUtils.h"
 #include "VideoWidget.h"
 
 #include <QAbstractSocket>
@@ -42,6 +43,9 @@ namespace
 constexpr int CameraCount = 3;
 constexpr int CarPlanSlotCount = 2;
 constexpr float Pi = 3.1415926f;
+constexpr double MotionArrowPixelsPerMps = 20.0;
+constexpr double MotionArrowMaxPixels = 48.0;
+constexpr double MotionArrowMinMps = 0.02;
 
 const QStringList CameraNames = {
     QStringLiteral("Front"),
@@ -126,6 +130,59 @@ float normalizeAngleDeg(float angle)
         angle += 360.0f;
     }
     return angle;
+}
+
+QPointF motionDisplayDelta(const QPointF& velocity)
+{
+    const double magnitude = std::hypot(velocity.x(), velocity.y());
+    if (!std::isfinite(magnitude) || magnitude < MotionArrowMinMps)
+    {
+        return QPointF();
+    }
+
+    const double scale = qMin(MotionArrowPixelsPerMps, MotionArrowMaxPixels / magnitude);
+    return velocity * scale;
+}
+
+void drawMotionArrow(QPainter* painter,
+                     const QPointF& origin,
+                     const QPointF& velocity,
+                     const QColor& color,
+                     const QString& label,
+                     const QPointF& labelOffset)
+{
+    if (painter == nullptr ||
+        !std::isfinite(velocity.x()) ||
+        !std::isfinite(velocity.y()))
+    {
+        return;
+    }
+
+    const QPointF delta = motionDisplayDelta(velocity);
+    const double displayLength = std::hypot(delta.x(), delta.y());
+    if (displayLength < 0.001)
+    {
+        return;
+    }
+
+    const QPointF tip = origin + delta;
+    const QPointF unit(delta.x() / displayLength, delta.y() / displayLength);
+    const QPointF normal(-unit.y(), unit.x());
+    const QPointF arrowBase = tip - unit * 6.0;
+
+    QPen pen(color);
+    pen.setWidth(2);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawLine(origin, tip);
+    painter->drawLine(tip, arrowBase + normal * 3.0);
+    painter->drawLine(tip, arrowBase - normal * 3.0);
+
+    const double magnitude = std::hypot(velocity.x(), velocity.y());
+    painter->drawText(tip + labelOffset,
+                      QStringLiteral("%1 %2")
+                          .arg(label)
+                          .arg(magnitude, 0, 'f', 2));
 }
 
 QString carPlanBuildDir()
@@ -496,6 +553,8 @@ void LogReplayWindow::startUdpListening()
     m_udpErrorCount = 0;
     m_lastUdpPeer.clear();
     m_hasLiveRow = false;
+    m_liveFusedCarLamp = {};
+    m_liveCarLampFusion.reset();
     m_currentRow = -1;
     m_udpElapsedTimer.restart();
     m_waveformHistoryErrorShown = false;
@@ -559,12 +618,12 @@ void LogReplayWindow::readPendingDatagrams()
         }
         datagram.resize((int)readSize);
 
-        const quint64 sequence = m_udpPacketCount;
+        const qint64 elapsedMs = m_udpElapsedTimer.isValid() ? m_udpElapsedTimer.elapsed() : 0;
         m_udpPacketCount++;
 
         JustFloatLogRow row;
         QString error;
-        if (!JustFloatLog::parseDatagram(datagram, sequence, &row, &error))
+        if (!JustFloatLog::parseDatagram(datagram, (double)elapsedMs, &row, &error))
         {
             m_udpErrorCount++;
             m_statusLabel->setText(QStringLiteral("UDP 解析失败：%1 | 包 %2 错 %3")
@@ -577,7 +636,6 @@ void LogReplayWindow::readPendingDatagrams()
         if (m_waveformHistory.isActive())
         {
             QString historyError;
-            const qint64 elapsedMs = m_udpElapsedTimer.isValid() ? m_udpElapsedTimer.elapsed() : 0;
             if (!m_waveformHistory.append(row, elapsedMs, &historyError) &&
                 !m_waveformHistoryErrorShown)
             {
@@ -613,6 +671,9 @@ void LogReplayWindow::readPendingDatagrams()
 
 void LogReplayWindow::acceptUdpRow(const JustFloatLogRow& row, const QString& peerName)
 {
+    m_liveFusedCarLamp = row.hasFusedCarLampData
+                             ? row.fusedCarLamp
+                             : m_liveCarLampFusion.update(row);
     m_liveRow = row;
     m_hasLiveRow = true;
     m_lastUdpPeer = peerName;
@@ -995,6 +1056,7 @@ bool LogReplayWindow::loadCsv(const QString& path)
         m_modeCombo->setCurrentIndex(0);
     }
     m_log = log;
+    rebuildFusedCarLampCache();
     m_currentRow = -1;
     m_focusCamera = -1;
     resetCarPlanState();
@@ -1165,6 +1227,8 @@ void LogReplayWindow::renderCamera(int cameraIndex)
     {
         drawCarPlanOverlay(&rendered, cameraIndex, slot);
     }
+    drawMappedDetectionsOverlay(&rendered, cameraIndex);
+    drawMotionOverlay(&rendered, cameraIndex);
     m_videoWidgets[cameraIndex]->setPixelSourceImage(gray);
     m_videoWidgets[cameraIndex]->setFrameGeometry(QSize(BEACON_IMAGE_W, BEACON_IMAGE_H), 1);
     m_videoWidgets[cameraIndex]->setImage(rendered);
@@ -1296,22 +1360,49 @@ void LogReplayWindow::updateInfoText()
     {
         text += QStringLiteral("Frame %1 / %2\n").arg(m_currentRow).arg(m_log.rowCount() - 1);
     }
-    text += QStringLiteral("I0: %1  Sync: %2 ms\n")
+    text += QStringLiteral("I0 时间戳: %1 ms  Sync: %2 ms\n")
                 .arg(row->rowTime, 0, 'f', 3)
                 .arg(row->syncTimeMs, 0, 'f', 3);
     text += QStringLiteral("Pitch: %1  Roll: %2  Yaw: %3\n")
                 .arg(row->pitch, 0, 'f', 3)
                 .arg(row->roll, 0, 'f', 3)
                 .arg(row->yaw, 0, 'f', 3);
-    if (row->hasProjectionDistance)
+    if (row->hasMotionData)
     {
-        text += QStringLiteral("投影距离: X=%1 cm  Y=%2 cm\n")
-                    .arg(row->projectionXcm, 0, 'f', 3)
-                    .arg(row->projectionYcm, 0, 'f', 3);
+        const double actualSpeed = std::hypot((double)row->actualVelocityX,
+                                              (double)row->actualVelocityY);
+        const double targetSpeed = std::hypot((double)row->targetStrafeMps,
+                                              (double)row->targetForwardMps);
+        text += QStringLiteral("实际速度: X横移=%1  Y前进=%2  speed=%3 m/s\n")
+                    .arg(row->actualVelocityX, 0, 'f', 3)
+                    .arg(row->actualVelocityY, 0, 'f', 3)
+                    .arg(actualSpeed, 0, 'f', 3);
+        text += QStringLiteral("车辆 Yaw: %1 deg（顺时针为正）\n")
+                    .arg(row->vehicleYawDeg, 0, 'f', 3);
+        text += QStringLiteral("相对飞机 Yaw: %1 deg（车辆 Yaw - 飞机 Yaw）\n")
+                    .arg(normalizeAngleDeg(row->vehicleYawDeg - row->yaw), 0, 'f', 3);
+        text += QStringLiteral("目标速度: forward=%1  strafe=%2  speed=%3 m/s\n")
+                    .arg(row->targetForwardMps, 0, 'f', 3)
+                    .arg(row->targetStrafeMps, 0, 'f', 3)
+                    .arg(targetSpeed, 0, 'f', 3);
+        const JustFloatFusedCarLamp* fused = currentFusedCarLamp();
+        if (fused != nullptr)
+        {
+            text += QStringLiteral("融合车灯: %1 cx=%2 cy=%3 angle=%4 deg%5\n")
+                        .arg(fused->valid ? QStringLiteral("有效") : QStringLiteral("无效"))
+                        .arg(fused->cx, 0, 'f', 3)
+                        .arg(fused->cy, 0, 'f', 3)
+                        .arg(fused->angle, 0, 'f', 3)
+                        .arg(row->hasFusedCarLampData
+                                 ? QStringLiteral("（遥测）")
+                                 : (m_udpMode
+                                        ? QStringLiteral("（本机重建）")
+                                        : QStringLiteral("（由旧日志重建）")));
+        }
     }
     else
     {
-        text += QStringLiteral("投影距离: 旧日志无 I38/I39\n");
+        text += QStringLiteral("车辆运动: 基础日志无 I38~I42\n");
     }
     for (int slot = 0; slot < CarPlanSlotCount; ++slot)
     {
@@ -1395,6 +1486,135 @@ void LogReplayWindow::drawCarPlanOverlay(QImage* image, int cameraIndex, int slo
                      QStringLiteral("PLAN %1 B%2")
                          .arg(carPlanSlotName(slot))
                          .arg(m_currentCarPlanResults[slot].beaconIndex));
+}
+
+void LogReplayWindow::drawMappedDetectionsOverlay(QImage* image, int cameraIndex) const
+{
+    const JustFloatLogRow* row = currentRow();
+    if (image == nullptr ||
+        row == nullptr ||
+        cameraIndex != VehicleMotionUtils::CenterCameraIndex)
+    {
+        return;
+    }
+
+    QPainter painter(image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const int sourceCameras[] = {
+        VehicleMotionUtils::FrontCameraIndex,
+        VehicleMotionUtils::BackCameraIndex
+    };
+    const QColor colors[] = {
+        QColor(0, 220, 190),
+        QColor(255, 176, 48)
+    };
+    for (int sourceIndex = 0; sourceIndex < 2; ++sourceIndex)
+    {
+        const int sourceCamera = sourceCameras[sourceIndex];
+        const JustFloatCameraFrame& frame = row->cameras[sourceCamera];
+        QPen pen(colors[sourceIndex]);
+        pen.setWidth(1);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        for (int beaconIndex = 0; beaconIndex < 2; ++beaconIndex)
+        {
+            const JustFloatBeacon& beacon = frame.beacons[beaconIndex];
+            if (!beacon.valid)
+            {
+                continue;
+            }
+            const QPointF mapped = VehicleMotionUtils::mapPointToCenter(sourceCamera,
+                                                                        beacon.x,
+                                                                        beacon.y);
+            const QPointF point = FrameRenderer::algorithmToImagePoint(
+                displayXForCamera(VehicleMotionUtils::CenterCameraIndex,
+                                  static_cast<float>(mapped.x())),
+                static_cast<float>(mapped.y()));
+            painter.drawEllipse(point, 3.0, 3.0);
+            painter.drawText(point + QPointF(4.0, -3.0),
+                             QStringLiteral("%1 B%2")
+                                 .arg(CameraNames[sourceCamera])
+                                 .arg(beaconIndex));
+        }
+
+        const JustFloatCarLamp& lamp = frame.carLamp;
+        if (lamp.valid)
+        {
+            const QPointF mapped = VehicleMotionUtils::mapPointToCenter(sourceCamera,
+                                                                        lamp.cx,
+                                                                        lamp.cy);
+            const QPointF point = FrameRenderer::algorithmToImagePoint(
+                displayXForCamera(VehicleMotionUtils::CenterCameraIndex,
+                                  static_cast<float>(mapped.x())),
+                static_cast<float>(mapped.y()));
+            painter.drawLine(point + QPointF(-3.0, 0.0), point + QPointF(3.0, 0.0));
+            painter.drawLine(point + QPointF(0.0, -3.0), point + QPointF(0.0, 3.0));
+        }
+    }
+}
+
+void LogReplayWindow::drawMotionOverlay(QImage* image, int cameraIndex) const
+{
+    const JustFloatLogRow* row = currentRow();
+    const JustFloatFusedCarLamp* fused = currentFusedCarLamp();
+    if (image == nullptr ||
+        row == nullptr ||
+        !row->hasMotionData ||
+        cameraIndex != VehicleMotionUtils::CenterCameraIndex ||
+        fused == nullptr ||
+        !fused->valid ||
+        !std::isfinite((double)fused->cx) ||
+        !std::isfinite((double)fused->cy) ||
+        !std::isfinite((double)fused->angle))
+    {
+        return;
+    }
+
+    const QPointF origin = FrameRenderer::algorithmToImagePoint(
+        displayXForCamera(VehicleMotionUtils::CenterCameraIndex, fused->cx),
+        fused->cy + 10.0f);
+    const QPointF actualVelocity = VehicleMotionUtils::velocityToCenter(
+        row->actualVelocityX,
+        row->actualVelocityY,
+        fused->angle);
+    const QPointF targetVelocity = VehicleMotionUtils::velocityToCenter(
+        row->targetStrafeMps,
+        row->targetForwardMps,
+        fused->angle);
+
+    QPainter painter(image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QFont font = painter.font();
+    font.setPixelSize(8);
+    font.setBold(true);
+    painter.setFont(font);
+
+    drawMotionArrow(&painter,
+                    origin,
+                    actualVelocity,
+                    QColor(255, 79, 216),
+                    QStringLiteral("实际"),
+                    QPointF(3.0, -3.0));
+    drawMotionArrow(&painter,
+                    origin,
+                    targetVelocity,
+                    QColor(77, 163, 255),
+                    QStringLiteral("目标"),
+                    QPointF(3.0, 9.0));
+}
+
+void LogReplayWindow::rebuildFusedCarLampCache()
+{
+    m_fusedCarLampCache.clear();
+    m_fusedCarLampCache.reserve(m_log.rowCount());
+    VehicleMotionUtils::CarLampFusion fusion;
+    for (int rowIndex = 0; rowIndex < m_log.rowCount(); ++rowIndex)
+    {
+        const JustFloatLogRow& row = m_log.rowAt(rowIndex);
+        m_fusedCarLampCache.push_back(row.hasFusedCarLampData
+                                         ? row.fusedCarLamp
+                                         : fusion.update(row));
+    }
 }
 
 bool LogReplayWindow::carPlanRelationAngleDeg(int slot, float* angleDeg) const
@@ -1509,6 +1729,19 @@ const JustFloatLogRow* LogReplayWindow::currentRow() const
         return nullptr;
     }
     return &m_log.rowAt(m_currentRow);
+}
+
+const JustFloatFusedCarLamp* LogReplayWindow::currentFusedCarLamp() const
+{
+    if (m_udpMode)
+    {
+        return m_hasLiveRow ? &m_liveFusedCarLamp : nullptr;
+    }
+    if (m_currentRow < 0 || m_currentRow >= m_fusedCarLampCache.size())
+    {
+        return nullptr;
+    }
+    return &m_fusedCarLampCache[m_currentRow];
 }
 
 beacon_result_t LogReplayWindow::resultForCamera(int cameraIndex) const

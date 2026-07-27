@@ -84,6 +84,7 @@ add_executable(BeaconImageAnalyzer
     core/JustFloatCsvRecorder.cpp
     core/WaveformHistoryStore.h
     core/WaveformHistoryStore.cpp
+    core/VehicleMotionUtils.h
     core/WaveformViewport.h
     core/WaveformViewport.cpp
     core/FrameRenderer.h
@@ -138,6 +139,7 @@ if (BUILD_TESTING)
         core/JustFloatCsvRecorder.cpp
         core/WaveformHistoryStore.h
         core/WaveformHistoryStore.cpp
+        core/VehicleMotionUtils.h
         core/WaveformViewport.h
         core/WaveformViewport.cpp
     )

@@ -4,6 +4,7 @@
 #include "CarPlanRunner.h"
 #include "JustFloatCsvRecorder.h"
 #include "JustFloatLog.h"
+#include "VehicleMotionUtils.h"
 #include "WaveformHistoryStore.h"
 #include "beacon_image.h"
 
@@ -80,6 +81,9 @@ private:
     void updateCameraVisibility();
     void updateInfoText();
     void drawCarPlanOverlay(QImage* image, int cameraIndex, int slot) const;
+    void drawMappedDetectionsOverlay(QImage* image, int cameraIndex) const;
+    void drawMotionOverlay(QImage* image, int cameraIndex) const;
+    void rebuildFusedCarLampCache();
     bool carPlanRelationAngleDeg(int slot, float* angleDeg) const;
     QString carPlanInfoText(int slot) const;
     QString carPlanInfoText() const;
@@ -87,9 +91,13 @@ private:
     beacon_result_t resultForCamera(int cameraIndex) const;
     QImage syntheticImageForCamera(int cameraIndex) const;
     const JustFloatLogRow* currentRow() const;
+    const JustFloatFusedCarLamp* currentFusedCarLamp() const;
 
     JustFloatLog m_log;
     JustFloatLogRow m_liveRow;
+    JustFloatFusedCarLamp m_liveFusedCarLamp;
+    VehicleMotionUtils::CarLampFusion m_liveCarLampFusion;
+    QVector<JustFloatFusedCarLamp> m_fusedCarLampCache;
     JustFloatCsvRecorder m_csvRecorder;
     WaveformHistoryStore m_waveformHistory;
     std::array<CarPlanRunner, CarPlanSlotCount> m_carPlanRunners;

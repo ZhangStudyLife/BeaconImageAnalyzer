@@ -92,12 +92,16 @@ bool isUsableChannelValue(const JustFloatLogRow& row, int channelIndex, double v
     {
         return row.cameras[(channelIndex - 19) / 5].carLamp.valid;
     }
+    if (channelIndex >= 38 && channelIndex <= 42)
+    {
+        return row.hasMotionData;
+    }
     return true;
 }
 
 double sourceTimeMs(const JustFloatLogRow& row)
 {
-    if (std::isfinite(row.syncTimeMs) && row.syncTimeMs >= 0.0)
+    if (std::isfinite(row.syncTimeMs) && row.syncTimeMs > 0.0)
     {
         return row.syncTimeMs;
     }
