@@ -21,6 +21,9 @@ public:
     void setFrameGeometry(const QSize& originalSize, int displayScale);
     void setCorrectionTool(const QString& tool);
     void setCorrectionStyle(const QColor& color, int lineWidth);
+    void finishCorrection();
+    void undoCorrectionPoint();
+    void cancelCorrection();
     void setSelected(bool selected);
     QSize sizeHint() const override;
 
@@ -36,6 +39,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
 
@@ -43,6 +47,7 @@ private:
     bool widgetToImagePoint(const QPoint& widgetPoint, QPointF* imagePoint) const;
     bool widgetToImagePixel(const QPoint& widgetPoint, QPoint* imagePixel) const;
     void updateHoverPixel(const QPoint& widgetPoint);
+    void appendPolylinePoint(const QPointF& point);
     QVector<QPointF> previewDisplayPoints() const;
     QRectF imageDisplayRect() const;
 

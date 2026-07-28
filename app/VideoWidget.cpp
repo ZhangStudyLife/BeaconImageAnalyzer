@@ -1,5 +1,7 @@
 #include "VideoWidget.h"
 
+#include "HorizonLineGeometry.h"
+
 #include <QImage>
 #include <QEvent>
 #include <QLineF>
@@ -65,6 +67,37 @@ void VideoWidget::setCorrectionStyle(const QColor& color, int lineWidth)
     update();
 }
 
+void VideoWidget::finishCorrection()
+{
+    if (m_correctionTool == QStringLiteral("polyline") && m_drawing)
+    {
+        if (m_previewPoints.size() >= 2)
+        {
+            emit correctionShapeFinished(m_correctionTool, m_previewPoints);
+        }
+        m_drawing = false;
+        m_previewPoints.clear();
+        update();
+    }
+}
+
+void VideoWidget::undoCorrectionPoint()
+{
+    if (m_correctionTool == QStringLiteral("polyline") && !m_previewPoints.isEmpty())
+    {
+        m_previewPoints.removeLast();
+        m_drawing = !m_previewPoints.isEmpty();
+        update();
+    }
+}
+
+void VideoWidget::cancelCorrection()
+{
+    m_drawing = false;
+    m_previewPoints.clear();
+    update();
+}
+
 void VideoWidget::setSelected(bool selected)
 {
     if (m_selected == selected)
@@ -99,6 +132,13 @@ void VideoWidget::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if (event->button() == Qt::RightButton
+        && m_correctionTool == QStringLiteral("polyline") && m_drawing)
+    {
+        finishCorrection();
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::RightButton)
     {
         QPointF imagePoint;
@@ -122,6 +162,13 @@ void VideoWidget::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    if (m_correctionTool == QStringLiteral("polyline"))
+    {
+        appendPolylinePoint(imagePoint);
+        event->accept();
+        return;
+    }
+
     m_previewPoints.clear();
     m_previewPoints.push_back(imagePoint);
 
@@ -134,7 +181,9 @@ void VideoWidget::mousePressEvent(QMouseEvent* event)
     }
 
     m_drawing = true;
-    if (m_correctionTool == QStringLiteral("circle") || m_correctionTool == QStringLiteral("rect"))
+    if (m_correctionTool == QStringLiteral("circle")
+        || m_correctionTool == QStringLiteral("rect")
+        || m_correctionTool == QStringLiteral("line"))
     {
         m_previewPoints.push_back(imagePoint);
     }
@@ -145,7 +194,7 @@ void VideoWidget::mouseMoveEvent(QMouseEvent* event)
 {
     updateHoverPixel(event->pos());
 
-    if (!m_drawing)
+    if (!m_drawing || m_correctionTool == QStringLiteral("polyline"))
     {
         QLabel::mouseMoveEvent(event);
         return;
@@ -184,6 +233,12 @@ void VideoWidget::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
 
+    if (m_correctionTool == QStringLiteral("polyline"))
+    {
+        event->accept();
+        return;
+    }
+
     if (event->button() != Qt::LeftButton || !m_drawing)
     {
         QLabel::mouseReleaseEvent(event);
@@ -212,6 +267,18 @@ void VideoWidget::mouseReleaseEvent(QMouseEvent* event)
     m_drawing = false;
     m_previewPoints.clear();
     update();
+}
+
+void VideoWidget::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton
+        && m_correctionTool == QStringLiteral("polyline") && m_drawing)
+    {
+        finishCorrection();
+        event->accept();
+        return;
+    }
+    QLabel::mouseDoubleClickEvent(event);
 }
 
 void VideoWidget::leaveEvent(QEvent* event)
@@ -291,9 +358,15 @@ void VideoWidget::paintEvent(QPaintEvent* event)
     {
         painter.drawRect(QRectF(points[0], points[1]).normalized());
     }
-    else if (m_correctionTool == QStringLiteral("polygon") && points.size() >= 2)
+    else if ((m_correctionTool == QStringLiteral("polygon")
+              || m_correctionTool == QStringLiteral("polyline"))
+             && points.size() >= 2)
     {
         painter.drawPolyline(QPolygonF(points));
+    }
+    else if (m_correctionTool == QStringLiteral("line") && points.size() >= 2)
+    {
+        painter.drawLine(points[0], points[1]);
     }
 
     if (m_selected)
@@ -370,11 +443,33 @@ void VideoWidget::updateHoverPixel(const QPoint& widgetPoint)
     emit hoverPixelChanged(imagePixel.x(), imagePixel.y(), gray, true);
 }
 
+void VideoWidget::appendPolylinePoint(const QPointF& point)
+{
+    if (m_previewPoints.isEmpty() || QLineF(m_previewPoints.last(), point).length() >= 0.5)
+    {
+        m_previewPoints.push_back(point);
+    }
+    m_drawing = true;
+    update();
+}
+
 QVector<QPointF> VideoWidget::previewDisplayPoints() const
 {
     QVector<QPointF> points;
     const QRectF displayRect = imageDisplayRect();
-    for (const QPointF& point : m_previewPoints)
+    QVector<QPointF> imagePoints = m_previewPoints;
+    if (m_correctionTool == QStringLiteral("line") && m_previewPoints.size() >= 2)
+    {
+        QLineF segment;
+        if (HorizonLineGeometry::clipThroughPoints(m_previewPoints[0],
+                                                   m_previewPoints[1],
+                                                   m_originalSize,
+                                                   &segment))
+        {
+            imagePoints = {segment.p1(), segment.p2()};
+        }
+    }
+    for (const QPointF& point : imagePoints)
     {
         points.push_back(displayRect.topLeft() +
                          QPointF(point.x() * displayRect.width() / (double)m_originalSize.width(),

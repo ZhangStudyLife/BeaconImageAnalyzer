@@ -10,13 +10,16 @@ const QByteArray Magic("BIMG", 4);
 const QByteArray ParameterMagic("BPAR", 4);
 const QByteArray SeekfreeMagic("\xaa\x02", 2);
 const QByteArray SeekfreeDotMagic("\xaa\x03", 2);
-constexpr quint8 ProtocolVersion = 1;
+constexpr quint8 ProtocolVersion1 = 1;
+constexpr quint8 ProtocolVersion2 = 2;
 constexpr quint8 HeaderSize = 28;
 constexpr quint8 MarkerSize = 6;
+constexpr quint8 DebugFloatSize = 8;
 constexpr quint8 ParameterHeaderSize = 28;
 constexpr quint8 ParameterEntrySize = 8;
 constexpr quint8 MaxStreamMode = 3;
 constexpr quint8 MaxMarkerCount = 16;
+constexpr quint8 MaxDebugFloatCount = 32;
 constexpr quint16 MaxParameterCount = 256;
 constexpr qsizetype CrcSize = 4;
 constexpr qsizetype MaxBufferSize = 2 * 1024 * 1024;
@@ -56,6 +59,14 @@ quint32 readU32Le(const QByteArray& data, qsizetype offset)
            | ((quint32)(quint8)data.at(offset + 1) << 8)
            | ((quint32)(quint8)data.at(offset + 2) << 16)
            | ((quint32)(quint8)data.at(offset + 3) << 24);
+}
+
+float readFloatLe(const QByteArray& data, qsizetype offset)
+{
+    const quint32 bits = readU32Le(data, offset);
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
 }
 
 quint32 crc32(const char* data, qsizetype length)
@@ -161,6 +172,7 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
                     BimgImageFrame frame;
                     frame.image = image;
                     frame.protocol = ImageFrameProtocol::SeekfreeAssistant;
+                    frame.protocolVersion = 0;
                     frame.width = width;
                     frame.height = height;
                     frame.sequence = m_seekfreeSequence++;
@@ -227,7 +239,7 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
             const quint32 sequence = readU32Le(m_buffer, 24);
             const quint64 expectedPayload = (quint64)entryCount * entrySize;
 
-            if (version != ProtocolVersion || headerSize != ParameterHeaderSize
+            if (version != ProtocolVersion1 || headerSize != ParameterHeaderSize
                 || cameraId > 1U || entrySize != ParameterEntrySize
                 || entryCount > MaxParameterCount || payloadSize != expectedPayload)
             {
@@ -295,16 +307,27 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
         const quint32 imageSize = readU32Le(m_buffer, 16);
         const quint8 markerCount = (quint8)m_buffer.at(20);
         const quint8 markerSize = (quint8)m_buffer.at(21);
+        const quint8 debugFloatCount = (quint8)m_buffer.at(22);
+        const quint8 debugFloatSize = (quint8)m_buffer.at(23);
         const quint32 payloadSize = readU32Le(m_buffer, 24);
         const quint64 pixels = (quint64)width * (quint64)height;
-        const quint64 expectedPayload = (quint64)imageSize
-                                        + (quint64)markerCount * markerSize;
+        quint64 expectedPayload = (quint64)imageSize
+                                  + (quint64)markerCount * markerSize;
+        if (version == ProtocolVersion2)
+        {
+            expectedPayload += (quint64)debugFloatCount * debugFloatSize;
+        }
 
-        if (version != ProtocolVersion || headerSize != HeaderSize
+        if ((version != ProtocolVersion1 && version != ProtocolVersion2)
+            || headerSize != HeaderSize
             || streamMode > MaxStreamMode || cameraId > 1U
             || width == 0U || height == 0U || pixels > MaxImageSize
             || imageSize != pixels || markerCount > MaxMarkerCount
-            || markerSize != MarkerSize || payloadSize != expectedPayload)
+            || markerSize != MarkerSize
+            || (version == ProtocolVersion2
+                && (debugFloatCount > MaxDebugFloatCount
+                    || debugFloatSize != DebugFloatSize))
+            || payloadSize != expectedPayload)
         {
             m_buffer.remove(0, 1);
             ++m_protocolErrorCount;
@@ -344,6 +367,7 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
         BimgImageFrame frame;
         frame.image = image;
         frame.protocol = ImageFrameProtocol::Bimg;
+        frame.protocolVersion = version;
         frame.streamMode = streamMode;
         frame.cameraId = cameraId;
         frame.width = width;
@@ -372,6 +396,20 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
                 ++m_protocolErrorCount;
             }
             markerOffset += MarkerSize;
+        }
+        if (version == ProtocolVersion2)
+        {
+            frame.debugFloats.reserve(debugFloatCount);
+            qsizetype debugOffset = markerOffset;
+            for (quint8 index = 0; index < debugFloatCount; ++index)
+            {
+                BimgDebugFloat debugFloat;
+                debugFloat.id = readU16Le(m_buffer, debugOffset);
+                debugFloat.valid = ((quint8)m_buffer.at(debugOffset + 2) & 0x01U) != 0U;
+                debugFloat.value = readFloatLe(m_buffer, debugOffset + 4);
+                frame.debugFloats.push_back(debugFloat);
+                debugOffset += DebugFloatSize;
+            }
         }
         batch.frames.push_back(frame);
         m_buffer.remove(0, packetSize);

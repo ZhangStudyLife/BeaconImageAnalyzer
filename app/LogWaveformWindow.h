@@ -18,6 +18,7 @@ public:
 
     void setUdpMode(bool enabled);
     void setLiveHistory(WaveformHistoryStore* history);
+    void configureLiveSource(const QString& sourceName, const QVector<int>& channels);
     void clearLiveData();
     void setCsvLog(const JustFloatLog* log);
     void setCsvRow(int row);

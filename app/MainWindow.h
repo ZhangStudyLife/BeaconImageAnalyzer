@@ -70,6 +70,7 @@ private slots:
     void openVideo();
     void configureTcpReceiver();
     void openJustFloatLogWindow();
+    void openHorizonCalibrationWindow();
     void saveAnnotation();
     void loadAnnotation();
     void exportMarkedAvi();
@@ -245,7 +246,7 @@ private:
     QString m_liveSaveDir;
     quint16 m_liveLocalPort = 0;
     int m_liveFrameIndex = -1;
-    quint16 m_nextTcpPort = 1346;
+    quint16 m_nextTcpPort = 8086;
     bool m_liveMode = false;
     bool m_updatingControls = false;
     QVector<int> m_splitSlotInstanceIds;

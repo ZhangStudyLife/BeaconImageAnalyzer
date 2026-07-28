@@ -2,6 +2,7 @@
 
 #include "BeaconResultUtils.h"
 #include "FrameRenderer.h"
+#include "LogWaveformWindow.h"
 #include "VideoWidget.h"
 
 #include <QApplication>
@@ -26,19 +27,95 @@
 #include <QStandardPaths>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <QtConcurrent>
 
 #include <opencv2/imgproc.hpp>
 
+#include <cmath>
+#include <limits>
+
 namespace
 {
+constexpr int PitchWaveformChannel = 34;
+constexpr int RollWaveformChannel = 35;
+constexpr qint64 AttitudeTcpTimeoutMs = 200;
+constexpr float InvalidWaveformValue = -1000.0f;
+
 QString defaultRecordName(quint16 port)
 {
     return QStringLiteral("tcp_%1_port%2.avi")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")))
         .arg(port);
+}
+
+QString defaultCalibrationName(quint16 port, quint8 cameraId)
+{
+    return QStringLiteral("tcp_%1_port%2_%3.hcal.json")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")))
+        .arg(port)
+        .arg(cameraId == 0U ? QStringLiteral("front") : QStringLiteral("back"));
+}
+
+bool frameAttitude(const BimgImageFrame& frame,
+                   double* rollDeg,
+                   double* pitchDeg,
+                   bool* valid)
+{
+    const BimgDebugFloat* roll = nullptr;
+    const BimgDebugFloat* pitch = nullptr;
+    for (const BimgDebugFloat& debugFloat : frame.debugFloats)
+    {
+        if (debugFloat.id == BimgDebugRollDegId)
+        {
+            roll = &debugFloat;
+        }
+        else if (debugFloat.id == BimgDebugPitchDegId)
+        {
+            pitch = &debugFloat;
+        }
+    }
+    if (roll == nullptr || pitch == nullptr)
+    {
+        return false;
+    }
+    if (rollDeg != nullptr)
+    {
+        *rollDeg = roll->value;
+    }
+    if (pitchDeg != nullptr)
+    {
+        *pitchDeg = pitch->value;
+    }
+    if (valid != nullptr)
+    {
+        *valid = roll->valid && pitch->valid
+                 && std::isfinite(roll->value) && std::isfinite(pitch->value);
+    }
+    return true;
+}
+
+bool frameHeight(const BimgImageFrame& frame, double* heightMm, bool* valid)
+{
+    for (const BimgDebugFloat& debugFloat : frame.debugFloats)
+    {
+        if (debugFloat.id != BimgDebugHeightMmId)
+        {
+            continue;
+        }
+        if (heightMm != nullptr)
+        {
+            *heightMm = debugFloat.value;
+        }
+        if (valid != nullptr)
+        {
+            *valid = debugFloat.valid && std::isfinite(debugFloat.value);
+        }
+        return true;
+    }
+    return false;
 }
 
 cv::Mat qImageToBgrMat(const QImage& image)
@@ -86,11 +163,13 @@ void drawChipMarkers(QImage* image, const QVector<BimgImageMarker>& markers)
         painter.drawLine(center + QPoint(-3, 3), center + QPoint(3, -3));
     }
 }
+
 }
 
 TcpImageWindow::TcpImageWindow(QWidget* parent)
     : QWidget(parent),
-      m_server(new QTcpServer(this))
+      m_server(new QTcpServer(this)),
+      m_calibrationRecorder(new HorizonCalibrationRecorder(this))
 {
     setAttribute(Qt::WA_DeleteOnClose, true);
     setWindowTitle(QStringLiteral("TCP 图像监视"));
@@ -115,6 +194,33 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_statusLabel->setWordWrap(true);
     root->addWidget(m_statusLabel);
+
+    auto* attitudeLayout = new QHBoxLayout;
+    attitudeLayout->setSpacing(12);
+    auto* attitudeTitle = new QLabel(QStringLiteral("姿态"), this);
+    QFont attitudeTitleFont = attitudeTitle->font();
+    attitudeTitleFont.setBold(true);
+    attitudeTitle->setFont(attitudeTitleFont);
+    m_attitudeRollLabel = new QLabel(QStringLiteral("Roll -- deg"), this);
+    m_attitudePitchLabel = new QLabel(QStringLiteral("Pitch -- deg"), this);
+    m_attitudeStateLabel = new QLabel(QStringLiteral("未提供"), this);
+    m_attitudeStateLabel->setAlignment(Qt::AlignCenter);
+    m_attitudeStateLabel->setMinimumWidth(82);
+    m_heightLabel = new QLabel(QStringLiteral("Height -- mm"), this);
+    m_heightStateLabel = new QLabel(QStringLiteral("未提供"), this);
+    m_heightStateLabel->setAlignment(Qt::AlignCenter);
+    m_heightStateLabel->setMinimumWidth(82);
+    m_attitudeWaveformButton = new QPushButton(QStringLiteral("姿态波形"), this);
+    m_attitudeWaveformButton->setEnabled(false);
+    attitudeLayout->addWidget(attitudeTitle);
+    attitudeLayout->addWidget(m_attitudeRollLabel);
+    attitudeLayout->addWidget(m_attitudePitchLabel);
+    attitudeLayout->addWidget(m_attitudeStateLabel);
+    attitudeLayout->addWidget(m_heightLabel);
+    attitudeLayout->addWidget(m_heightStateLabel);
+    attitudeLayout->addWidget(m_attitudeWaveformButton);
+    attitudeLayout->addStretch(1);
+    root->addLayout(attitudeLayout);
 
     auto* body = new QHBoxLayout;
     body->setSpacing(10);
@@ -167,6 +273,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     auto* saveButton = new QPushButton(QStringLiteral("保存当前帧"), this);
     auto* dirButton = new QPushButton(QStringLiteral("保存目录"), this);
     m_recordButton = new QPushButton(QStringLiteral("开始录像"), this);
+    m_calibrationRecordButton = new QPushButton(QStringLiteral("开始标定录像"), this);
     m_diagnosticButton = new QPushButton(QStringLiteral("区域诊断"), this);
     m_viewModeCombo = new QComboBox(this);
     m_viewModeCombo->addItem(QStringLiteral("原图"), QStringLiteral("original"));
@@ -181,6 +288,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     controls->addWidget(saveButton);
     controls->addWidget(dirButton);
     controls->addWidget(m_recordButton);
+    controls->addWidget(m_calibrationRecordButton);
     controls->addWidget(m_diagnosticButton);
     controls->addSpacing(12);
     controls->addWidget(m_viewModeCombo);
@@ -219,6 +327,41 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
             startRecording();
         }
     });
+    connect(m_calibrationRecordButton, &QPushButton::clicked, this, [this]() {
+        if (m_calibrationRecorder->isAccepting())
+        {
+            stopCalibrationRecording();
+        }
+        else if (!m_calibrationFinalizing)
+        {
+            startCalibrationRecording();
+        }
+    });
+    connect(m_calibrationRecorder,
+            &HorizonCalibrationRecorder::recordingFinished,
+            this,
+            [this](const QString& path, int frameCount, quint64 droppedFrames) {
+                m_calibrationFinalizing = false;
+                m_calibrationRecordButton->setEnabled(true);
+                m_calibrationRecordButton->setText(QStringLiteral("开始标定录像"));
+                updateStatus(m_result);
+                QMessageBox::information(this,
+                                         QStringLiteral("标定录像完成"),
+                                         QStringLiteral("已写入 %1 帧，丢弃/缺失 %2 帧。\n%3")
+                                             .arg(frameCount)
+                                             .arg(droppedFrames)
+                                             .arg(path));
+            });
+    connect(m_calibrationRecorder,
+            &HorizonCalibrationRecorder::recordingFailed,
+            this,
+            [this](const QString& message) {
+                m_calibrationFinalizing = false;
+                m_calibrationRecordButton->setEnabled(true);
+                m_calibrationRecordButton->setText(QStringLiteral("开始标定录像"));
+                updateStatus(m_result);
+                QMessageBox::critical(this, QStringLiteral("标定录像失败"), message);
+            });
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &TcpImageWindow::render);
     connect(m_enableInstanceCheck, &QCheckBox::toggled, this, &TcpImageWindow::render);
     connect(m_instanceCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &TcpImageWindow::render);
@@ -229,6 +372,10 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     connect(m_autoSaveCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_autoSave = checked;
     });
+    connect(m_attitudeWaveformButton,
+            &QPushButton::clicked,
+            this,
+            &TcpImageWindow::showAttitudeWaveform);
     connect(m_diagnosticButton, &QPushButton::clicked, this, &TcpImageWindow::toggleRegionDiagnostic);
     connect(m_videoWidget,
             &VideoWidget::correctionShapeFinished,
@@ -240,11 +387,27 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
             this,
             &TcpImageWindow::finishRegionDiagnostic);
 
+    m_attitudeTimer = new QTimer(this);
+    m_attitudeTimer->setInterval(50);
+    connect(m_attitudeTimer, &QTimer::timeout, this, [this]() {
+        if (m_attitudeProvided && m_attitudeLastMs >= 0 && m_attitudeElapsed.isValid()
+            && m_attitudeElapsed.elapsed() - m_attitudeLastMs > AttitudeTcpTimeoutMs
+            && !m_attitudeTimeoutGapWritten)
+        {
+            appendAttitudeSample(false);
+            m_attitudeTimeoutGapWritten = true;
+        }
+        refreshAttitudeDisplay();
+    });
+    m_attitudeTimer->start();
+
+    refreshAttitudeDisplay();
     updateStatus(m_result);
 }
 
 TcpImageWindow::~TcpImageWindow()
 {
+    m_calibrationRecorder->finish();
     stopRecording();
     stopListening();
 }
@@ -318,6 +481,35 @@ void TcpImageWindow::startListening()
         updateStatus(m_result);
         return;
     }
+
+    QString historyError;
+    m_attitudeHistoryError = !m_attitudeHistory.beginSession(&historyError);
+    if (m_attitudeHistoryError)
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("姿态波形不可用"),
+                             QStringLiteral("TCP图像接收仍会继续，但本次姿态波形无法记录。\n%1")
+                                 .arg(historyError));
+    }
+    m_attitudeElapsed.restart();
+    m_attitudeLastMs = -1;
+    m_heightLastMs = -1;
+    m_attitudeCameraId = 0xffU;
+    m_attitudeProvided = false;
+    m_attitudeHasValue = false;
+    m_attitudeValid = false;
+    m_heightProvided = false;
+    m_heightHasValue = false;
+    m_heightValid = false;
+    m_attitudeTimeoutGapWritten = false;
+    m_attitudeWaveformButton->setEnabled(!m_attitudeHistoryError);
+    if (m_attitudeWaveformWindow != nullptr)
+    {
+        m_attitudeWaveformWindow->setLiveHistory(&m_attitudeHistory);
+        m_attitudeWaveformWindow->configureLiveSource(
+            attitudeSourceName(), {PitchWaveformChannel, RollWaveformChannel});
+    }
+    refreshAttitudeDisplay();
 
     m_addressCombo->setEnabled(false);
     m_portEdit->setEnabled(false);
@@ -439,8 +631,12 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
         return;
     }
 
+    updateAttitude(frame);
     m_peerName = peerName;
     const QImage gray = frame.image.convertToFormat(QImage::Format_Grayscale8);
+    m_lastReceivedFrame = frame;
+    m_lastReceivedGrayImage = gray;
+    appendCalibrationFrame(frame, gray);
     if (frame.protocol == ImageFrameProtocol::Bimg && frame.streamMode == 0U)
     {
         m_recentRawFrames.push_back(gray);
@@ -490,6 +686,214 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
         QDir().mkpath(QFileInfo(path).absolutePath());
         m_renderedImage.save(path, "PNG");
     }
+}
+
+void TcpImageWindow::updateAttitude(const BimgImageFrame& frame)
+{
+    const BimgDebugFloat* roll = nullptr;
+    const BimgDebugFloat* pitch = nullptr;
+    const BimgDebugFloat* height = nullptr;
+
+    if (frame.protocol == ImageFrameProtocol::Bimg && frame.cameraId <= 1U
+        && frame.cameraId != m_attitudeCameraId)
+    {
+        m_attitudeCameraId = frame.cameraId;
+        if (m_attitudeWaveformWindow != nullptr)
+        {
+            m_attitudeWaveformWindow->configureLiveSource(
+                attitudeSourceName(), {PitchWaveformChannel, RollWaveformChannel});
+        }
+    }
+    for (const BimgDebugFloat& debugFloat : frame.debugFloats)
+    {
+        if (debugFloat.id == BimgDebugRollDegId)
+        {
+            roll = &debugFloat;
+        }
+        else if (debugFloat.id == BimgDebugPitchDegId)
+        {
+            pitch = &debugFloat;
+        }
+        else if (debugFloat.id == BimgDebugHeightMmId)
+        {
+            height = &debugFloat;
+        }
+    }
+
+    if (!m_attitudeElapsed.isValid() && (roll != nullptr || pitch != nullptr || height != nullptr))
+    {
+        m_attitudeElapsed.start();
+    }
+    const qint64 nowMs = m_attitudeElapsed.isValid() ? m_attitudeElapsed.elapsed() : -1;
+    if (roll == nullptr || pitch == nullptr)
+    {
+        if (m_attitudeProvided && !m_attitudeTimeoutGapWritten)
+        {
+            appendAttitudeSample(false);
+        }
+        m_attitudeProvided = false;
+        m_attitudeValid = false;
+        m_attitudeLastMs = -1;
+        m_attitudeTimeoutGapWritten = true;
+    }
+    else
+    {
+        const bool finite = std::isfinite(roll->value) && std::isfinite(pitch->value);
+        if (finite)
+        {
+            m_attitudeRollDeg = roll->value;
+            m_attitudePitchDeg = pitch->value;
+            m_attitudeHasValue = true;
+        }
+        m_attitudeProvided = true;
+        m_attitudeValid = finite && roll->valid && pitch->valid;
+        m_attitudeLastMs = nowMs;
+        m_attitudeTimeoutGapWritten = false;
+        appendAttitudeSample(m_attitudeValid);
+    }
+
+    if (height == nullptr)
+    {
+        m_heightProvided = false;
+        m_heightValid = false;
+        m_heightLastMs = -1;
+    }
+    else
+    {
+        const bool finite = std::isfinite(height->value);
+        if (finite)
+        {
+            m_heightMm = height->value;
+            m_heightHasValue = true;
+        }
+        m_heightProvided = true;
+        m_heightValid = finite && height->valid;
+        m_heightLastMs = nowMs;
+    }
+    refreshAttitudeDisplay();
+}
+
+void TcpImageWindow::appendAttitudeSample(bool valid)
+{
+    if (m_attitudeHistoryError || !m_attitudeHistory.isActive())
+    {
+        return;
+    }
+
+    const qint64 elapsedMs = m_attitudeElapsed.isValid() ? m_attitudeElapsed.elapsed() : 0;
+    JustFloatLogRow row;
+    row.rowTime = elapsedMs;
+    row.syncTimeMs = elapsedMs;
+    row.pitch = valid ? m_attitudePitchDeg : InvalidWaveformValue;
+    row.roll = valid ? m_attitudeRollDeg : InvalidWaveformValue;
+    row.yaw = InvalidWaveformValue;
+
+    QString error;
+    if (!m_attitudeHistory.append(row, elapsedMs, &error))
+    {
+        m_attitudeHistoryError = true;
+        m_attitudeWaveformButton->setEnabled(false);
+        m_attitudeStateLabel->setToolTip(error);
+    }
+}
+
+void TcpImageWindow::refreshAttitudeDisplay()
+{
+    m_attitudeRollLabel->setText(
+        m_attitudeHasValue
+            ? QStringLiteral("Roll %1 deg").arg(m_attitudeRollDeg, 0, 'f', 2)
+            : QStringLiteral("Roll -- deg"));
+    m_attitudePitchLabel->setText(
+        m_attitudeHasValue
+            ? QStringLiteral("Pitch %1 deg").arg(m_attitudePitchDeg, 0, 'f', 2)
+            : QStringLiteral("Pitch -- deg"));
+    m_heightLabel->setText(
+        m_heightHasValue
+            ? QStringLiteral("Height %1 mm").arg(m_heightMm, 0, 'f', 1)
+            : QStringLiteral("Height -- mm"));
+
+    QString state = QStringLiteral("未提供");
+    QString color = QStringLiteral("#8b949e");
+    if (m_attitudeProvided && m_attitudeLastMs >= 0 && m_attitudeElapsed.isValid())
+    {
+        if (m_attitudeElapsed.elapsed() - m_attitudeLastMs > AttitudeTcpTimeoutMs)
+        {
+            state = QStringLiteral("TCP超时");
+            color = QStringLiteral("#f87171");
+        }
+        else if (m_attitudeValid)
+        {
+            state = QStringLiteral("有效");
+            color = QStringLiteral("#4ade80");
+        }
+        else
+        {
+            state = QStringLiteral("姿态超时");
+            color = QStringLiteral("#facc15");
+        }
+    }
+    m_attitudeStateLabel->setText(state);
+    m_attitudeStateLabel->setStyleSheet(
+        QStringLiteral("color:%1; border:1px solid %1; border-radius:4px; padding:2px 8px;")
+            .arg(color));
+
+    state = QStringLiteral("未提供");
+    color = QStringLiteral("#8b949e");
+    if (m_heightProvided && m_heightLastMs >= 0 && m_attitudeElapsed.isValid())
+    {
+        if (m_attitudeElapsed.elapsed() - m_heightLastMs > AttitudeTcpTimeoutMs)
+        {
+            state = QStringLiteral("TCP超时");
+            color = QStringLiteral("#f87171");
+        }
+        else if (m_heightValid)
+        {
+            state = QStringLiteral("有效");
+            color = QStringLiteral("#4ade80");
+        }
+        else
+        {
+            state = QStringLiteral("高度无效");
+            color = QStringLiteral("#facc15");
+        }
+    }
+    m_heightStateLabel->setText(state);
+    m_heightStateLabel->setStyleSheet(
+        QStringLiteral("color:%1; border:1px solid %1; border-radius:4px; padding:2px 8px;")
+            .arg(color));
+}
+
+void TcpImageWindow::showAttitudeWaveform()
+{
+    if (m_attitudeHistoryError)
+    {
+        return;
+    }
+    if (m_attitudeWaveformWindow == nullptr)
+    {
+        m_attitudeWaveformWindow = new LogWaveformWindow(this);
+    }
+    m_attitudeWaveformWindow->setLiveHistory(&m_attitudeHistory);
+    m_attitudeWaveformWindow->configureLiveSource(
+        attitudeSourceName(), {PitchWaveformChannel, RollWaveformChannel});
+    m_attitudeWaveformWindow->setUdpMode(true);
+    m_attitudeWaveformWindow->show();
+    m_attitudeWaveformWindow->raise();
+    m_attitudeWaveformWindow->activateWindow();
+}
+
+QString TcpImageWindow::attitudeSourceName() const
+{
+    QString camera;
+    if (m_attitudeCameraId == 0U)
+    {
+        camera = QStringLiteral(" Front");
+    }
+    else if (m_attitudeCameraId == 1U)
+    {
+        camera = QStringLiteral(" Back");
+    }
+    return QStringLiteral("TCP%1 :%2").arg(camera).arg(m_port);
 }
 
 void TcpImageWindow::render()
@@ -805,6 +1209,131 @@ void TcpImageWindow::appendRecordingFrame(const QImage& rendered)
     m_writer.write(qImageToBgrMat(rendered));
 }
 
+void TcpImageWindow::startCalibrationRecording()
+{
+    if (m_lastReceivedGrayImage.isNull())
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("开始标定录像"),
+                                 QStringLiteral("请先等待收到第一帧图像。"));
+        return;
+    }
+    if (m_lastReceivedFrame.protocol != ImageFrameProtocol::Bimg
+        || m_lastReceivedFrame.protocolVersion != 2U
+        || m_lastReceivedFrame.streamMode != 0U)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("开始标定录像"),
+                                 QStringLiteral("标定录像只支持 BIMG v2 的 Raw 图像模式。"));
+        return;
+    }
+    if (m_lastReceivedGrayImage.size() != QSize(188, 120))
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("开始标定录像"),
+                                 QStringLiteral("标定录像要求 188x120 原始图像。"));
+        return;
+    }
+    double rollDeg = 0.0;
+    double pitchDeg = 0.0;
+    double heightMm = 0.0;
+    bool attitudeValid = false;
+    bool heightValid = false;
+    if (!frameAttitude(m_lastReceivedFrame, &rollDeg, &pitchDeg, &attitudeValid)
+        || !frameHeight(m_lastReceivedFrame, &heightMm, &heightValid)
+        || !attitudeValid || !heightValid)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("开始标定录像"),
+                                 QStringLiteral("请等待当前帧同时提供有效的Roll、Pitch和融合高度。"));
+        return;
+    }
+
+    const QString dir = m_saveDir.isEmpty()
+        ? QDir(QDir::currentPath()).absoluteFilePath(QStringLiteral("tcp_frames"))
+        : m_saveDir;
+    QDir().mkpath(dir);
+    QString sessionPath = QFileDialog::getSaveFileName(
+        this,
+        QStringLiteral("保存地平线标定会话"),
+        QDir(dir).absoluteFilePath(defaultCalibrationName(m_port, m_lastReceivedFrame.cameraId)),
+        QStringLiteral("Horizon Calibration (*.hcal.json)"));
+    if (sessionPath.isEmpty())
+    {
+        return;
+    }
+    if (!sessionPath.endsWith(QStringLiteral(".hcal.json"), Qt::CaseInsensitive))
+    {
+        sessionPath += QStringLiteral(".hcal.json");
+    }
+    QString basePath = sessionPath;
+    basePath.chop(10);
+    const QString videoPath = basePath + QStringLiteral(".avi");
+    const QString csvPath = basePath + QStringLiteral(".hcal.csv");
+    if ((QFileInfo::exists(videoPath) || QFileInfo::exists(csvPath))
+        && QMessageBox::question(this,
+                                 QStringLiteral("覆盖标定文件"),
+                                 QStringLiteral("同名 AVI 或 HCAL CSV 已存在，继续将覆盖这些文件。"))
+               != QMessageBox::Yes)
+    {
+        return;
+    }
+
+    HorizonCalibrationRecorderConfig config;
+    config.sessionPath = QFileInfo(sessionPath).absoluteFilePath();
+    config.videoPath = QFileInfo(videoPath).absoluteFilePath();
+    config.csvPath = QFileInfo(csvPath).absoluteFilePath();
+    config.imageSize = m_lastReceivedGrayImage.size();
+    config.cameraId = m_lastReceivedFrame.cameraId;
+    config.fps = 50.0;
+    QString error;
+    if (!m_calibrationRecorder->begin(config, &error))
+    {
+        QMessageBox::critical(this, QStringLiteral("开始标定录像失败"), error);
+        return;
+    }
+    m_calibrationRecordButton->setText(QStringLiteral("结束标定录像"));
+    updateStatus(m_result);
+}
+
+void TcpImageWindow::stopCalibrationRecording()
+{
+    if (!m_calibrationRecorder->isAccepting())
+    {
+        return;
+    }
+    m_calibrationFinalizing = true;
+    m_calibrationRecordButton->setEnabled(false);
+    m_calibrationRecordButton->setText(QStringLiteral("正在结束标定录像..."));
+    m_calibrationRecorder->finish();
+    updateStatus(m_result);
+}
+
+void TcpImageWindow::appendCalibrationFrame(const BimgImageFrame& frame, const QImage& gray)
+{
+    if (!m_calibrationRecorder->isAccepting()
+        || frame.protocol != ImageFrameProtocol::Bimg
+        || frame.protocolVersion != 2U
+        || frame.streamMode != 0U)
+    {
+        return;
+    }
+
+    HorizonCalibrationRecorderFrame record;
+    record.image = gray;
+    record.bimgSequence = frame.sequence;
+    record.hostTimeMs = QDateTime::currentMSecsSinceEpoch();
+    record.cameraId = frame.cameraId;
+    record.rollDeg = std::numeric_limits<double>::quiet_NaN();
+    record.pitchDeg = std::numeric_limits<double>::quiet_NaN();
+    record.heightMm = std::numeric_limits<double>::quiet_NaN();
+    record.attitudeValid = false;
+    record.heightValid = false;
+    frameAttitude(frame, &record.rollDeg, &record.pitchDeg, &record.attitudeValid);
+    frameHeight(frame, &record.heightMm, &record.heightValid);
+    m_calibrationRecorder->enqueue(record);
+}
+
 QString TcpImageWindow::defaultSavePath(const QString& suffix) const
 {
     const QString dir = m_saveDir.isEmpty()
@@ -827,6 +1356,13 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
         ? QStringLiteral("WiFi SPI 未连接")
         : QStringLiteral("WiFi SPI %1").arg(m_peerName);
     const QString recordText = m_recording ? QStringLiteral("录像中") : QStringLiteral("未录像");
+    const QString calibrationText = m_calibrationFinalizing
+        ? QStringLiteral("标定录像收尾中")
+        : m_calibrationRecorder->isAccepting()
+            ? QStringLiteral("标定录像中：已写 %1，丢帧 %2")
+                  .arg(m_calibrationRecorder->writtenFrameCount())
+                  .arg(m_calibrationRecorder->droppedFrameCount())
+            : QStringLiteral("未标定录像");
     int beaconMarkers = 0;
     int lampMarkers = 0;
     for (const BimgImageMarker& marker : m_streamFrame.markers)
@@ -867,14 +1403,15 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
                             .arg(BeaconResultUtils::totalTargetCount(result))
                             .arg(AlgorithmProcessProfiler::formatCompact(m_processProfile));
     }
-    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | %4 | CRC错误 %5 | 协议错误 %6 | %7")
+    m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | %4 | CRC错误 %5 | 协议错误 %6 | %7 | %8")
                                .arg(listenText)
                                .arg(peerText)
                                .arg(frameText)
                                .arg(algorithmText)
                                .arg(m_crcErrorCount)
                                .arg(m_protocolErrorCount)
-                               .arg(recordText));
+                               .arg(recordText)
+                               .arg(calibrationText));
 }
 
 AlgorithmRunner* TcpImageWindow::selectedRunner() const

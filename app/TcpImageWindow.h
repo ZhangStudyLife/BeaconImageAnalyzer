@@ -5,8 +5,11 @@
 #include "AnnotationModel.h"
 #include "BeaconParameterDiagnostic.h"
 #include "BimgImageFrameParser.h"
+#include "HorizonCalibrationRecorder.h"
+#include "WaveformHistoryStore.h"
 #include "beacon_image.h"
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QImage>
 #include <QString>
@@ -22,6 +25,8 @@ class QLineEdit;
 class QPushButton;
 class QTcpServer;
 class QTcpSocket;
+class QTimer;
+class LogWaveformWindow;
 class VideoWidget;
 template<typename T> class QFutureWatcher;
 
@@ -61,12 +66,20 @@ private:
     void setParameterSnapshot(const BimgParameterSnapshot& snapshot);
     void removeSocket(QTcpSocket* socket);
     void setFrame(const BimgImageFrame& frame, const QString& peerName);
+    void updateAttitude(const BimgImageFrame& frame);
+    void appendAttitudeSample(bool valid);
+    void refreshAttitudeDisplay();
+    void showAttitudeWaveform();
+    QString attitudeSourceName() const;
     void render();
     void saveCurrentFrame();
     void chooseSaveDirectory();
     void startRecording();
     void stopRecording();
     void appendRecordingFrame(const QImage& rendered);
+    void startCalibrationRecording();
+    void stopCalibrationRecording();
+    void appendCalibrationFrame(const BimgImageFrame& frame, const QImage& gray);
     void toggleRegionDiagnostic();
     void handleDiagnosticRegion(const QString& shapeType, const QVector<QPointF>& points);
     void finishRegionDiagnostic();
@@ -86,8 +99,12 @@ private:
     QString m_saveDir;
     QImage m_grayImage;
     QImage m_renderedImage;
+    QImage m_lastReceivedGrayImage;
     BimgImageFrame m_streamFrame;
+    BimgImageFrame m_lastReceivedFrame;
     QHash<int, BimgParameterSnapshot> m_parameterSnapshots;
+    WaveformHistoryStore m_attitudeHistory;
+    QElapsedTimer m_attitudeElapsed;
     QVector<QImage> m_recentRawFrames;
     QVector<QImage> m_diagnosticFrames;
     QImage m_diagnosticGrayImage;
@@ -95,22 +112,45 @@ private:
     quint64 m_crcErrorCount = 0;
     quint64 m_protocolErrorCount = 0;
     quint16 m_port = 0;
+    qint64 m_attitudeLastMs = -1;
+    qint64 m_heightLastMs = -1;
     int m_frameIndex = -1;
+    quint8 m_attitudeCameraId = 0xffU;
+    float m_attitudeRollDeg = 0.0f;
+    float m_attitudePitchDeg = 0.0f;
+    float m_heightMm = 0.0f;
     bool m_paused = false;
     bool m_autoSave = false;
     bool m_showOverlay = true;
     bool m_recording = false;
+    bool m_calibrationFinalizing = false;
     bool m_diagnosticFrozen = false;
+    bool m_attitudeProvided = false;
+    bool m_attitudeHasValue = false;
+    bool m_attitudeValid = false;
+    bool m_heightProvided = false;
+    bool m_heightHasValue = false;
+    bool m_heightValid = false;
+    bool m_attitudeTimeoutGapWritten = false;
+    bool m_attitudeHistoryError = false;
 
     beacon_result_t m_result = {};
     AlgorithmProcessProfile m_processProfile = {};
     cv::VideoWriter m_writer;
     QFutureWatcher<BeaconDiagnosticResult>* m_diagnosticWatcher = nullptr;
+    LogWaveformWindow* m_attitudeWaveformWindow = nullptr;
+    HorizonCalibrationRecorder* m_calibrationRecorder = nullptr;
+    QTimer* m_attitudeTimer = nullptr;
 
     QComboBox* m_addressCombo = nullptr;
     QLineEdit* m_portEdit = nullptr;
     QPushButton* m_listenButton = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QLabel* m_attitudeRollLabel = nullptr;
+    QLabel* m_attitudePitchLabel = nullptr;
+    QLabel* m_attitudeStateLabel = nullptr;
+    QLabel* m_heightLabel = nullptr;
+    QLabel* m_heightStateLabel = nullptr;
     VideoWidget* m_videoWidget = nullptr;
     QWidget* m_diagnosticPanel = nullptr;
     QLabel* m_diagnosticStateLabel = nullptr;
@@ -122,6 +162,8 @@ private:
     QPushButton* m_diagnosticButton = nullptr;
     QPushButton* m_pauseButton = nullptr;
     QPushButton* m_recordButton = nullptr;
+    QPushButton* m_calibrationRecordButton = nullptr;
+    QPushButton* m_attitudeWaveformButton = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
     QComboBox* m_instanceCombo = nullptr;
     QCheckBox* m_enableInstanceCheck = nullptr;

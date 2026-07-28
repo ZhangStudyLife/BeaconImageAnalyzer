@@ -61,6 +61,8 @@ add_executable(BeaconImageAnalyzer
     app/LogReplayWindow.cpp
     app/LogWaveformWindow.h
     app/LogWaveformWindow.cpp
+    app/HorizonCalibrationWindow.h
+    app/HorizonCalibrationWindow.cpp
     app/TcpImageWindow.h
     app/TcpImageWindow.cpp
     app/VideoWidget.h
@@ -91,6 +93,12 @@ add_executable(BeaconImageAnalyzer
     core/FrameRenderer.cpp
     core/BimgImageFrameParser.h
     core/BimgImageFrameParser.cpp
+    core/HorizonLineGeometry.h
+    core/HorizonLineGeometry.cpp
+    core/HorizonCalibration.h
+    core/HorizonCalibration.cpp
+    core/HorizonCalibrationRecorder.h
+    core/HorizonCalibrationRecorder.cpp
     core/VideoExporter.h
     core/VideoExporter.cpp
     annotation/AnnotationModel.h
@@ -171,6 +179,32 @@ if (BUILD_TESTING)
     )
 
     add_test(NAME BimgImageFrameParserTests COMMAND BimgImageFrameParserTests)
+
+    add_executable(HorizonCalibrationTests
+        tests/HorizonCalibrationTests.cpp
+        core/HorizonLineGeometry.h
+        core/HorizonLineGeometry.cpp
+        core/HorizonCalibration.h
+        core/HorizonCalibration.cpp
+        core/HorizonCalibrationRecorder.h
+        core/HorizonCalibrationRecorder.cpp
+        core/VideoReader.h
+        core/VideoReader.cpp
+    )
+
+    target_include_directories(HorizonCalibrationTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+        ${OpenCV_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(HorizonCalibrationTests PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Test
+        ${OpenCV_LIBS}
+    )
+
+    add_test(NAME HorizonCalibrationTests COMMAND HorizonCalibrationTests)
 
     add_executable(TwoBl3AlgorithmRunnerTests
         tests/TwoBl3AlgorithmRunnerTests.cpp

@@ -797,6 +797,42 @@ public:
         }
     }
 
+    void configureLiveSource(const QString& sourceName, const QVector<int>& channels)
+    {
+        liveSourceName = sourceName.trimmed().isEmpty() ? QStringLiteral("UDP") : sourceName;
+        if (!channels.isEmpty())
+        {
+            for (int index = 0; index < channelItems.size(); ++index)
+            {
+                QTreeWidgetItem* item = channelItems[index];
+                if (item == nullptr)
+                {
+                    continue;
+                }
+                const bool visible = channels.contains(index);
+                item->setHidden(!visible);
+                item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+            }
+            for (int groupIndex = 0; groupIndex < channelTree->topLevelItemCount(); ++groupIndex)
+            {
+                QTreeWidgetItem* group = channelTree->topLevelItem(groupIndex);
+                bool visible = false;
+                for (int childIndex = 0; childIndex < group->childCount(); ++childIndex)
+                {
+                    visible = visible || !group->child(childIndex)->isHidden();
+                }
+                group->setHidden(!visible);
+                group->setExpanded(visible);
+            }
+        }
+        updateModeControls();
+        dirty = true;
+        if (!paused)
+        {
+            refreshPlot();
+        }
+    }
+
     void clearLiveData()
     {
         paused = false;
@@ -1006,10 +1042,15 @@ private:
 
     void updateModeControls()
     {
-        sourceLabel->setText(udpMode ? QStringLiteral("UDP 实时") : QStringLiteral("CSV 回放"));
+        sourceLabel->setText(udpMode
+                                 ? QStringLiteral("%1 实时").arg(liveSourceName)
+                                 : QStringLiteral("CSV 回放"));
         clearButton->setEnabled(udpMode);
-        q->setWindowTitle(udpMode ? QStringLiteral("JustFloat 实时波形 - UDP")
-                                  : QStringLiteral("JustFloat 实时波形 - CSV"));
+        q->setWindowTitle(udpMode
+                              ? (liveSourceName == QStringLiteral("UDP")
+                                     ? QStringLiteral("JustFloat 实时波形 - UDP")
+                                     : QStringLiteral("姿态实时波形 - %1").arg(liveSourceName))
+                              : QStringLiteral("JustFloat 实时波形 - CSV"));
         updateFollowButton();
     }
 
@@ -1284,6 +1325,7 @@ public:
     quint64 liveHistoryRevision = 0;
     const JustFloatLog* csvLog = nullptr;
     QVector<double> csvTimeline;
+    QString liveSourceName = QStringLiteral("UDP");
     int csvRow = -1;
     bool udpMode = false;
     bool paused = false;
@@ -1308,6 +1350,12 @@ void LogWaveformWindow::setUdpMode(bool enabled)
 void LogWaveformWindow::setLiveHistory(WaveformHistoryStore* history)
 {
     d->setLiveHistory(history);
+}
+
+void LogWaveformWindow::configureLiveSource(const QString& sourceName,
+                                            const QVector<int>& channels)
+{
+    d->configureLiveSource(sourceName, channels);
 }
 
 void LogWaveformWindow::clearLiveData()

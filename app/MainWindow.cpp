@@ -7,6 +7,7 @@
 #include "FrameRenderer.h"
 #include "LogReplayWindow.h"
 #include "TcpImageWindow.h"
+#include "HorizonCalibrationWindow.h"
 #include "VideoExporter.h"
 #include "VideoWidget.h"
 
@@ -1985,6 +1986,7 @@ void MainWindow::buildUi()
     auto* openRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("打开 AVI"));
     auto* tcpRailButton = makeRailButton(rail, QStyle::SP_ComputerIcon, QStringLiteral("TCP 接收"));
     auto* logReplayRailButton = makeRailButton(rail, QStyle::SP_FileDialogDetailedView, QStringLiteral("日志回放"));
+    auto* horizonRailButton = makeRailButton(rail, QStyle::SP_FileDialogContentsView, QStringLiteral("地平线标定"));
     auto* loadInstanceRailButton = makeRailButton(rail, QStyle::SP_DialogOpenButton, QStringLiteral("加载实例"));
     auto* addInstanceRailButton = makeRailButton(rail, QStyle::SP_FileDialogNewFolder, QStringLiteral("添加实例"));
     auto* saveRailButton = makeRailButton(rail, QStyle::SP_DialogSaveButton, QStringLiteral("保存标注"));
@@ -1995,6 +1997,7 @@ void MainWindow::buildUi()
     railLayout->addWidget(openRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(tcpRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(logReplayRailButton, 0, Qt::AlignHCenter);
+    railLayout->addWidget(horizonRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(loadInstanceRailButton, 0, Qt::AlignHCenter);
     railLayout->addWidget(addInstanceRailButton, 0, Qt::AlignHCenter);
     railLayout->addSpacing(10);
@@ -2257,6 +2260,7 @@ void MainWindow::buildUi()
     connect(openRailButton, &QToolButton::clicked, this, &MainWindow::openVideo);
     connect(tcpRailButton, &QToolButton::clicked, this, &MainWindow::configureTcpReceiver);
     connect(logReplayRailButton, &QToolButton::clicked, this, &MainWindow::openJustFloatLogWindow);
+    connect(horizonRailButton, &QToolButton::clicked, this, &MainWindow::openHorizonCalibrationWindow);
     connect(loadInstanceRailButton, &QToolButton::clicked, this, &MainWindow::loadInstance);
     connect(addInstanceRailButton, &QToolButton::clicked, this, &MainWindow::addInstance);
     connect(loadInstanceButton, &QPushButton::clicked, this, &MainWindow::loadInstance);
@@ -2344,6 +2348,7 @@ void MainWindow::buildMenus()
     fileMenu->addAction(QStringLiteral("打开视频"), this, &MainWindow::openVideo);
     fileMenu->addAction(QStringLiteral("新增 TCP 监视窗口"), this, &MainWindow::configureTcpReceiver);
     fileMenu->addAction(QStringLiteral("打开 JustFloat 日志"), this, &MainWindow::openJustFloatLogWindow);
+    fileMenu->addAction(QStringLiteral("地平线标定"), this, &MainWindow::openHorizonCalibrationWindow);
     fileMenu->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
     fileMenu->addAction(QStringLiteral("读取标注"), this, &MainWindow::loadAnnotation);
     fileMenu->addSeparator();
@@ -2656,6 +2661,14 @@ void MainWindow::openJustFloatLogWindow()
     window->show();
     window->raise();
     statusBar()->showMessage(QStringLiteral("已打开 JustFloat 日志回放窗口。"), 3000);
+}
+
+void MainWindow::openHorizonCalibrationWindow()
+{
+    auto* window = new HorizonCalibrationWindow;
+    window->show();
+    window->raise();
+    statusBar()->showMessage(QStringLiteral("已打开地平线标定窗口。"), 3000);
 }
 
 bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame)

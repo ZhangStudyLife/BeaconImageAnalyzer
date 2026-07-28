@@ -5,6 +5,10 @@
 #include <QImage>
 #include <QVector>
 
+constexpr quint16 BimgDebugRollDegId = 0x0001U;
+constexpr quint16 BimgDebugPitchDegId = 0x0002U;
+constexpr quint16 BimgDebugHeightMmId = 0x0003U;
+
 enum class BimgMarkerType : quint8
 {
     Beacon = 1,
@@ -25,16 +29,25 @@ struct BimgImageMarker
     quint16 y = 0;
 };
 
+struct BimgDebugFloat
+{
+    quint16 id = 0;
+    bool valid = false;
+    float value = 0.0f;
+};
+
 struct BimgImageFrame
 {
     QImage image;
     ImageFrameProtocol protocol = ImageFrameProtocol::Bimg;
+    quint8 protocolVersion = 0;
     quint8 streamMode = 0;
     quint8 cameraId = 0;
     quint16 width = 0;
     quint16 height = 0;
     quint32 sequence = 0;
     QVector<BimgImageMarker> markers;
+    QVector<BimgDebugFloat> debugFloats;
 };
 
 struct BimgParameterValue
