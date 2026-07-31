@@ -36,6 +36,10 @@ QVector<QPointF> beaconCenters(const beacon_result_t& result)
             centers.push_back(FrameRenderer::algorithmToImagePoint(beacons[index].x, beacons[index].y));
         }
     }
+    if (!centers.isEmpty())
+    {
+        return centers;
+    }
     const int temporalCount = BeaconResultUtils::boundedCount(result.temporal_beacon_count,
                                                                BEACON_MAX_BEACON_COUNT);
     for (int index = 0; index < temporalCount; ++index)
@@ -45,20 +49,7 @@ QVector<QPointF> beaconCenters(const beacon_result_t& result)
         {
             continue;
         }
-        const QPointF point = FrameRenderer::algorithmToImagePoint(beacon.x, beacon.y);
-        bool duplicate = false;
-        for (const QPointF& existing : centers)
-        {
-            if (QLineF(existing, point).length() <= 3.0)
-            {
-                duplicate = true;
-                break;
-            }
-        }
-        if (!duplicate)
-        {
-            centers.push_back(point);
-        }
+        centers.push_back(FrameRenderer::algorithmToImagePoint(beacon.x, beacon.y));
     }
     return centers;
 }

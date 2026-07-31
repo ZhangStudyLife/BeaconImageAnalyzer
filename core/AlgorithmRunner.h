@@ -23,6 +23,23 @@ struct AlgorithmDetectionMetrics
     std::array<unsigned short, BEACON_MAX_CAR_LAMP_COUNT> carLampPixelAreas = {};
 };
 
+struct AlgorithmFrameTelemetry
+{
+    quint8 cameraId = 0;
+    float rollDeg = 0.0f;
+    float pitchDeg = 0.0f;
+    float heightMm = 0.0f;
+    bool attitudeValid = false;
+    bool heightValid = false;
+};
+
+struct AlgorithmHorizonCurve
+{
+    bool valid = false;
+    std::array<float, BEACON_IMAGE_W> y = {};
+    std::array<unsigned char, BEACON_IMAGE_W> columnValid = {};
+};
+
 struct AlgorithmParameterInfo
 {
     quint16 id = 0;
@@ -56,7 +73,9 @@ public:
     QString sourcePath() const;
     bool usesDynamicLibrary() const;
     void resetTemporal() const;
+    void setFrameTelemetry(const AlgorithmFrameTelemetry& telemetry) const;
     beacon_result_t process(const QImage& grayImage) const;
+    AlgorithmHorizonCurve horizonCurve() const;
     AlgorithmProcessProfile lastProcessProfile() const;
     AlgorithmDetectionMetrics lastDetectionMetrics() const;
     QImage binaryImage(const QImage& grayImage) const;
@@ -74,6 +93,9 @@ private:
                               unsigned char[BEACON_IMAGE_H][BEACON_IMAGE_W]);
     using CarLampPixelAreasFn = unsigned char (*)(
         unsigned short[BEACON_MAX_CAR_LAMP_COUNT]);
+    using SetTelemetryFn = void (*)(quint8, float, float, float, quint8, quint8);
+    using HorizonCurveFn = quint8 (*)(float[BEACON_IMAGE_W],
+                                      unsigned char[BEACON_IMAGE_W]);
     using BuildIdFn = quint32 (*)();
     using ParameterCountFn = quint16 (*)();
     using ParameterInfoFn = int (*)(quint16, quint16*, quint8*, float*, float*);
@@ -91,6 +113,8 @@ private:
     ProcessFn m_processFn = nullptr;
     BinaryFn m_binaryFn = nullptr;
     CarLampPixelAreasFn m_carLampPixelAreasFn = nullptr;
+    SetTelemetryFn m_setTelemetryFn = nullptr;
+    HorizonCurveFn m_horizonCurveFn = nullptr;
     BuildIdFn m_buildIdFn = nullptr;
     ParameterCountFn m_parameterCountFn = nullptr;
     ParameterInfoFn m_parameterInfoFn = nullptr;

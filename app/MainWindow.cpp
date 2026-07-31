@@ -3,8 +3,10 @@
 #include "AnnotationJson.h"
 #include "AnnotationPanel.h"
 #include "AiInstanceDialog.h"
+#include "BeaconLabelWindow.h"
 #include "BeaconResultUtils.h"
 #include "FrameRenderer.h"
+#include "HorizonCalibration.h"
 #include "LogReplayWindow.h"
 #include "TcpImageWindow.h"
 #include "HorizonCalibrationWindow.h"
@@ -270,6 +272,75 @@ QString defaultAlgorithmHeaderPath(const QString& fileName)
 QString defaultInstancesRoot()
 {
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("instances"));
+}
+
+QString twoBl3ImageSourceFromInstance(const QString& rootDir, QString* errorMessage)
+{
+    const QDir root(rootDir);
+    const QStringList candidates = {
+        root.absoluteFilePath(QStringLiteral("Image")),
+        root.absoluteFilePath(QStringLiteral("algorithm/Image")),
+        root.absoluteFilePath(QStringLiteral("algorithm")),
+        root.absolutePath()
+    };
+    const auto imageSource = [](const QString& directory) {
+        const QDir imageDir(directory);
+        return QFileInfo::exists(imageDir.absoluteFilePath(QStringLiteral("image.c")))
+                   && QFileInfo::exists(imageDir.absoluteFilePath(QStringLiteral("image.h")))
+                   && QFileInfo::exists(imageDir.absoluteFilePath(QStringLiteral("image_params.c")))
+               ? imageDir.absoluteFilePath(QStringLiteral("image.c"))
+               : QString();
+    };
+
+    for (const QString& candidate : candidates)
+    {
+        const QString source = imageSource(candidate);
+        if (!source.isEmpty())
+        {
+            return source;
+        }
+    }
+
+    QFile manifest(root.absoluteFilePath(QStringLiteral("two_bl3_instance.json")));
+    if (!manifest.exists())
+    {
+        return {};
+    }
+    if (!manifest.open(QIODevice::ReadOnly))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("无法读取2BL3实例描述文件：%1").arg(manifest.fileName());
+        }
+        return {};
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(manifest.readAll(), &parseError);
+    const QString configuredPath = document.object()
+                                       .value(QStringLiteral("image_directory"))
+                                       .toString()
+                                       .trimmed();
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()
+        || configuredPath.isEmpty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("2BL3实例描述文件格式错误：%1").arg(manifest.fileName());
+        }
+        return {};
+    }
+
+    const QString imageDirectory = QDir::isAbsolutePath(configuredPath)
+                                       ? QDir(configuredPath).absolutePath()
+                                       : root.absoluteFilePath(configuredPath);
+    const QString source = imageSource(imageDirectory);
+    if (source.isEmpty() && errorMessage != nullptr)
+    {
+        *errorMessage = QStringLiteral("2BL3实例缺少image.c、image.h或image_params.c：%1")
+                            .arg(QDir(imageDirectory).absolutePath());
+    }
+    return source;
 }
 
 bool copyFileIfNeeded(const QString& source, const QString& destination, QString* errorMessage)
@@ -1049,7 +1120,16 @@ AnalyzerInstance* MainWindow::createInstance(const QString& rootDir,
     {
         QString compileError;
         const QString buildDir = QDir(instance->rootDir).absoluteFilePath(QStringLiteral("build"));
-        if (!instance->runner.loadSourceFile(instance->algorithmPath, buildDir, &compileError))
+        const QFileInfo algorithmInfo(instance->algorithmPath);
+        const bool isTwoBl3Firmware = algorithmInfo.fileName() == QStringLiteral("image.c")
+                                      && QFileInfo::exists(algorithmInfo.dir().absoluteFilePath(
+                                          QStringLiteral("image_params.c")));
+        const bool loaded = isTwoBl3Firmware
+                                ? instance->runner.loadTwoBl3Firmware(
+                                      algorithmInfo.absolutePath(), buildDir, &compileError)
+                                : instance->runner.loadSourceFile(
+                                      instance->algorithmPath, buildDir, &compileError);
+        if (!loaded)
         {
             delete instance;
             if (errorMessage != nullptr)
@@ -1208,7 +1288,16 @@ void MainWindow::refreshInstanceList()
         {
             continue;
         }
-        auto* item = new QListWidgetItem(instance->name);
+        QString displayName = instance->name;
+        const quint32 buildId = instance->runner.algorithmBuildId();
+        if (buildId != 0U)
+        {
+            const QString buildText = QString::number(buildId, 16)
+                                          .rightJustified(8, QLatin1Char('0'))
+                                          .toUpper();
+            displayName += QStringLiteral("  [Build 0x%1]").arg(buildText);
+        }
+        auto* item = new QListWidgetItem(displayName);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(slotForInstance(instance->id) >= 0 ? Qt::Checked : Qt::Unchecked);
         item->setData(Qt::UserRole, instance->id);
@@ -1646,7 +1735,9 @@ void MainWindow::resetInstanceTemporal(AnalyzerInstance* instance)
     instance->temporalFrameCache.clear();
     instance->temporalProfileCache.clear();
     instance->temporalDetectionMetricsCache.clear();
+    instance->temporalHorizonCache.clear();
     instance->currentDetectionMetrics = {};
+    instance->currentHorizon = {};
     instance->temporalLastFrame = -1;
 }
 
@@ -1664,12 +1755,15 @@ bool MainWindow::rebuildTemporalCacheToFrame(AnalyzerInstance* instance,
         instance->temporalFrameCache.size() == cachedLastFrame + 1 &&
         instance->temporalProfileCache.size() == cachedLastFrame + 1 &&
         instance->temporalDetectionMetricsCache.size() == cachedLastFrame + 1 &&
+        instance->temporalHorizonCache.size() == cachedLastFrame + 1 &&
         instance->temporalFrameCache.contains(0) &&
         instance->temporalFrameCache.contains(cachedLastFrame) &&
         instance->temporalProfileCache.contains(0) &&
         instance->temporalProfileCache.contains(cachedLastFrame) &&
         instance->temporalDetectionMetricsCache.contains(0) &&
-        instance->temporalDetectionMetricsCache.contains(cachedLastFrame);
+        instance->temporalDetectionMetricsCache.contains(cachedLastFrame) &&
+        instance->temporalHorizonCache.contains(0) &&
+        instance->temporalHorizonCache.contains(cachedLastFrame);
 
     int firstFrame = 0;
     if (hasCompletePrefix && targetFrame > cachedLastFrame)
@@ -1693,12 +1787,15 @@ bool MainWindow::rebuildTemporalCacheToFrame(AnalyzerInstance* instance,
             }
             return false;
         }
+        instance->runner.setFrameTelemetry(frameTelemetryForFrame(frame));
         const beacon_result_t result = instance->runner.process(frameImage);
         const AlgorithmProcessProfile profile = instance->runner.lastProcessProfile();
         const AlgorithmDetectionMetrics metrics = instance->runner.lastDetectionMetrics();
+        const AlgorithmHorizonCurve horizon = instance->runner.horizonCurve();
         instance->temporalFrameCache.insert(frame, result);
         instance->temporalProfileCache.insert(frame, profile);
         instance->temporalDetectionMetricsCache.insert(frame, metrics);
+        instance->temporalHorizonCache.insert(frame, horizon);
         instance->temporalLastFrame = frame;
     }
     return true;
@@ -1718,6 +1815,7 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
     {
         instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
         instance->currentDetectionMetrics = instance->temporalDetectionMetricsCache.value(frameIndex);
+        instance->currentHorizon = instance->temporalHorizonCache.value(frameIndex);
         return instance->temporalFrameCache.value(frameIndex);
     }
 
@@ -1727,15 +1825,19 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
         {
             resetInstanceTemporal(instance);
         }
+        instance->runner.setFrameTelemetry(frameTelemetryForFrame(frameIndex));
         const beacon_result_t result = instance->runner.process(gray);
         const AlgorithmProcessProfile profile = instance->runner.lastProcessProfile();
         const AlgorithmDetectionMetrics metrics = instance->runner.lastDetectionMetrics();
+        const AlgorithmHorizonCurve horizon = instance->runner.horizonCurve();
         instance->temporalFrameCache.insert(frameIndex, result);
         instance->temporalProfileCache.insert(frameIndex, profile);
         instance->temporalDetectionMetricsCache.insert(frameIndex, metrics);
+        instance->temporalHorizonCache.insert(frameIndex, horizon);
         instance->temporalLastFrame = frameIndex;
         instance->currentProfile = profile;
         instance->currentDetectionMetrics = metrics;
+        instance->currentHorizon = horizon;
         return result;
     }
 
@@ -1744,12 +1846,15 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
     {
         instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
         instance->currentDetectionMetrics = instance->temporalDetectionMetricsCache.value(frameIndex);
+        instance->currentHorizon = instance->temporalHorizonCache.value(frameIndex);
         return instance->temporalFrameCache.value(frameIndex);
     }
 
+    instance->runner.setFrameTelemetry(frameTelemetryForFrame(frameIndex));
     const beacon_result_t result = instance->runner.process(gray);
     instance->currentProfile = instance->runner.lastProcessProfile();
     instance->currentDetectionMetrics = instance->runner.lastDetectionMetrics();
+    instance->currentHorizon = instance->runner.horizonCurve();
     return result;
 }
 
@@ -1779,7 +1884,12 @@ void MainWindow::renderInstance(AnalyzerInstance* instance,
     {
         visibleCorrections = m_annotationPanel->draftCorrections();
     }
-    const QImage rendered = FrameRenderer::render(displayImage, result, visibleCorrections, 1, m_showOverlay);
+    const QImage rendered = FrameRenderer::render(displayImage,
+                                                  result,
+                                                  visibleCorrections,
+                                                  1,
+                                                  m_showOverlay,
+                                                  &instance->currentHorizon);
 
     const int slot = slotForInstance(instance->id);
     if (slot >= 0 && slot < m_videoWidgets.size())
@@ -2349,6 +2459,7 @@ void MainWindow::buildMenus()
     fileMenu->addAction(QStringLiteral("新增 TCP 监视窗口"), this, &MainWindow::configureTcpReceiver);
     fileMenu->addAction(QStringLiteral("打开 JustFloat 日志"), this, &MainWindow::openJustFloatLogWindow);
     fileMenu->addAction(QStringLiteral("地平线标定"), this, &MainWindow::openHorizonCalibrationWindow);
+    fileMenu->addAction(QStringLiteral("信标样本标注"), this, &MainWindow::openBeaconLabelWindow);
     fileMenu->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
     fileMenu->addAction(QStringLiteral("读取标注"), this, &MainWindow::loadAnnotation);
     fileMenu->addSeparator();
@@ -2392,7 +2503,14 @@ void MainWindow::loadInstance()
 
     QString algorithmPath;
     QString error;
-    if (!seedAlgorithmFolder(rootDir, defaultAlgorithmPath(), &algorithmPath, &error))
+    algorithmPath = twoBl3ImageSourceFromInstance(rootDir, &error);
+    if (!error.isEmpty())
+    {
+        QMessageBox::critical(this, QStringLiteral("加载实例失败"), error);
+        return;
+    }
+    if (algorithmPath.isEmpty()
+        && !seedAlgorithmFolder(rootDir, defaultAlgorithmPath(), &algorithmPath, &error))
     {
         QMessageBox::critical(this, QStringLiteral("新建实例失败"), error);
         return;
@@ -2671,6 +2789,51 @@ void MainWindow::openHorizonCalibrationWindow()
     statusBar()->showMessage(QStringLiteral("已打开地平线标定窗口。"), 3000);
 }
 
+void MainWindow::openBeaconLabelWindow()
+{
+    auto* window = new BeaconLabelWindow;
+    window->show();
+    window->raise();
+    statusBar()->showMessage(QStringLiteral("已打开信标样本标注窗口。"), 3000);
+}
+
+void MainWindow::loadCompanionFrameTelemetry(const QString& videoPath)
+{
+    m_frameTelemetry.clear();
+    const QFileInfo videoInfo(videoPath);
+    const QString sessionPath = videoInfo.dir().absoluteFilePath(
+        videoInfo.completeBaseName() + QStringLiteral(".hcal.json"));
+    if (!QFileInfo::exists(sessionPath))
+    {
+        return;
+    }
+
+    HorizonCalibrationSession session;
+    QString error;
+    if (!HorizonCalibration::loadSession(sessionPath, &session, &error))
+    {
+        statusBar()->showMessage(QStringLiteral("HCAL遥测读取失败：%1").arg(error), 5000);
+        return;
+    }
+
+    for (const HorizonFrameMetadata& frame : session.frames)
+    {
+        AlgorithmFrameTelemetry telemetry;
+        telemetry.cameraId = frame.cameraId;
+        telemetry.rollDeg = static_cast<float>(frame.rollDeg);
+        telemetry.pitchDeg = static_cast<float>(frame.pitchDeg);
+        telemetry.heightMm = static_cast<float>(frame.heightMm);
+        telemetry.attitudeValid = frame.attitudeValid;
+        telemetry.heightValid = frame.heightValid;
+        m_frameTelemetry.insert(frame.frameIndex, telemetry);
+    }
+}
+
+AlgorithmFrameTelemetry MainWindow::frameTelemetryForFrame(int frameIndex) const
+{
+    return m_liveMode ? AlgorithmFrameTelemetry{} : m_frameTelemetry.value(frameIndex);
+}
+
 bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame)
 {
     QString error;
@@ -2681,6 +2844,7 @@ bool MainWindow::loadVideoFile(const QString& path, bool restoreProject, int fal
     }
 
     m_currentVideoPath = path;
+    loadCompanionFrameTelemetry(path);
     m_currentFrame = fallbackFrame;
     m_liveMode = false;
     m_decodedFrameCache.clear();

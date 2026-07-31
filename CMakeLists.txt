@@ -29,6 +29,7 @@ if (EXISTS "${TWO_BL3_IMAGE_DIR}/image.c" AND EXISTS "${TWO_BL3_IMAGE_DIR}/image
     add_library(two_bl3_diagnostic SHARED
         "${TWO_BL3_IMAGE_DIR}/image.c"
         "${TWO_BL3_IMAGE_DIR}/image_params.c"
+        "${TWO_BL3_IMAGE_DIR}/image_horizon.c"
         algorithm/2bl3_host/two_bl3_desktop_adapter.c
     )
     target_include_directories(two_bl3_diagnostic PRIVATE
@@ -63,6 +64,8 @@ add_executable(BeaconImageAnalyzer
     app/LogWaveformWindow.cpp
     app/HorizonCalibrationWindow.h
     app/HorizonCalibrationWindow.cpp
+    app/BeaconLabelWindow.h
+    app/BeaconLabelWindow.cpp
     app/TcpImageWindow.h
     app/TcpImageWindow.cpp
     app/VideoWidget.h
@@ -99,6 +102,8 @@ add_executable(BeaconImageAnalyzer
     core/HorizonCalibration.cpp
     core/HorizonCalibrationRecorder.h
     core/HorizonCalibrationRecorder.cpp
+    core/BeaconLabelSession.h
+    core/BeaconLabelSession.cpp
     core/VideoExporter.h
     core/VideoExporter.cpp
     annotation/AnnotationModel.h
@@ -205,6 +210,23 @@ if (BUILD_TESTING)
     )
 
     add_test(NAME HorizonCalibrationTests COMMAND HorizonCalibrationTests)
+
+    add_executable(BeaconLabelSessionTests
+        tests/BeaconLabelSessionTests.cpp
+        core/BeaconLabelSession.h
+        core/BeaconLabelSession.cpp
+    )
+
+    target_include_directories(BeaconLabelSessionTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+    )
+
+    target_link_libraries(BeaconLabelSessionTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+    )
+
+    add_test(NAME BeaconLabelSessionTests COMMAND BeaconLabelSessionTests)
 
     add_executable(TwoBl3AlgorithmRunnerTests
         tests/TwoBl3AlgorithmRunnerTests.cpp

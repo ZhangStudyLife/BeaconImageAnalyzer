@@ -43,10 +43,12 @@ struct AnalyzerInstance
     beacon_result_t currentResult = {};
     AlgorithmProcessProfile currentProfile = {};
     AlgorithmDetectionMetrics currentDetectionMetrics = {};
+    AlgorithmHorizonCurve currentHorizon = {};
     beacon_result_t previousAutoPauseResult = {};
     QHash<int, beacon_result_t> temporalFrameCache;
     QHash<int, AlgorithmProcessProfile> temporalProfileCache;
     QHash<int, AlgorithmDetectionMetrics> temporalDetectionMetricsCache;
+    QHash<int, AlgorithmHorizonCurve> temporalHorizonCache;
     int temporalLastFrame = -1;
     int previousAutoPauseFrame = -1;
     bool hasPreviousAutoPauseResult = false;
@@ -71,6 +73,7 @@ private slots:
     void configureTcpReceiver();
     void openJustFloatLogWindow();
     void openHorizonCalibrationWindow();
+    void openBeaconLabelWindow();
     void saveAnnotation();
     void loadAnnotation();
     void exportMarkedAvi();
@@ -117,6 +120,8 @@ private:
     void buildUi();
     void buildMenus();
     bool loadVideoFile(const QString& path, bool restoreProject, int fallbackFrame);
+    void loadCompanionFrameTelemetry(const QString& videoPath);
+    AlgorithmFrameTelemetry frameTelemetryForFrame(int frameIndex) const;
     bool readFrameCached(int frameIndex, QImage* grayImage, QString* errorMessage = nullptr);
     void showFrame(int frameIndex);
     void advancePlayingInstances();
@@ -210,6 +215,7 @@ private:
     QVector<AnalyzerInstance*> m_instances;
     VideoReader m_globalReader;
     QCache<int, QImage> m_decodedFrameCache;
+    QHash<int, AlgorithmFrameTelemetry> m_frameTelemetry;
     QTimer m_playTimer;
 
     VideoWidget* m_videoWidget = nullptr;

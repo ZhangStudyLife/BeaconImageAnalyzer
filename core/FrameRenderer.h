@@ -7,6 +7,8 @@
 #include <QImage>
 #include <QPointF>
 
+struct AlgorithmHorizonCurve;
+
 class FrameRenderer
 {
 public:
@@ -15,7 +17,8 @@ public:
                          const beacon_result_t& result,
                          const QVector<CorrectionShape>& corrections,
                          int scale,
-                         bool showOverlay);
+                         bool showOverlay,
+                         const AlgorithmHorizonCurve* horizon = nullptr);
 };
 
 #endif

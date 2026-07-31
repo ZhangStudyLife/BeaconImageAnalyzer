@@ -94,9 +94,23 @@ QString twoBl3HostAdapterPath()
         .absoluteFilePath(QStringLiteral("2bl3_host/two_bl3_desktop_adapter.c"));
 }
 
-QString twoBl3HostIncludeDir()
+QString twoBl3HostAdapterPathForImageDirectory(const QString& imageDirectory)
 {
-    return QDir(projectAlgorithmIncludeDir()).absoluteFilePath(QStringLiteral("2bl3_host"));
+    const QDir imageDir(imageDirectory);
+    const QStringList candidates = {
+        imageDir.absoluteFilePath(QStringLiteral("../host/two_bl3_desktop_adapter.c")),
+        imageDir.absoluteFilePath(QStringLiteral("../two_bl3_desktop_adapter.c")),
+        twoBl3HostAdapterPath()
+    };
+
+    for (const QString& candidate : candidates)
+    {
+        if (QFileInfo(candidate).isFile())
+        {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return QString();
 }
 
 constexpr double McuEstimateMinScale = 80.0;
@@ -256,8 +270,9 @@ bool AlgorithmRunner::loadTwoBl3Firmware(const QString& imageDirectory,
     const QDir imageDir(imageDirectory);
     const QString imageSource = imageDir.absoluteFilePath(QStringLiteral("image.c"));
     const QString parameterSource = imageDir.absoluteFilePath(QStringLiteral("image_params.c"));
+    const QString horizonSource = imageDir.absoluteFilePath(QStringLiteral("image_horizon.c"));
     const QString imageHeader = imageDir.absoluteFilePath(QStringLiteral("image.h"));
-    const QString adapterSource = twoBl3HostAdapterPath();
+    const QString adapterSource = twoBl3HostAdapterPathForImageDirectory(imageDirectory);
     const bool sourcesAvailable = QFileInfo(imageSource).isFile()
                                   && QFileInfo(parameterSource).isFile()
                                   && QFileInfo(imageHeader).isFile()
@@ -285,17 +300,21 @@ bool AlgorithmRunner::loadTwoBl3Firmware(const QString& imageDirectory,
 
     const QString outputPath = dynamicLibraryPath(imageSource, buildDir);
     const QString codeDirectory = QDir(imageDirectory).absoluteFilePath(QStringLiteral(".."));
+    const QString adapterIncludeDirectory = QFileInfo(adapterSource).absolutePath();
     QStringList arguments;
     arguments << QStringLiteral("-shared")
               << QStringLiteral("-O2")
               << QStringLiteral("-std=c11")
-              << QStringLiteral("-I") << twoBl3HostIncludeDir()
+              << QStringLiteral("-I") << adapterIncludeDirectory
               << QStringLiteral("-I") << codeDirectory
-              << QStringLiteral("-I") << projectAlgorithmIncludeDir()
               << QStringLiteral("-o") << outputPath
               << imageSource
-              << parameterSource
-              << adapterSource
+              << parameterSource;
+    if (QFileInfo(horizonSource).isFile())
+    {
+        arguments << horizonSource;
+    }
+    arguments << adapterSource
               << QStringLiteral("-lm");
 
     QProcess compilerProcess;
@@ -411,6 +430,8 @@ void AlgorithmRunner::clearDynamicFunctions()
     m_processFn = nullptr;
     m_binaryFn = nullptr;
     m_carLampPixelAreasFn = nullptr;
+    m_setTelemetryFn = nullptr;
+    m_horizonCurveFn = nullptr;
     m_buildIdFn = nullptr;
     m_parameterCountFn = nullptr;
     m_parameterInfoFn = nullptr;
@@ -426,6 +447,10 @@ bool AlgorithmRunner::resolveDynamicFunctions(QString* errorMessage)
     m_binaryFn = reinterpret_cast<BinaryFn>(m_library.resolve("beacon_image_debug_binary"));
     m_carLampPixelAreasFn = reinterpret_cast<CarLampPixelAreasFn>(
         m_library.resolve("beacon_image_debug_car_lamp_pixel_areas"));
+    m_setTelemetryFn = reinterpret_cast<SetTelemetryFn>(
+        m_library.resolve("beacon_image_set_telemetry"));
+    m_horizonCurveFn = reinterpret_cast<HorizonCurveFn>(
+        m_library.resolve("beacon_image_debug_horizon"));
     m_buildIdFn = reinterpret_cast<BuildIdFn>(m_library.resolve("beacon_image_debug_build_id"));
     m_parameterCountFn = reinterpret_cast<ParameterCountFn>(
         m_library.resolve("beacon_image_debug_parameter_count"));
@@ -471,6 +496,20 @@ void AlgorithmRunner::resetTemporal() const
     }
 }
 
+void AlgorithmRunner::setFrameTelemetry(const AlgorithmFrameTelemetry& telemetry) const
+{
+    if (m_setTelemetryFn == nullptr)
+    {
+        return;
+    }
+    m_setTelemetryFn(telemetry.cameraId,
+                     telemetry.rollDeg,
+                     telemetry.pitchDeg,
+                     telemetry.heightMm,
+                     telemetry.attitudeValid ? 1U : 0U,
+                     telemetry.heightValid ? 1U : 0U);
+}
+
 beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
 {
     beacon_result_t result;
@@ -512,6 +551,16 @@ beacon_result_t AlgorithmRunner::process(const QImage& grayImage) const
         }
     }
     return result;
+}
+
+AlgorithmHorizonCurve AlgorithmRunner::horizonCurve() const
+{
+    AlgorithmHorizonCurve curve;
+    if (m_horizonCurveFn != nullptr)
+    {
+        curve.valid = m_horizonCurveFn(curve.y.data(), curve.columnValid.data()) != 0U;
+    }
+    return curve;
 }
 
 AlgorithmProcessProfile AlgorithmRunner::lastProcessProfile() const

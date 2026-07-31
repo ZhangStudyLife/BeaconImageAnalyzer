@@ -1,5 +1,6 @@
 #include "FrameRenderer.h"
 
+#include "AlgorithmRunner.h"
 #include "BeaconResultUtils.h"
 
 #include <QFont>
@@ -8,6 +9,8 @@
 #include <QPolygonF>
 #include <QRectF>
 #include <QtMath>
+
+#include <cmath>
 
 namespace
 {
@@ -208,6 +211,39 @@ void drawTargetRect(QPainter& painter,
                              center.y() - 2 * safeScale),
                      label);
 }
+
+void drawHorizon(QPainter& painter,
+                 const AlgorithmHorizonCurve& horizon,
+                 int safeScale)
+{
+    if (!horizon.valid)
+    {
+        return;
+    }
+
+    QPen pen(QColor(40, 255, 80));
+    pen.setWidth(qMax(1, safeScale / 2));
+    painter.setPen(pen);
+    QPointF previous;
+    bool hasPrevious = false;
+    for (int x = 0; x < BEACON_IMAGE_W; ++x)
+    {
+        const float y = horizon.y[static_cast<std::size_t>(x)];
+        if (horizon.columnValid[static_cast<std::size_t>(x)] == 0U
+            || !std::isfinite(y))
+        {
+            hasPrevious = false;
+            continue;
+        }
+        const QPointF current(x * safeScale, y * safeScale);
+        if (hasPrevious)
+        {
+            painter.drawLine(previous, current);
+        }
+        previous = current;
+        hasPrevious = true;
+    }
+}
 }
 
 QPointF FrameRenderer::algorithmToImagePoint(float x, float y)
@@ -221,7 +257,8 @@ QImage FrameRenderer::render(const QImage& grayImage,
                              const beacon_result_t& result,
                              const QVector<CorrectionShape>& corrections,
                              int scale,
-                             bool showOverlay)
+                             bool showOverlay,
+                             const AlgorithmHorizonCurve* horizon)
 {
     const int safeScale = qMax(1, scale);
     QImage base = grayImage.convertToFormat(QImage::Format_RGB32);
@@ -245,6 +282,10 @@ QImage FrameRenderer::render(const QImage& grayImage,
     font.setPixelSize(safeScale == 1 ? 8 : 12);
     font.setBold(true);
     painter.setFont(font);
+    if (horizon != nullptr)
+    {
+        drawHorizon(painter, *horizon, safeScale);
+    }
 
     const bool useLegacyBeacons = BeaconResultUtils::usesLegacyBeacons(result);
     const beacon_circle_t* beacons = useLegacyBeacons ? result.circles : result.beacons;

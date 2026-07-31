@@ -41,8 +41,6 @@ typedef struct
     unsigned char temporal_beacon_count;
     beacon_rect_t temporal_car_lamps[BEACON_MAX_CAR_LAMP_COUNT];
     unsigned char temporal_car_lamp_count;
-    beacon_circle_t candidate_beacons[BEACON_MAX_BEACON_COUNT];
-    unsigned char candidate_beacon_count;
 } beacon_result_t;
 
 void beacon_image_init(void);
