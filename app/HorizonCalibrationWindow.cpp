@@ -224,6 +224,8 @@ bool HorizonCalibrationWindow::openSession(const QString& path)
 
     m_session = session;
     m_importedModel = HorizonFisheyeModel();
+    m_importedDownModel = DownGroundRangeModel();
+    m_downFit = DownGroundRangeFitResult();
     m_availableFrames = qMin(m_reader.frameCount(), m_session.frames.size());
     if (m_availableFrames <= 0)
     {
@@ -252,7 +254,14 @@ bool HorizonCalibrationWindow::openSession(const QString& path)
     m_frameSlider->setRange(0, m_availableFrames - 1);
     m_frameSpin->setRange(0, m_availableFrames - 1);
     m_importModelButton->setEnabled(true);
-    m_fitButton->setEnabled(!m_session.heightRecorded);
+    const bool downSession = m_session.cameraId == HorizonCameraDown;
+    m_videoWidget->setText(downSession
+        ? QStringLiteral("沿 7 米直线垂足附近画 2 至 5 个点的局部短线段")
+        : QStringLiteral("导入 HCAL 会话后逐帧标注地平线"));
+    m_videoWidget->setToolTip(downSession
+        ? QStringLiteral("只标垂足两侧约 0.5 米的短段；右键或双击结束，Backspace 撤销")
+        : QStringLiteral("沿栏杆从左到右点击 5 至 11 个点；右键或双击结束，Backspace 撤销，Esc 取消"));
+    m_fitButton->setEnabled(downSession || !m_session.heightRecorded);
     updateFitText();
     showFrame(0);
     return true;
@@ -290,6 +299,31 @@ void HorizonCalibrationWindow::chooseModel()
 
 bool HorizonCalibrationWindow::openModel(const QString& path)
 {
+    if (m_session.cameraId == HorizonCameraDown)
+    {
+        DownGroundRangeModel model;
+        QString error;
+        if (!DownGroundRangeCalibration::loadModel(path, &model, &error))
+        {
+            QMessageBox::critical(this, QStringLiteral("导入模型失败"), error);
+            return false;
+        }
+        if (model.imageSize != m_session.imageSize)
+        {
+            QMessageBox::critical(this,
+                                  QStringLiteral("模型不匹配"),
+                                  QStringLiteral("模型尺寸与 HCAL 会话不一致。"));
+            return false;
+        }
+        m_importedDownModel = model;
+        m_importedModel = HorizonFisheyeModel();
+        updateFitText();
+        if (m_currentFrame >= 0)
+        {
+            showFrame(m_currentFrame);
+        }
+        return true;
+    }
     HorizonFisheyeModel model;
     QString error;
     if (!HorizonCalibration::loadModel(path, &model, &error))
@@ -326,6 +360,7 @@ bool HorizonCalibrationWindow::openModel(const QString& path)
     }
 
     m_importedModel = model;
+    m_importedDownModel = DownGroundRangeModel();
     updateFitText();
     if (m_currentFrame >= 0)
     {
@@ -359,10 +394,22 @@ void HorizonCalibrationWindow::showFrame(int frameIndex)
     QImage display = image.convertToFormat(QImage::Format_RGB32);
     QPainter painter(&display);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    const bool downSession = m_session.cameraId == HorizonCameraDown;
+    const bool importedDownReady = m_importedDownModel.valid && frame.attitudeValid && frame.heightValid;
     const bool importedModelReady = m_importedModel.valid
                                     && (!m_importedModel.heightCompensated
                                         || (m_session.heightRecorded && frame.heightValid));
-    if (frame.attitudeValid && (importedModelReady || m_session.fit.fitted))
+    if (importedDownReady)
+    {
+        const QVector<QPointF> predicted = DownGroundRangeCalibration::predictBoundary(
+            m_importedDownModel, frame.rollDeg, frame.pitchDeg, frame.heightMm);
+        if (predicted.size() >= 3)
+        {
+            painter.setPen(QPen(QColor(0, 220, 255), 1));
+            painter.drawPolygon(QPolygonF(predicted));
+        }
+    }
+    else if (frame.attitudeValid && (importedModelReady || m_session.fit.fitted))
     {
         const QVector<QPointF> predicted = m_importedModel.valid
             ? HorizonCalibration::predictCurve(m_importedModel,
@@ -410,26 +457,36 @@ void HorizonCalibrationWindow::showFrame(int frameIndex)
     const QString annotationState = annotation.skipped
         ? QStringLiteral("已跳过")
         : annotation.legacyLine ? QStringLiteral("旧直线，需重标")
-        : annotation.points.size() >= 5
+        : annotation.points.size() >= (downSession ? 2 : 5)
             ? QStringLiteral("已标注 %1 点").arg(annotation.points.size())
             : QStringLiteral("未标注");
-    const QString errorText = !m_importedModel.valid && m_session.fit.frameErrors.contains(frameIndex)
+    const QString errorText = downSession && m_downFit.frameErrors.contains(frameIndex)
+        ? QStringLiteral(" | 预测误差 %1 px").arg(m_downFit.frameErrors.value(frameIndex), 0, 'f', 2)
+        : !m_importedModel.valid && m_session.fit.frameErrors.contains(frameIndex)
         ? QStringLiteral(" | 预测误差 %1 px").arg(m_session.fit.frameErrors.value(frameIndex), 0, 'f', 2)
         : QString();
-    const double rollMin = m_importedModel.valid ? m_importedModel.rollMin : m_session.fit.rollMin;
-    const double rollMax = m_importedModel.valid ? m_importedModel.rollMax : m_session.fit.rollMax;
-    const double pitchMin = m_importedModel.valid ? m_importedModel.pitchMin : m_session.fit.pitchMin;
-    const double pitchMax = m_importedModel.valid ? m_importedModel.pitchMax : m_session.fit.pitchMax;
-    const QString extrapolationText = (m_importedModel.valid || m_session.fit.fitted)
+    const double rollMin = importedDownReady ? m_importedDownModel.rollMin
+        : m_importedModel.valid ? m_importedModel.rollMin : m_session.fit.rollMin;
+    const double rollMax = importedDownReady ? m_importedDownModel.rollMax
+        : m_importedModel.valid ? m_importedModel.rollMax : m_session.fit.rollMax;
+    const double pitchMin = importedDownReady ? m_importedDownModel.pitchMin
+        : m_importedModel.valid ? m_importedModel.pitchMin : m_session.fit.pitchMin;
+    const double pitchMax = importedDownReady ? m_importedDownModel.pitchMax
+        : m_importedModel.valid ? m_importedModel.pitchMax : m_session.fit.pitchMax;
+    const QString extrapolationText = (importedDownReady || m_importedModel.valid || m_session.fit.fitted)
         && frame.attitudeValid
         && (frame.rollDeg < rollMin || frame.rollDeg > rollMax
             || frame.pitchDeg < pitchMin || frame.pitchDeg > pitchMax
+            || (importedDownReady
+                && (frame.heightMm < m_importedDownModel.heightMinMm
+                    || frame.heightMm > m_importedDownModel.heightMaxMm))
             || (m_importedModel.heightCompensated
                 && (!frame.heightValid || frame.heightMm < m_importedModel.heightMinMm
                     || frame.heightMm > m_importedModel.heightMaxMm)))
         ? QStringLiteral(" | 外推姿态/高度")
         : QString();
-    const QString modelText = m_importedModel.valid
+    const QString modelText = importedDownReady ? QStringLiteral(" | 外部下摄闭合边界模型")
+        : m_importedModel.valid
         ? (m_importedModel.heightCompensated ? QStringLiteral(" | 外部高度鱼眼模型")
                                              : QStringLiteral(" | 外部鱼眼模型"))
         : QString();
@@ -473,21 +530,28 @@ void HorizonCalibrationWindow::saveCurve(const QString& shapeType, const QVector
                                  QStringLiteral("该帧没有有效的同帧融合高度，不能加入高度标定样本。"));
         return;
     }
-    if (points.size() < 5)
+    const int minimumPoints = m_session.cameraId == HorizonCameraDown ? 2 : 5;
+    if (points.size() < minimumPoints)
     {
         QMessageBox::information(this,
                                  QStringLiteral("标注点不足"),
-                                 QStringLiteral("每帧请沿栏杆至少标注 5 个点，建议 7～11 个点。"));
+                                 m_session.cameraId == HorizonCameraDown
+                                     ? QStringLiteral("下摄每帧请只标 7 米垂足附近的局部短线段，至少 2 个点。")
+                                     : QStringLiteral("每帧请沿栏杆至少标注 5 个点，建议 7～11 个点。"));
         return;
     }
 
     HorizonFrameAnnotation annotation;
     annotation.points = points;
-    std::sort(annotation.points.begin(), annotation.points.end(), [](const QPointF& a, const QPointF& b) {
-        return a.x() < b.x();
-    });
+    if (m_session.cameraId != HorizonCameraDown)
+    {
+        std::sort(annotation.points.begin(), annotation.points.end(), [](const QPointF& a, const QPointF& b) {
+            return a.x() < b.x();
+        });
+    }
     m_session.annotations.insert(m_currentFrame, annotation);
     m_session.fit = HorizonFitResult();
+    m_downFit = DownGroundRangeFitResult();
     saveSession();
     updateFitText();
     showFrame(m_currentFrame);
@@ -501,6 +565,7 @@ void HorizonCalibrationWindow::clearCurrentFrame()
     }
     m_session.annotations.remove(m_currentFrame);
     m_session.fit = HorizonFitResult();
+    m_downFit = DownGroundRangeFitResult();
     saveSession();
     updateFitText();
     showFrame(m_currentFrame);
@@ -516,6 +581,7 @@ void HorizonCalibrationWindow::skipCurrentFrame()
     annotation.skipped = true;
     m_session.annotations.insert(m_currentFrame, annotation);
     m_session.fit = HorizonFitResult();
+    m_downFit = DownGroundRangeFitResult();
     saveSession();
     updateFitText();
     showFrame(m_currentFrame);
@@ -526,6 +592,20 @@ void HorizonCalibrationWindow::fitModel()
     if (m_availableFrames <= 0)
     {
         QMessageBox::information(this, QStringLiteral("拟合模型"), QStringLiteral("请先导入 HCAL 会话。"));
+        return;
+    }
+    if (m_session.cameraId == HorizonCameraDown)
+    {
+        m_downFit = DownGroundRangeCalibration::fit(m_session);
+        if (!m_downFit.fitted)
+        {
+            updateFitText();
+            QMessageBox::warning(this, QStringLiteral("拟合失败"), m_downFit.error);
+            return;
+        }
+        m_importedDownModel = m_downFit.model;
+        updateFitText();
+        showFrame(m_currentFrame);
         return;
     }
     if (m_session.heightRecorded)
@@ -549,6 +629,41 @@ void HorizonCalibrationWindow::fitModel()
 
 void HorizonCalibrationWindow::exportModel()
 {
+    if (m_session.cameraId == HorizonCameraDown)
+    {
+        if (!m_downFit.exportable)
+        {
+            QMessageBox::information(this,
+                                     QStringLiteral("暂不可导出"),
+                                     m_downFit.error.isEmpty()
+                                         ? QStringLiteral("下摄模型尚未达到导出条件。")
+                                         : m_downFit.error);
+            return;
+        }
+        QString path = QFileDialog::getSaveFileName(this,
+                                                    QStringLiteral("导出下摄闭合边界模型"),
+                                                    defaultModelPath(),
+                                                    QStringLiteral("Horizon Model (*.json)"));
+        if (path.isEmpty())
+        {
+            return;
+        }
+        if (!path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+        {
+            path += QStringLiteral(".json");
+        }
+        QString error;
+        const QString headerPath = path.left(path.size() - 5) + QStringLiteral(".h");
+        if (!DownGroundRangeCalibration::exportModel(m_downFit.model, path, headerPath, &error))
+        {
+            QMessageBox::critical(this, QStringLiteral("导出失败"), error);
+            return;
+        }
+        QMessageBox::information(this,
+                                 QStringLiteral("导出完成"),
+                                 QStringLiteral("已生成：\n%1\n%2").arg(path, headerPath));
+        return;
+    }
     if (!m_session.fit.exportable)
     {
         return;
@@ -596,9 +711,12 @@ void HorizonCalibrationWindow::moveToMatch(int direction, bool unannotated)
          frame += direction)
     {
         const HorizonFrameAnnotation annotation = m_session.annotations.value(frame);
+        const int minimumPoints = m_session.cameraId == HorizonCameraDown ? 2 : 5;
         const bool matches = unannotated
-            ? (annotation.legacyLine || annotation.points.size() < 5) && !annotation.skipped
-            : m_session.fit.outlierFrames.contains(frame);
+            ? (annotation.legacyLine || annotation.points.size() < minimumPoints) && !annotation.skipped
+            : m_session.cameraId == HorizonCameraDown
+                ? m_downFit.outlierFrames.contains(frame)
+                : m_session.fit.outlierFrames.contains(frame);
         if (matches)
         {
             showFrame(frame);
@@ -633,11 +751,34 @@ QString HorizonCalibrationWindow::defaultModelPath() const
     {
         base = QFileInfo(base).absolutePath() + QLatin1Char('/') + QFileInfo(base).completeBaseName();
     }
-    return base + QStringLiteral("_horizon_model.json");
+    return base + (m_session.cameraId == HorizonCameraDown
+        ? QStringLiteral("_down_ground_range_model.json") : QStringLiteral("_horizon_model.json"));
 }
 
 void HorizonCalibrationWindow::updateFitText()
 {
+    if (m_session.cameraId == HorizonCameraDown && m_importedDownModel.valid)
+    {
+        const DownGroundRangeModel& model = m_importedDownModel;
+        const QString state = m_downFit.fitted
+            ? (m_downFit.exportable ? QStringLiteral("可导出") : QStringLiteral("模型草稿"))
+            : QStringLiteral("外部模型");
+        m_fitLabel->setText(QStringLiteral("%1 | 样本 %2 | 内点 %3 | RMSE %4 px | 中位 %5 px | 最大 %6 px | "
+                                          "范围 %7 mm | 高度偏置 %8 mm | 方位覆盖 %9%% | Height [%10, %11] mm")
+                                .arg(state)
+                                .arg(model.sampleCount)
+                                .arg(model.inlierCount)
+                                .arg(model.rmse, 0, 'f', 3)
+                                .arg(model.medianError, 0, 'f', 3)
+                                .arg(model.maxError, 0, 'f', 3)
+                                .arg(model.effectiveRangeMm, 0, 'f', 1)
+                                .arg(model.heightBiasMm, 0, 'f', 1)
+                                .arg(model.azimuthCoverage, 0, 'f', 1)
+                                .arg(model.heightMinMm, 0, 'f', 1)
+                                .arg(model.heightMaxMm, 0, 'f', 1));
+        m_exportButton->setEnabled(m_downFit.exportable);
+        return;
+    }
     if (m_importedModel.valid)
     {
         const QString heightDetails = m_importedModel.heightCompensated

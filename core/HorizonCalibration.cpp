@@ -20,7 +20,7 @@
 
 namespace
 {
-constexpr int SessionVersion = 3;
+constexpr int SessionVersion = 4;
 constexpr int MinimumFitFrames = 8;
 constexpr int MinimumExportInliers = 12;
 constexpr int MinimumPointsPerFrame = 5;
@@ -239,16 +239,19 @@ bool readCsv(const QString& path,
         "frame_index,bimg_sequence,host_time_ms,camera_id,roll_deg,pitch_deg,attitude_valid");
     const QString heightHeader = QStringLiteral(
         "frame_index,bimg_sequence,host_time_ms,camera_id,roll_deg,pitch_deg,height_mm,attitude_valid,height_valid");
+    const QString downHeightHeader = QStringLiteral(
+        "frame_index,bimg_sequence,host_time_ms,camera_id,source_camera_id,roll_deg,pitch_deg,height_mm,attitude_valid,height_valid");
     const QString header = stream.readLine().trimmed();
     const bool hasHeight = header == heightHeader;
-    if (header != legacyHeader && !hasHeight)
+    const bool hasSourceCamera = header == downHeightHeader;
+    if (header != legacyHeader && !hasHeight && !hasSourceCamera)
     {
         setError(errorMessage, QStringLiteral("HCAL CSV 表头不匹配。"));
         return false;
     }
     if (heightRecorded != nullptr)
     {
-        *heightRecorded = hasHeight;
+        *heightRecorded = hasHeight || hasSourceCamera;
     }
 
     frames->clear();
@@ -262,7 +265,7 @@ bool readCsv(const QString& path,
             continue;
         }
         const QStringList values = line.split(QLatin1Char(','), Qt::KeepEmptyParts);
-        if (values.size() != (hasHeight ? 9 : 7))
+        if (values.size() != (hasSourceCamera ? 10 : hasHeight ? 9 : 7))
         {
             setError(errorMessage, QStringLiteral("HCAL CSV 第 %1 行字段数错误。").arg(lineNumber));
             return false;
@@ -272,6 +275,7 @@ bool readCsv(const QString& path,
         bool sequenceOk = false;
         bool timeOk = false;
         bool cameraOk = false;
+        bool sourceCameraOk = !hasSourceCamera;
         bool rollOk = false;
         bool pitchOk = false;
         bool heightOk = false;
@@ -282,19 +286,24 @@ bool readCsv(const QString& path,
         frame.bimgSequence = values[1].toUInt(&sequenceOk);
         frame.hostTimeMs = values[2].toLongLong(&timeOk);
         frame.cameraId = (quint8)values[3].toUInt(&cameraOk);
-        frame.rollDeg = values[4].toDouble(&rollOk);
-        frame.pitchDeg = values[5].toDouble(&pitchOk);
-        const int attitudeValid = values[hasHeight ? 7 : 6].toInt(&attitudeValidOk);
+        const int sourceOffset = hasSourceCamera ? 1 : 0;
+        frame.sourceCameraId = hasSourceCamera
+            ? (quint8)values[4].toUInt(&sourceCameraOk) : frame.cameraId;
+        frame.rollDeg = values[4 + sourceOffset].toDouble(&rollOk);
+        frame.pitchDeg = values[5 + sourceOffset].toDouble(&pitchOk);
+        const int attitudeValid = values[(hasHeight || hasSourceCamera) ? 7 + sourceOffset : 6]
+                                      .toInt(&attitudeValidOk);
         frame.attitudeValid = attitudeValid == 1;
-        if (hasHeight)
+        if (hasHeight || hasSourceCamera)
         {
-            frame.heightMm = values[6].toDouble(&heightOk);
-            const int heightValid = values[8].toInt(&heightValidOk);
+            frame.heightMm = values[6 + sourceOffset].toDouble(&heightOk);
+            const int heightValid = values[8 + sourceOffset].toInt(&heightValidOk);
             frame.heightValid = heightValid == 1;
         }
-        if (!frameOk || !sequenceOk || !timeOk || !cameraOk
+        if (!frameOk || !sequenceOk || !timeOk || !cameraOk || !sourceCameraOk
             || !attitudeValidOk || !heightValidOk
             || frame.frameIndex != frames->size() || frame.cameraId != cameraId
+            || frame.cameraId > HorizonCameraDown || frame.sourceCameraId > HorizonCameraBack
             || (frame.attitudeValid
                 && (!rollOk || !pitchOk
                     || !std::isfinite(frame.rollDeg)
@@ -634,9 +643,10 @@ QString floatLiteral(double value)
 
 QString HorizonCalibration::cameraName(quint8 cameraId)
 {
-    return cameraId == 0U ? QStringLiteral("Front")
-                          : cameraId == 1U ? QStringLiteral("Back")
-                                           : QStringLiteral("Unknown");
+    return cameraId == HorizonCameraFront ? QStringLiteral("Front")
+        : cameraId == HorizonCameraBack ? QStringLiteral("Back")
+        : cameraId == HorizonCameraDown ? QStringLiteral("Down")
+                                         : QStringLiteral("Unknown");
 }
 
 std::array<double, 3> HorizonCalibration::gravity(double rollDeg, double pitchDeg)
@@ -1019,7 +1029,11 @@ bool HorizonCalibration::loadSession(const QString& path,
     loaded.frameCount = root.value(QStringLiteral("frame_count")).toInt();
     loaded.sourceDroppedFrames = root.value(QStringLiteral("source_dropped_frames")).toVariant().toULongLong();
     loaded.queueDroppedFrames = root.value(QStringLiteral("queue_dropped_frames")).toVariant().toULongLong();
-    if (loaded.imageSize.width() <= 0 || loaded.imageSize.height() <= 0 || loaded.cameraId > 1U
+    loaded.sourceCameraId = version >= 4
+        ? (quint8)root.value(QStringLiteral("source_camera_id")).toInt(255)
+        : loaded.cameraId;
+    if (loaded.imageSize.width() <= 0 || loaded.imageSize.height() <= 0
+        || loaded.cameraId > HorizonCameraDown || loaded.sourceCameraId > HorizonCameraBack
         || loaded.videoPath.isEmpty() || loaded.csvPath.isEmpty())
     {
         setError(errorMessage, QStringLiteral("HCAL JSON 会话字段无效。"));
@@ -1032,6 +1046,14 @@ bool HorizonCalibration::loadSession(const QString& path,
                  errorMessage))
     {
         return false;
+    }
+    for (const HorizonFrameMetadata& frame : loaded.frames)
+    {
+        if (frame.sourceCameraId != loaded.sourceCameraId)
+        {
+            setError(errorMessage, QStringLiteral("HCAL CSV 源相机与会话不一致。"));
+            return false;
+        }
     }
 
     for (const QJsonValue& value : root.value(QStringLiteral("annotations")).toArray())
@@ -1101,6 +1123,8 @@ bool HorizonCalibration::saveSession(const HorizonCalibrationSession& session,
         annotations.push_back(object);
     }
 
+    const quint8 sourceCameraId = session.sourceCameraId <= HorizonCameraBack
+        ? session.sourceCameraId : session.cameraId;
     const quint64 droppedFrames = session.sourceDroppedFrames + session.queueDroppedFrames;
     QJsonObject root({
         {QStringLiteral("format"), QStringLiteral("horizon_calibration")},
@@ -1114,6 +1138,7 @@ bool HorizonCalibration::saveSession(const HorizonCalibrationSession& session,
         {QStringLiteral("image_height"), session.imageSize.height()},
         {QStringLiteral("camera_id"), session.cameraId},
         {QStringLiteral("camera_name"), cameraName(session.cameraId)},
+        {QStringLiteral("source_camera_id"), sourceCameraId},
         {QStringLiteral("height_recorded"), session.heightRecorded},
         {QStringLiteral("height_unit"), session.heightRecorded ? QStringLiteral("mm") : QString()},
         {QStringLiteral("frame_count"), session.frameCount},

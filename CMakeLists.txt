@@ -102,6 +102,8 @@ add_executable(BeaconImageAnalyzer
     core/HorizonCalibration.cpp
     core/HorizonCalibrationRecorder.h
     core/HorizonCalibrationRecorder.cpp
+    core/DownGroundRangeCalibration.h
+    core/DownGroundRangeCalibration.cpp
     core/BeaconLabelSession.h
     core/BeaconLabelSession.cpp
     core/VideoExporter.h
@@ -193,6 +195,8 @@ if (BUILD_TESTING)
         core/HorizonCalibration.cpp
         core/HorizonCalibrationRecorder.h
         core/HorizonCalibrationRecorder.cpp
+        core/DownGroundRangeCalibration.h
+        core/DownGroundRangeCalibration.cpp
         core/VideoReader.h
         core/VideoReader.cpp
     )
@@ -261,4 +265,43 @@ if (BUILD_TESTING)
     )
 
     add_test(NAME TwoBl3AlgorithmRunnerTests COMMAND TwoBl3AlgorithmRunnerTests)
+
+    set(DOWN_DRAFT_IMAGE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/instances_down/0801_下摄原始灰度信标草稿/algorithm/Image")
+    set(DOWN_DRAFT_HOST_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/instances_down/0801_下摄原始灰度信标草稿/algorithm/host")
+    if (EXISTS "${DOWN_DRAFT_IMAGE_DIR}/image_down_horizon.c")
+        configure_file(
+            "${DOWN_DRAFT_IMAGE_DIR}/image_down_horizon.c"
+            "${CMAKE_CURRENT_BINARY_DIR}/down_horizon_implicit_source.c"
+            COPYONLY
+        )
+        add_executable(DownHorizonImplicitTests
+            tests/DownHorizonImplicitTests.cpp
+            "${CMAKE_CURRENT_BINARY_DIR}/down_horizon_implicit_source.c"
+        )
+
+        target_include_directories(DownHorizonImplicitTests PRIVATE
+            "${DOWN_DRAFT_IMAGE_DIR}"
+            "${DOWN_DRAFT_HOST_DIR}"
+        )
+
+        target_compile_options(DownHorizonImplicitTests PRIVATE
+            -Wall
+            -Wextra
+            -Werror
+        )
+
+        target_compile_definitions(DownHorizonImplicitTests PRIVATE
+            IMAGE_DOWN_HORIZON_TEST_HOOKS=1
+        )
+
+        target_link_libraries(DownHorizonImplicitTests PRIVATE
+            Qt6::Core
+            Qt6::Test
+            m
+        )
+
+        add_test(NAME DownHorizonImplicitTests COMMAND DownHorizonImplicitTests)
+    endif()
 endif()

@@ -71,6 +71,7 @@ private:
     void refreshAttitudeDisplay();
     void showAttitudeWaveform();
     QString attitudeSourceName() const;
+    void processCurrentFrame();
     void render();
     void saveCurrentFrame();
     void chooseSaveDirectory();
@@ -87,6 +88,7 @@ private:
     void updateDiagnosticPanel(const BeaconDiagnosticResult& result);
     void setDiagnosticPreview(QLabel* label, const QImage& image);
     QString defaultSavePath(const QString& suffix) const;
+    quint8 calibrationCameraId() const;
     void updateStatus(const beacon_result_t& result = {});
     AlgorithmRunner* selectedRunner() const;
     AnnotationModel* selectedAnnotations() const;
@@ -124,6 +126,7 @@ private:
     bool m_showOverlay = true;
     bool m_recording = false;
     bool m_calibrationFinalizing = false;
+    quint8 m_activeCalibrationCameraId = 0xffU;
     bool m_diagnosticFrozen = false;
     bool m_attitudeProvided = false;
     bool m_attitudeHasValue = false;
@@ -136,6 +139,7 @@ private:
 
     beacon_result_t m_result = {};
     AlgorithmProcessProfile m_processProfile = {};
+    AlgorithmHorizonCurve m_horizon = {};
     cv::VideoWriter m_writer;
     QFutureWatcher<BeaconDiagnosticResult>* m_diagnosticWatcher = nullptr;
     LogWaveformWindow* m_attitudeWaveformWindow = nullptr;
@@ -165,6 +169,7 @@ private:
     QPushButton* m_calibrationRecordButton = nullptr;
     QPushButton* m_attitudeWaveformButton = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
+    QComboBox* m_calibrationCameraCombo = nullptr;
     QComboBox* m_instanceCombo = nullptr;
     QCheckBox* m_enableInstanceCheck = nullptr;
     QCheckBox* m_overlayCheck = nullptr;

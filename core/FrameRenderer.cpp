@@ -212,24 +212,18 @@ void drawTargetRect(QPainter& painter,
                      label);
 }
 
-void drawHorizon(QPainter& painter,
-                 const AlgorithmHorizonCurve& horizon,
-                 int safeScale)
+void drawHorizonCurve(
+    QPainter& painter,
+    const std::array<float, BEACON_IMAGE_W>& yValues,
+    const std::array<unsigned char, BEACON_IMAGE_W>& columnValid,
+    int safeScale)
 {
-    if (!horizon.valid)
-    {
-        return;
-    }
-
-    QPen pen(QColor(40, 255, 80));
-    pen.setWidth(qMax(1, safeScale / 2));
-    painter.setPen(pen);
     QPointF previous;
     bool hasPrevious = false;
     for (int x = 0; x < BEACON_IMAGE_W; ++x)
     {
-        const float y = horizon.y[static_cast<std::size_t>(x)];
-        if (horizon.columnValid[static_cast<std::size_t>(x)] == 0U
+        const float y = yValues[static_cast<std::size_t>(x)];
+        if (columnValid[static_cast<std::size_t>(x)] == 0U
             || !std::isfinite(y))
         {
             hasPrevious = false;
@@ -242,6 +236,84 @@ void drawHorizon(QPainter& painter,
         }
         previous = current;
         hasPrevious = true;
+    }
+}
+
+bool horizonRegionContains(const AlgorithmHorizonCurve& horizon, int x, int y)
+{
+    if (x < 0 || x >= BEACON_IMAGE_W || y < 0 || y >= BEACON_IMAGE_H)
+    {
+        return false;
+    }
+    const unsigned char state = horizon.columnState[static_cast<std::size_t>(x)];
+    if (state == 2U)
+    {
+        return true;
+    }
+    if (state != 1U)
+    {
+        return false;
+    }
+    return static_cast<float>(y) >= horizon.y[static_cast<std::size_t>(x)] &&
+           static_cast<float>(y) <= horizon.secondaryY[static_cast<std::size_t>(x)];
+}
+
+void drawClosedHorizonRegion(QPainter& painter,
+                             const AlgorithmHorizonCurve& horizon,
+                             int safeScale)
+{
+    for (int y = 0; y < BEACON_IMAGE_H; ++y)
+    {
+        for (int x = 0; x < BEACON_IMAGE_W; ++x)
+        {
+            if (!horizonRegionContains(horizon, x, y))
+            {
+                continue;
+            }
+            const bool touchesPhysicalBoundary =
+                (x > 0 && !horizonRegionContains(horizon, x - 1, y)) ||
+                (x + 1 < BEACON_IMAGE_W &&
+                 !horizonRegionContains(horizon, x + 1, y)) ||
+                (y > 0 && !horizonRegionContains(horizon, x, y - 1)) ||
+                (y + 1 < BEACON_IMAGE_H &&
+                 !horizonRegionContains(horizon, x, y + 1));
+            if (!touchesPhysicalBoundary)
+            {
+                continue;
+            }
+            painter.drawPoint(x * safeScale + safeScale / 2,
+                              y * safeScale + safeScale / 2);
+        }
+    }
+}
+
+void drawHorizon(QPainter& painter,
+                 const AlgorithmHorizonCurve& horizon,
+                 int safeScale)
+{
+    if (!horizon.valid && !horizon.secondaryValid)
+    {
+        return;
+    }
+
+    QPen pen(QColor(40, 255, 80));
+    pen.setWidth(qMax(1, safeScale / 2));
+    painter.setPen(pen);
+    if (horizon.closedRegion && horizon.valid && horizon.secondaryValid)
+    {
+        drawClosedHorizonRegion(painter, horizon, safeScale);
+        return;
+    }
+    if (horizon.valid)
+    {
+        drawHorizonCurve(painter, horizon.y, horizon.columnValid, safeScale);
+    }
+    if (horizon.secondaryValid)
+    {
+        drawHorizonCurve(painter,
+                         horizon.secondaryY,
+                         horizon.secondaryColumnValid,
+                         safeScale);
     }
 }
 }

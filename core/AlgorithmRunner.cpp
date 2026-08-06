@@ -271,6 +271,8 @@ bool AlgorithmRunner::loadTwoBl3Firmware(const QString& imageDirectory,
     const QString imageSource = imageDir.absoluteFilePath(QStringLiteral("image.c"));
     const QString parameterSource = imageDir.absoluteFilePath(QStringLiteral("image_params.c"));
     const QString horizonSource = imageDir.absoluteFilePath(QStringLiteral("image_horizon.c"));
+    const QString downHorizonSource = imageDir.absoluteFilePath(
+        QStringLiteral("image_down_horizon.c"));
     const QString imageHeader = imageDir.absoluteFilePath(QStringLiteral("image.h"));
     const QString adapterSource = twoBl3HostAdapterPathForImageDirectory(imageDirectory);
     const bool sourcesAvailable = QFileInfo(imageSource).isFile()
@@ -307,12 +309,16 @@ bool AlgorithmRunner::loadTwoBl3Firmware(const QString& imageDirectory,
               << QStringLiteral("-std=c11")
               << QStringLiteral("-I") << adapterIncludeDirectory
               << QStringLiteral("-I") << codeDirectory
-              << QStringLiteral("-o") << outputPath
+              << QStringLiteral("-o") << QDir::toNativeSeparators(outputPath)
               << imageSource
               << parameterSource;
     if (QFileInfo(horizonSource).isFile())
     {
         arguments << horizonSource;
+    }
+    if (QFileInfo(downHorizonSource).isFile())
+    {
+        arguments << downHorizonSource;
     }
     arguments << adapterSource
               << QStringLiteral("-lm");
@@ -432,6 +438,9 @@ void AlgorithmRunner::clearDynamicFunctions()
     m_carLampPixelAreasFn = nullptr;
     m_setTelemetryFn = nullptr;
     m_horizonCurveFn = nullptr;
+    m_secondaryHorizonCurveFn = nullptr;
+    m_horizonRegionFn = nullptr;
+    m_processedFrameCountFn = nullptr;
     m_buildIdFn = nullptr;
     m_parameterCountFn = nullptr;
     m_parameterInfoFn = nullptr;
@@ -451,6 +460,12 @@ bool AlgorithmRunner::resolveDynamicFunctions(QString* errorMessage)
         m_library.resolve("beacon_image_set_telemetry"));
     m_horizonCurveFn = reinterpret_cast<HorizonCurveFn>(
         m_library.resolve("beacon_image_debug_horizon"));
+    m_secondaryHorizonCurveFn = reinterpret_cast<HorizonCurveFn>(
+        m_library.resolve("beacon_image_debug_horizon_secondary"));
+    m_horizonRegionFn = reinterpret_cast<HorizonRegionFn>(
+        m_library.resolve("beacon_image_debug_horizon_region"));
+    m_processedFrameCountFn = reinterpret_cast<ProcessedFrameCountFn>(
+        m_library.resolve("beacon_image_debug_processed_frame_count"));
     m_buildIdFn = reinterpret_cast<BuildIdFn>(m_library.resolve("beacon_image_debug_build_id"));
     m_parameterCountFn = reinterpret_cast<ParameterCountFn>(
         m_library.resolve("beacon_image_debug_parameter_count"));
@@ -560,7 +575,21 @@ AlgorithmHorizonCurve AlgorithmRunner::horizonCurve() const
     {
         curve.valid = m_horizonCurveFn(curve.y.data(), curve.columnValid.data()) != 0U;
     }
+    if (m_secondaryHorizonCurveFn != nullptr)
+    {
+        curve.secondaryValid = m_secondaryHorizonCurveFn(
+            curve.secondaryY.data(), curve.secondaryColumnValid.data()) != 0U;
+    }
+    if (m_horizonRegionFn != nullptr)
+    {
+        curve.closedRegion = m_horizonRegionFn(curve.columnState.data()) != 0U;
+    }
     return curve;
+}
+
+quint32 AlgorithmRunner::processedFrameCount() const
+{
+    return m_processedFrameCountFn != nullptr ? m_processedFrameCountFn() : 0U;
 }
 
 AlgorithmProcessProfile AlgorithmRunner::lastProcessProfile() const

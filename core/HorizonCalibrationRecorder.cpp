@@ -59,7 +59,8 @@ bool HorizonCalibrationRecorder::begin(const HorizonCalibrationRecorderConfig& c
     }
     if (config.sessionPath.isEmpty() || config.videoPath.isEmpty() || config.csvPath.isEmpty()
         || config.imageSize.width() <= 0 || config.imageSize.height() <= 0
-        || config.cameraId > 1U || config.fps <= 0.0)
+        || config.cameraId > HorizonCameraDown || config.sourceCameraId > HorizonCameraBack
+        || config.fps <= 0.0)
     {
         setError(errorMessage, QStringLiteral("标定录像配置无效。"));
         return false;
@@ -82,7 +83,7 @@ bool HorizonCalibrationRecorder::enqueue(const HorizonCalibrationRecorderFrame& 
 {
     QMutexLocker locker(&m_mutex);
     if (!m_accepting || frame.image.isNull() || frame.image.size() != m_config.imageSize
-        || frame.cameraId != m_config.cameraId)
+        || frame.cameraId != m_config.cameraId || frame.sourceCameraId != m_config.sourceCameraId)
     {
         return false;
     }
@@ -142,6 +143,7 @@ void HorizonCalibrationRecorder::run()
     session.csvPath = m_config.csvPath;
     session.imageSize = m_config.imageSize;
     session.cameraId = m_config.cameraId;
+    session.sourceCameraId = m_config.sourceCameraId;
     session.heightRecorded = true;
     session.status = QStringLiteral("recording");
     QString error;
@@ -163,7 +165,7 @@ void HorizonCalibrationRecorder::run()
     }
     QTextStream csv(&csvFile);
     csv.setEncoding(QStringConverter::Utf8);
-    csv << "frame_index,bimg_sequence,host_time_ms,camera_id,roll_deg,pitch_deg,height_mm,attitude_valid,height_valid\n";
+    csv << "frame_index,bimg_sequence,host_time_ms,camera_id,source_camera_id,roll_deg,pitch_deg,height_mm,attitude_valid,height_valid\n";
     csv.flush();
 
     const int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
@@ -206,6 +208,7 @@ void HorizonCalibrationRecorder::run()
             << frame.bimgSequence << ','
             << frame.hostTimeMs << ','
             << (int)frame.cameraId << ','
+            << (int)frame.sourceCameraId << ','
             << csvNumber(frame.rollDeg) << ','
             << csvNumber(frame.pitchDeg) << ','
             << csvNumber(frame.heightMm) << ','

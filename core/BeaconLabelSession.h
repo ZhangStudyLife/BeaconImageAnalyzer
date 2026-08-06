@@ -3,6 +3,7 @@
 
 #include <QMap>
 #include <QPointF>
+#include <QRectF>
 #include <QSize>
 #include <QString>
 #include <QVector>
@@ -19,6 +20,8 @@ struct BeaconFrameLabel
 {
     BeaconLabelFrameState state = BeaconLabelFrameState::Unreviewed;
     QVector<QPointF> points;
+    BeaconLabelFrameState lampState = BeaconLabelFrameState::Unreviewed;
+    QVector<QRectF> lampBoxes;
 };
 
 struct BeaconLabelSession
@@ -29,12 +32,13 @@ struct BeaconLabelSession
     int frameCount = 0;
     double videoFps = 0.0;
     int sampleStride = 5;
+    quint8 cameraId = 0U;
     QMap<int, BeaconFrameLabel> frames;
 };
 
 namespace BeaconLabelSessionIO
 {
-QString defaultSessionPath(const QString& videoPath);
+QString defaultSessionPath(const QString& videoPath, quint8 cameraId = 0U);
 QString stateKey(BeaconLabelFrameState state);
 QString stateDisplayName(BeaconLabelFrameState state);
 

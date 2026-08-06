@@ -13,6 +13,9 @@ constexpr int HorizonModelBasisCount = 9;
 constexpr int HorizonModelCoefficientCount = HorizonModelBasisCount * 3;
 constexpr int HorizonFisheyeThetaCoefficientCount = 3;
 constexpr int HorizonFisheyeMatrixCoefficientCount = 9;
+constexpr quint8 HorizonCameraFront = 0U;
+constexpr quint8 HorizonCameraBack = 1U;
+constexpr quint8 HorizonCameraDown = 2U;
 
 struct HorizonFrameMetadata
 {
@@ -20,6 +23,7 @@ struct HorizonFrameMetadata
     quint32 bimgSequence = 0;
     qint64 hostTimeMs = 0;
     quint8 cameraId = 0;
+    quint8 sourceCameraId = 0xffU;
     double rollDeg = 0.0;
     double pitchDeg = 0.0;
     double heightMm = 0.0;
@@ -63,6 +67,7 @@ struct HorizonCalibrationSession
     QString error;
     QSize imageSize;
     quint8 cameraId = 0;
+    quint8 sourceCameraId = 0xffU;
     int bimgProtocolVersion = 2;
     bool heightRecorded = false;
     int frameCount = 0;

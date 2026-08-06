@@ -1,6 +1,7 @@
 #include "HorizonCalibration.h"
 #include "HorizonCalibrationRecorder.h"
 #include "HorizonLineGeometry.h"
+#include "DownGroundRangeCalibration.h"
 #include "VideoReader.h"
 
 #include <QFile>
@@ -120,6 +121,8 @@ private slots:
     void exportsPortableHeader();
     void loadsPhysicalModel();
     void loadsHeightCompensatedModel();
+    void predictsAndReloadsDownBoundary();
+    void downFitKeepsCoverageDraftNonExportable();
     void recordsPairedFrames();
 };
 
@@ -430,6 +433,99 @@ void HorizonCalibrationTests::loadsHeightCompensatedModel()
     QVERIFY(maximumShift > 1.0);
 }
 
+void HorizonCalibrationTests::predictsAndReloadsDownBoundary()
+{
+    DownGroundRangeModel model = DownGroundRangeCalibration::defaultModel(QSize(188, 120));
+    model.valid = true;
+    model.inlierCount = 24;
+    model.sampleCount = 26;
+    model.rmse = 0.8;
+    model.azimuthCoverage = 82.0;
+
+    const QVector<QPointF> lowBoundary = DownGroundRangeCalibration::predictBoundary(
+        model, 0.0, 0.0, 800.0);
+    const QVector<QPointF> highBoundary = DownGroundRangeCalibration::predictBoundary(
+        model, 0.0, 0.0, 1400.0);
+    QCOMPARE(lowBoundary.size(), 360);
+    QCOMPARE(highBoundary.size(), 360);
+
+    double lowRadius = 0.0;
+    double highRadius = 0.0;
+    const QPointF center(model.centerX, model.centerY);
+    for (int index = 0; index < lowBoundary.size(); ++index)
+    {
+        lowRadius += QLineF(center, lowBoundary[index]).length();
+        highRadius += QLineF(center, highBoundary[index]).length();
+    }
+    QVERIFY(lowRadius > highRadius);
+
+    DownGroundRangeModel invalid = model;
+    invalid.valid = false;
+    QVERIFY(DownGroundRangeCalibration::predictBoundary(invalid, 0.0, 0.0, 1000.0).isEmpty());
+    QVERIFY(DownGroundRangeCalibration::predictBoundary(model, 0.0, 0.0, -1.0).isEmpty());
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString jsonPath = directory.filePath(QStringLiteral("down_model.json"));
+    const QString headerPath = directory.filePath(QStringLiteral("down_model.h"));
+    QString error;
+    QVERIFY2(DownGroundRangeCalibration::exportModel(model, jsonPath, headerPath, &error),
+             qPrintable(error));
+
+    DownGroundRangeModel loaded;
+    QVERIFY2(DownGroundRangeCalibration::loadModel(jsonPath, &loaded, &error), qPrintable(error));
+    const QVector<QPointF> reloaded = DownGroundRangeCalibration::predictBoundary(
+        loaded, 0.0, 0.0, 800.0);
+    QCOMPARE(reloaded.size(), lowBoundary.size());
+    for (int index = 0; index < reloaded.size(); index += 30)
+    {
+        QVERIFY(QLineF(reloaded[index], lowBoundary[index]).length() < 1e-9);
+    }
+
+    QFile header(headerPath);
+    QVERIFY(header.open(QIODevice::ReadOnly));
+    QVERIFY(header.readAll().contains("down_ground_range_boundary"));
+}
+
+void HorizonCalibrationTests::downFitKeepsCoverageDraftNonExportable()
+{
+    HorizonCalibrationSession session;
+    session.imageSize = QSize(188, 120);
+    session.cameraId = HorizonCameraDown;
+    session.sourceCameraId = HorizonCameraFront;
+    const DownGroundRangeModel model = [] {
+        DownGroundRangeModel value = DownGroundRangeCalibration::defaultModel(QSize(188, 120));
+        value.valid = true;
+        return value;
+    }();
+
+    for (int frameIndex = 0; frameIndex < 4; ++frameIndex)
+    {
+        HorizonFrameMetadata frame;
+        frame.frameIndex = frameIndex;
+        frame.cameraId = HorizonCameraDown;
+        frame.sourceCameraId = HorizonCameraFront;
+        frame.rollDeg = frameIndex * 2.0;
+        frame.pitchDeg = -frameIndex;
+        frame.heightMm = 900.0 + frameIndex * 100.0;
+        frame.attitudeValid = true;
+        frame.heightValid = true;
+        session.frames.push_back(frame);
+
+        const QVector<QPointF> boundary = DownGroundRangeCalibration::predictBoundary(
+            model, frame.rollDeg, frame.pitchDeg, frame.heightMm);
+        QCOMPARE(boundary.size(), 360);
+        HorizonFrameAnnotation annotation;
+        annotation.points = {boundary[8], boundary[10], boundary[12]};
+        session.annotations.insert(frameIndex, annotation);
+    }
+
+    const DownGroundRangeFitResult fit = DownGroundRangeCalibration::fit(session);
+    QVERIFY2(fit.fitted, qPrintable(fit.error));
+    QVERIFY(!fit.exportable);
+    QVERIFY(fit.model.azimuthCoverage < 75.0);
+}
+
 void HorizonCalibrationTests::recordsPairedFrames()
 {
     QTemporaryDir directory;
@@ -443,7 +539,8 @@ void HorizonCalibrationTests::recordsPairedFrames()
     config.videoPath = base + QStringLiteral(".avi");
     config.csvPath = base + QStringLiteral(".hcal.csv");
     config.imageSize = QSize(188, 120);
-    config.cameraId = 1;
+    config.cameraId = HorizonCameraDown;
+    config.sourceCameraId = HorizonCameraFront;
     QString error;
     QVERIFY2(recorder.begin(config, &error), qPrintable(error));
     for (int index = 0; index < 3; ++index)
@@ -453,7 +550,8 @@ void HorizonCalibrationTests::recordsPairedFrames()
         frame.image.fill(30 + index * 20);
         frame.bimgSequence = 100U + (quint32)index;
         frame.hostTimeMs = 1000 + index * 20;
-        frame.cameraId = 1;
+        frame.cameraId = HorizonCameraDown;
+        frame.sourceCameraId = HorizonCameraFront;
         frame.rollDeg = index + 0.25;
         frame.pitchDeg = -index - 0.5;
         frame.heightMm = 900.0 + index * 25.0;
@@ -471,6 +569,10 @@ void HorizonCalibrationTests::recordsPairedFrames()
     QCOMPARE(session.frames.size(), 3);
     QCOMPARE(session.frames[0].bimgSequence, 100U);
     QCOMPARE(session.frames[2].bimgSequence, 102U);
+    QCOMPARE(session.cameraId, HorizonCameraDown);
+    QCOMPARE(session.sourceCameraId, HorizonCameraFront);
+    QCOMPARE(session.frames[1].cameraId, HorizonCameraDown);
+    QCOMPARE(session.frames[1].sourceCameraId, HorizonCameraFront);
     QCOMPARE(session.frames[1].rollDeg, 1.25);
     QVERIFY(session.heightRecorded);
     QCOMPARE(session.frames[2].heightMm, 950.0);
@@ -483,7 +585,7 @@ void HorizonCalibrationTests::recordsPairedFrames()
     QFile json(config.sessionPath);
     QVERIFY(json.open(QIODevice::ReadOnly));
     const QJsonObject root = QJsonDocument::fromJson(json.readAll()).object();
-    QCOMPARE(root.value(QStringLiteral("version")).toInt(), 3);
+    QCOMPARE(root.value(QStringLiteral("version")).toInt(), 4);
     QVERIFY(root.value(QStringLiteral("height_recorded")).toBool());
     QCOMPARE(root.value(QStringLiteral("height_unit")).toString(), QStringLiteral("mm"));
     VideoReader reader;

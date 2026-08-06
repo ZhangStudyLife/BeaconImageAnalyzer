@@ -274,6 +274,15 @@ QString defaultInstancesRoot()
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("instances"));
 }
 
+QString instanceSelectionRoot()
+{
+#ifdef BEACON_SOURCE_DIR
+    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absolutePath();
+#else
+    return defaultInstancesRoot();
+#endif
+}
+
 QString twoBl3ImageSourceFromInstance(const QString& rootDir, QString* errorMessage)
 {
     const QDir root(rootDir);
@@ -1811,7 +1820,9 @@ beacon_result_t MainWindow::processCausalFrame(AnalyzerInstance* instance,
         return empty;
     }
 
-    if (instance->temporalFrameCache.contains(frameIndex))
+    if (instance->temporalFrameCache.contains(frameIndex) &&
+        (viewMode() != QStringLiteral("binary") ||
+         frameIndex == instance->temporalLastFrame))
     {
         instance->currentProfile = instance->temporalProfileCache.value(frameIndex);
         instance->currentDetectionMetrics = instance->temporalDetectionMetricsCache.value(frameIndex);
@@ -2494,8 +2505,8 @@ void MainWindow::buildMenus()
 void MainWindow::loadInstance()
 {
     const QString rootDir = QFileDialog::getExistingDirectory(this,
-                                                              QStringLiteral("选择新实例文件夹"),
-                                                              defaultInstancesRoot());
+                                                              QStringLiteral("选择实例文件夹"),
+                                                              instanceSelectionRoot());
     if (rootDir.isEmpty())
     {
         return;

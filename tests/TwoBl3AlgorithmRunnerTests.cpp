@@ -56,6 +56,213 @@ QString selfContainedImageDirectory()
     return {};
 }
 
+QString downImageDirectory()
+{
+    const QDir instancesRoot(QDir(QStringLiteral(BEACON_SOURCE_DIR))
+                                 .absoluteFilePath(QStringLiteral("instances_down")));
+    const QFileInfoList directories = instancesRoot.entryInfoList(
+        QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo& directory : directories)
+    {
+        const QDir instanceRoot(directory.absoluteFilePath());
+        const QDir imageDirectory(instanceRoot.absoluteFilePath(
+            QStringLiteral("algorithm/Image")));
+        if (QFileInfo::exists(instanceRoot.absoluteFilePath(
+                QStringLiteral("two_bl3_instance.json")))
+            && QFileInfo::exists(imageDirectory.absoluteFilePath(QStringLiteral("image.c")))
+            && QFileInfo::exists(imageDirectory.absoluteFilePath(QStringLiteral("image_down.h")))
+            && QFileInfo::exists(imageDirectory.absoluteFilePath(QStringLiteral("image_params.c"))))
+        {
+            return imageDirectory.absolutePath();
+        }
+    }
+    return {};
+}
+
+void drawDownBeacon(QImage* image, int centerX, int centerY, int radius)
+{
+    for (int y = centerY - radius; y <= centerY + radius; ++y)
+    {
+        if (y < 0 || y >= image->height())
+        {
+            continue;
+        }
+        uchar* row = image->scanLine(y);
+        for (int x = centerX - radius; x <= centerX + radius; ++x)
+        {
+            if (x >= 0 && x < image->width()
+                && (x - centerX) * (x - centerX) + (y - centerY) * (y - centerY)
+                       <= radius * radius)
+            {
+                row[x] = 255;
+            }
+        }
+    }
+}
+
+void drawDownBeacon(QImage* image, int centerX, int centerY)
+{
+    drawDownBeacon(image, centerX, centerY, 5);
+}
+
+void drawDownCarLamp(QImage* image, int centerX, int centerY)
+{
+    for (int y = centerY - 2; y <= centerY + 2; ++y)
+    {
+        uchar* row = image->scanLine(y);
+        for (int x = centerX - 11; x <= centerX + 11; ++x)
+        {
+            row[x] = 250;
+        }
+    }
+}
+
+void drawDownVerticalCarLamp(QImage* image, int centerX, int centerY,
+                             int halfWidth, int halfHeight)
+{
+    for (int y = centerY - halfHeight; y <= centerY + halfHeight; ++y)
+    {
+        if (y < 0 || y >= image->height())
+        {
+            continue;
+        }
+        uchar* row = image->scanLine(y);
+        for (int x = centerX - halfWidth; x <= centerX + halfWidth; ++x)
+        {
+            if (x >= 0 && x < image->width())
+            {
+                row[x] = 250;
+            }
+        }
+    }
+}
+
+void drawTinyThinDownCarLamp(QImage* image, int centerX, int centerY)
+{
+    for (int y = centerY - 3; y <= centerY + 3; ++y)
+    {
+        image->scanLine(y)[centerX] = 250;
+    }
+    image->scanLine(centerY)[centerX + 1] = 250;
+}
+
+void drawGrayConnectedFragmentedCar(QImage* image, int centerX, int centerY)
+{
+    for (int y = centerY - 7; y <= centerY + 7; ++y)
+    {
+        for (int x = centerX; x <= centerX + 1; ++x)
+        {
+            image->scanLine(y)[x] = 140;
+        }
+    }
+    const int segmentStarts[] = {centerY - 7, centerY, centerY + 5};
+    const int segmentLengths[] = {3, 1, 3};
+    for (int segment = 0; segment < 3; ++segment)
+    {
+        for (int y = segmentStarts[segment];
+             y < segmentStarts[segment] + segmentLengths[segment]; ++y)
+        {
+            for (int x = centerX; x <= centerX + 1; ++x)
+            {
+                image->scanLine(y)[x] = 250;
+            }
+        }
+    }
+}
+
+void drawOccludedFragmentedCar(QImage* image, int centerX)
+{
+    for (int y = 58; y <= 61; ++y)
+    {
+        for (int x = centerX; x <= centerX + 2; ++x)
+        {
+            image->scanLine(y)[x] = 250;
+        }
+    }
+    for (int y = 66; y <= 72; ++y)
+    {
+        for (int x = centerX; x <= centerX + 1; ++x)
+        {
+            image->scanLine(y)[x] = 250;
+        }
+    }
+}
+
+void drawMicroEnvelopeCar(QImage* image, int centerX, int centerY, int peakGray)
+{
+    for (int offset = -7; offset <= 7; ++offset)
+    {
+        const int x = centerX + offset;
+        const int y = centerY + offset / 2;
+        for (int widthOffset = -1; widthOffset <= 1; ++widthOffset)
+        {
+            image->scanLine(y + widthOffset)[x] = 100;
+        }
+    }
+    for (int offset = -2; offset <= 2; ++offset)
+    {
+        image->scanLine(centerY + offset / 2)[centerX + offset] =
+            static_cast<uchar>(peakGray);
+    }
+}
+
+void drawEmbeddedLateralHighlight(QImage* image, int centerX, int centerY)
+{
+    for (int y = centerY - 14; y <= centerY + 14; ++y)
+    {
+        uchar* row = image->scanLine(y);
+        for (int x = centerX - 2; x <= centerX + 2; ++x)
+        {
+            row[x] = 100;
+        }
+    }
+    drawDownBeacon(image, centerX, centerY, 2);
+}
+
+void drawClippedDiffuseHighlight(QImage* image, int centerY)
+{
+    for (int y = centerY - 5; y <= centerY + 5; ++y)
+    {
+        uchar* row = image->scanLine(y);
+        for (int x = 0; x <= 4; ++x)
+        {
+            row[x] = 100;
+        }
+    }
+    for (int y = centerY - 2; y <= centerY + 2; ++y)
+    {
+        uchar* row = image->scanLine(y);
+        for (int x = 0; x <= 2; ++x)
+        {
+            row[x] = 250;
+        }
+    }
+}
+
+void drawScaleVariantDownCarLamp(QImage* image, int centerX, int centerY)
+{
+    for (int y = centerY - 4; y <= centerY + 4; ++y)
+    {
+        uchar* row = image->scanLine(y);
+        for (int x = centerX - 15; x <= centerX + 15; ++x)
+        {
+            row[x] = 250;
+        }
+    }
+}
+
+void drawWeakDownCarLamp(QImage* image, int centerX, int centerY)
+{
+    for (int y = centerY - 2; y <= centerY + 2; ++y)
+    {
+        uchar* row = image->scanLine(y);
+        for (int x = centerX - 5; x < centerX + 5; ++x)
+        {
+            row[x] = 210;
+        }
+    }
+}
+
 void drawSyntheticCarLamp(QImage* image, int centerX, int centerY)
 {
     for (int y = centerY - 7; y <= centerY + 7; ++y)
@@ -155,6 +362,26 @@ private slots:
     void loadsParametersAndKeepsInstancesIsolated();
     void loadsPackagedFallbackLibrary();
     void loadsSelfContainedInstanceSnapshot();
+    void loadsDownDraftInstance();
+    void downDraftProcessesEachFrameExactlyOnce();
+    void downDraftRendersExactClosedRegionBoundary();
+    void downDraftDoesNotRenderClosedRegionAtViewportEdges();
+    void downDraftUsesAreaOrderedB0B1AndTwoFrameCoast();
+    void downDraftDoesNotCoastUnconfirmedBeacon();
+    void downDraftMasksCarLampBeforeBeaconSelection();
+    void downDraftFiltersBeaconOutsideClosedBoundary();
+    void downDraftKeepsCurrentRotatedCarMeasurement();
+    void downDraftMergesOnlyGrayConnectedCarFragments();
+    void downDraftSuppressesOccludedCarFragmentBeacon();
+    void downDraftPrefersFullyVisibleCarCandidate();
+    void downDraftUsesTrackToChooseWeakCar();
+    void downDraftRejectsCarGlareOutsideClosedBoundary();
+    void downDraftSeparatesTinyThinCarFromCompactBeacon();
+    void downDraftAcceptsScaleChangeWithoutMinorAxisLimit();
+    void downDraftRejectsBoundaryBandStructureButKeepsInnerBeacon();
+    void downDraftClassifiesMicroElongatedCarImmediately();
+    void downDraftKeepsAmbiguousCarOutOfBeaconOutput();
+    void downDraftRejectsEmbeddedLateralHighlightButKeepsEdgeBeacon();
     void selfContainedInstanceKeepsDiffuseCompactBeacon();
     void selfContainedInstanceRejectsEmbeddedCompactHighlights();
     void selfContainedInstanceFiltersBeaconsByHorizonGeometry();
@@ -180,7 +407,7 @@ void TwoBl3AlgorithmRunnerTests::loadsParametersAndKeepsInstancesIsolated()
                                       &error),
              qPrintable(error));
     QVERIFY(first.supportsParameterTuning());
-    QCOMPARE(first.algorithmBuildId(), quint32(0x20260906U));
+    QCOMPARE(first.algorithmBuildId(), quint32(0x20260974U));
     QCOMPARE(first.parameterInfos().size(), 57);
 
     quint32 currentBits = 0;
@@ -216,7 +443,7 @@ void TwoBl3AlgorithmRunnerTests::loadsPackagedFallbackLibrary()
                                        &error),
              qPrintable(error));
     QVERIFY(runner.supportsParameterTuning());
-    QCOMPARE(runner.algorithmBuildId(), quint32(0x20260906U));
+    QCOMPARE(runner.algorithmBuildId(), quint32(0x20260974U));
     QCOMPARE(runner.parameterInfos().size(), 57);
 }
 
@@ -243,6 +470,711 @@ void TwoBl3AlgorithmRunnerTests::loadsSelfContainedInstanceSnapshot()
     QCOMPARE(QFileInfo(runner.sourcePath()).canonicalFilePath(),
              QFileInfo(QDir(imageDirectory).absoluteFilePath(QStringLiteral("image.c")))
                  .canonicalFilePath());
+}
+
+void TwoBl3AlgorithmRunnerTests::loadsDownDraftInstance()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+    QCOMPARE(runner.algorithmBuildId(), quint32(0x20260816U));
+    const QVector<AlgorithmParameterInfo> parameters = runner.parameterInfos();
+    QCOMPARE(parameters.size(), 22);
+    QCOMPARE(parameters[18].type, quint8(1U));
+    QCOMPARE(parameters[19].type, quint8(1U));
+    QCOMPARE(parameters[20].type, quint8(0U));
+    QCOMPARE(parameters[21].type, quint8(0U));
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(0);
+    QCOMPARE(runner.process(blank).beacon_count, quint8(0));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownBeacon(&frame, 120, 70);
+    const beacon_result_t result = runner.process(frame);
+    QVERIFY(result.beacon_count >= 1U);
+    QCOMPARE(result.beacons[0].valid, quint8(1U));
+    QVERIFY(std::abs(result.beacons[0].x + 26.0f) < 1.0f);
+    QVERIFY(std::abs(result.beacons[0].y - 10.0f) < 1.5f);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftProcessesEachFrameExactlyOnce()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+    QCOMPARE(runner.processedFrameCount(), quint32(0U));
+
+    AlgorithmFrameTelemetry telemetry;
+    telemetry.rollDeg = -0.360687941f;
+    telemetry.pitchDeg = -0.756091833f;
+    telemetry.heightMm = 1112.39966f;
+    telemetry.attitudeValid = true;
+    telemetry.heightValid = true;
+    runner.setFrameTelemetry(telemetry);
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    (void)runner.process(frame);
+    QCOMPARE(runner.processedFrameCount(), quint32(1U));
+    QVERIFY(!runner.binaryImage(frame).isNull());
+    QCOMPARE(runner.processedFrameCount(), quint32(1U));
+    (void)runner.horizonCurve();
+    QCOMPARE(runner.processedFrameCount(), quint32(1U));
+
+    (void)runner.process(frame);
+    QCOMPARE(runner.processedFrameCount(), quint32(2U));
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftRendersExactClosedRegionBoundary()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    AlgorithmFrameTelemetry telemetry;
+    telemetry.rollDeg = -0.360687941f;
+    telemetry.pitchDeg = -0.756091833f;
+    telemetry.heightMm = 1112.39966f;
+    telemetry.attitudeValid = true;
+    telemetry.heightValid = true;
+    runner.setFrameTelemetry(telemetry);
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    const beacon_result_t result = runner.process(frame);
+    const AlgorithmHorizonCurve horizon = runner.horizonCurve();
+    QVERIFY(horizon.valid);
+    QVERIFY(horizon.secondaryValid);
+    QVERIFY(horizon.closedRegion);
+
+    int closingColumn = -1;
+    int closingY = -1;
+    for (int x = 0; x + 1 < BEACON_IMAGE_W; ++x)
+    {
+        const float top = horizon.y[static_cast<std::size_t>(x)];
+        const float bottom = horizon.secondaryY[static_cast<std::size_t>(x)];
+        if (horizon.columnState[static_cast<std::size_t>(x)] == 1U &&
+            horizon.columnState[static_cast<std::size_t>(x + 1)] == 0U &&
+            top >= 0.0f && bottom <= static_cast<float>(BEACON_IMAGE_H - 1) &&
+            bottom - top >= 2.0f)
+        {
+            closingColumn = x;
+            closingY = static_cast<int>((top + bottom) * 0.5f + 0.5f);
+            break;
+        }
+    }
+    QVERIFY(closingColumn >= 0);
+    const QImage rendered = FrameRenderer::render(frame, result, {}, 1, true, &horizon);
+    const QColor boundary = rendered.pixelColor(closingColumn, closingY);
+    QCOMPARE(boundary, QColor(40, 255, 80));
+    QVERIFY(rendered.pixelColor(closingColumn + 1, closingY) != boundary);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftDoesNotRenderClosedRegionAtViewportEdges()
+{
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    beacon_result_t result = {};
+    AlgorithmHorizonCurve horizon;
+    horizon.valid = true;
+    horizon.secondaryValid = true;
+    horizon.closedRegion = true;
+
+    horizon.columnState.fill(2U);
+    const QImage fullyInside = FrameRenderer::render(frame, result, {}, 1, true, &horizon);
+    const QColor boundary(40, 255, 80);
+    for (int y = 0; y < BEACON_IMAGE_H; ++y)
+    {
+        for (int x = 0; x < BEACON_IMAGE_W; ++x)
+        {
+            QVERIFY(fullyInside.pixelColor(x, y) != boundary);
+        }
+    }
+
+    horizon.columnState.fill(1U);
+    horizon.columnValid.fill(1U);
+    horizon.secondaryColumnValid.fill(1U);
+    horizon.y.fill(-8.0f);
+    horizon.secondaryY.fill(70.0f);
+    const QImage lowerBoundary = FrameRenderer::render(frame, result, {}, 1, true, &horizon);
+    QVERIFY(lowerBoundary.pixelColor(BEACON_IMAGE_W / 2, 0) != boundary);
+    QCOMPARE(lowerBoundary.pixelColor(BEACON_IMAGE_W / 2, 70), boundary);
+    QVERIFY(lowerBoundary.pixelColor(0, 30) != boundary);
+    QVERIFY(lowerBoundary.pixelColor(BEACON_IMAGE_W - 1, 30) != boundary);
+
+    horizon.y.fill(35.0f);
+    horizon.secondaryY.fill(static_cast<float>(BEACON_IMAGE_H + 9));
+    const QImage upperBoundary = FrameRenderer::render(frame, result, {}, 1, true, &horizon);
+    QCOMPARE(upperBoundary.pixelColor(BEACON_IMAGE_W / 2, 35), boundary);
+    QVERIFY(upperBoundary.pixelColor(BEACON_IMAGE_W / 2,
+                                      BEACON_IMAGE_H - 1) != boundary);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftUsesAreaOrderedB0B1AndTwoFrameCoast()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownBeacon(&frame, 120, 70, 5);
+    drawDownBeacon(&frame, 60, 50, 3);
+
+    const beacon_result_t firstCurrent = runner.process(frame);
+    QCOMPARE(firstCurrent.beacon_count, quint8(2U));
+
+    const beacon_result_t current = runner.process(frame);
+    QCOMPARE(current.beacon_count, quint8(2U));
+    QVERIFY(current.beacons[0].radius > current.beacons[1].radius);
+    QVERIFY(std::abs(current.beacons[0].x + 26.0f) < 2.0f);
+    QVERIFY(std::abs(current.beacons[1].x - 34.0f) < 1.0f);
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(0);
+    const beacon_result_t firstMiss = runner.process(blank);
+    const beacon_result_t secondMiss = runner.process(blank);
+    const beacon_result_t thirdMiss = runner.process(blank);
+    QCOMPARE(firstMiss.beacon_count, quint8(1U));
+    QCOMPARE(secondMiss.beacon_count, quint8(1U));
+    QCOMPARE(thirdMiss.beacon_count, quint8(0U));
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftDoesNotCoastUnconfirmedBeacon()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownBeacon(&frame, 120, 70, 5);
+    QCOMPARE(runner.process(frame).beacon_count, quint8(1U));
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(0);
+    QCOMPARE(runner.process(blank).beacon_count, quint8(0U));
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftMasksCarLampBeforeBeaconSelection()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownCarLamp(&frame, 81, 50);
+    drawDownBeacon(&frame, 130, 70, 4);
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    QCOMPARE(result.beacon_count, quint8(1U));
+    QVERIFY(std::abs(result.beacons[0].x + 36.0f) < 1.5f);
+    QVERIFY(std::abs(result.beacons[0].y - 10.0f) < 1.5f);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftFiltersBeaconOutsideClosedBoundary()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage edgeFrame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    edgeFrame.fill(0);
+    drawDownBeacon(&edgeFrame, 170, 3, 3);
+    QCOMPARE(runner.process(edgeFrame).beacon_count, quint8(1U));
+
+    runner.resetTemporal();
+    AlgorithmFrameTelemetry telemetry;
+    telemetry.rollDeg = 0.0f;
+    telemetry.pitchDeg = 0.0f;
+    telemetry.heightMm = 1000.0f;
+    telemetry.attitudeValid = true;
+    telemetry.heightValid = true;
+    runner.setFrameTelemetry(telemetry);
+    QCOMPARE(runner.process(edgeFrame).beacon_count, quint8(0U));
+
+    const AlgorithmHorizonCurve horizon = runner.horizonCurve();
+    QVERIFY(horizon.valid);
+    QVERIFY(horizon.secondaryValid);
+    QVERIFY(horizon.columnValid[0] != 0U);
+    QVERIFY(horizon.secondaryColumnValid[0] != 0U);
+    QVERIFY(horizon.y[0] < horizon.secondaryY[0]);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftKeepsCurrentRotatedCarMeasurement()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage horizontal(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    horizontal.fill(0);
+    drawDownCarLamp(&horizontal, 60, 60);
+    QCOMPARE(runner.process(horizontal).car_lamp_count, quint8(1U));
+    QCOMPARE(runner.process(horizontal).car_lamp_count, quint8(1U));
+
+    QImage rotated(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    rotated.fill(0);
+    drawDownVerticalCarLamp(&rotated, 120, 35, 2, 6);
+    const beacon_result_t result = runner.process(rotated);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    QVERIFY(std::hypot(center.x() - 120.0, center.y() - 35.0) < 0.5);
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(0);
+    QCOMPARE(runner.process(blank).car_lamp_count, quint8(0U));
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftMergesOnlyGrayConnectedCarFragments()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage connected(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    connected.fill(30);
+    drawGrayConnectedFragmentedCar(&connected, 80, 60);
+    const beacon_result_t merged = runner.process(connected);
+    QCOMPARE(merged.car_lamp_count, quint8(1U));
+    QCOMPARE(merged.beacon_count, quint8(0U));
+    const QPointF mergedCenter = FrameRenderer::algorithmToImagePoint(
+        merged.car_lamps[0].cx, merged.car_lamps[0].cy);
+    QVERIFY(std::hypot(mergedCenter.x() - 80.5, mergedCenter.y() - 60.0) < 1.0);
+
+    runner.resetTemporal();
+    QImage disconnected = connected;
+    for (int y = 53; y <= 67; ++y)
+    {
+        for (int x = 80; x <= 81; ++x)
+        {
+            if (disconnected.scanLine(y)[x] < 200)
+            {
+                disconnected.scanLine(y)[x] = 30;
+            }
+        }
+    }
+    QCOMPARE(runner.process(disconnected).car_lamp_count, quint8(0U));
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftSuppressesOccludedCarFragmentBeacon()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage confirmed(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    confirmed.fill(30);
+    drawDownVerticalCarLamp(&confirmed, 79, 64, 1, 7);
+    QCOMPARE(runner.process(confirmed).car_lamp_count, quint8(1U));
+    QCOMPARE(runner.process(confirmed).car_lamp_count, quint8(1U));
+
+    QImage occluded(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    occluded.fill(30);
+    drawOccludedFragmentedCar(&occluded, 78);
+    drawDownBeacon(&occluded, 120, 93, 4);
+    const beacon_result_t result = runner.process(occluded);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    QCOMPARE(result.beacon_count, quint8(1U));
+    const QPointF beaconCenter = FrameRenderer::algorithmToImagePoint(
+        result.beacons[0].x, result.beacons[0].y);
+    QVERIFY(std::hypot(beaconCenter.x() - 120.0, beaconCenter.y() - 93.0) < 1.5);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftPrefersFullyVisibleCarCandidate()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(30);
+    drawDownCarLamp(&frame, 110, 55);
+    for (int y = BEACON_IMAGE_H - 4; y < BEACON_IMAGE_H; ++y)
+    {
+        uchar* row = frame.scanLine(y);
+        for (int x = 28; x <= 66; ++x)
+        {
+            row[x] = 250;
+        }
+    }
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    QVERIFY(std::hypot(center.x() - 110.0, center.y() - 55.0) < 1.0);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftUsesTrackToChooseWeakCar()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage strong(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    strong.fill(0);
+    drawDownCarLamp(&strong, 60, 75);
+    QCOMPARE(runner.process(strong).car_lamp_count, quint8(1U));
+    QCOMPARE(runner.process(strong).car_lamp_count, quint8(1U));
+
+    QImage mixed(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    mixed.fill(0);
+    drawTinyThinDownCarLamp(&mixed, 59, 82);
+    drawTinyThinDownCarLamp(&mixed, 56, 106);
+    drawDownBeacon(&mixed, 130, 70, 4);
+
+    const beacon_result_t result = runner.process(mixed);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    const QPointF carCenter = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    QVERIFY(std::hypot(carCenter.x() - 59.0, carCenter.y() - 82.0) < 0.5);
+    QCOMPARE(result.beacon_count, quint8(1U));
+    const QPointF beaconCenter = FrameRenderer::algorithmToImagePoint(
+        result.beacons[0].x, result.beacons[0].y);
+    QVERIFY(std::hypot(beaconCenter.x() - 130.0, beaconCenter.y() - 70.0) < 1.5);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftRejectsCarGlareOutsideClosedBoundary()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+    AlgorithmFrameTelemetry telemetry;
+    telemetry.rollDeg = 0.0f;
+    telemetry.pitchDeg = 0.0f;
+    telemetry.heightMm = 1000.0f;
+    telemetry.attitudeValid = true;
+    telemetry.heightValid = true;
+    runner.setFrameTelemetry(telemetry);
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownCarLamp(&frame, 170, 3);
+    drawDownVerticalCarLamp(&frame, 80, 60, 2, 6);
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    QVERIFY(std::hypot(center.x() - 80.0, center.y() - 60.0) < 0.5);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftSeparatesTinyThinCarFromCompactBeacon()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawTinyThinDownCarLamp(&frame, 60, 70);
+    drawDownBeacon(&frame, 120, 80, 2);
+
+    runner.process(frame);
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    const QPointF carCenter = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    QVERIFY(std::hypot(carCenter.x() - 60.0, carCenter.y() - 70.0) < 1.0);
+    QCOMPARE(result.beacon_count, quint8(1U));
+    const QPointF beaconCenter = FrameRenderer::algorithmToImagePoint(
+        result.beacons[0].x, result.beacons[0].y);
+    QVERIFY(std::hypot(beaconCenter.x() - 120.0, beaconCenter.y() - 80.0) < 1.5);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftAcceptsScaleChangeWithoutMinorAxisLimit()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawScaleVariantDownCarLamp(&frame, 80, 65);
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    const QString centerMessage = QStringLiteral("center=(%1,%2), width=%3, length=%4")
+                                      .arg(center.x())
+                                      .arg(center.y())
+                                      .arg(result.car_lamps[0].width)
+                                      .arg(result.car_lamps[0].length);
+    QVERIFY2(std::hypot(center.x() - 80.0, center.y() - 65.0) < 1.0,
+             qPrintable(centerMessage));
+    QVERIFY(result.car_lamps[0].width > 7.0f);
+    QVERIFY(result.car_lamps[0].length > 25.0f);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftRejectsBoundaryBandStructureButKeepsInnerBeacon()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+    AlgorithmFrameTelemetry telemetry;
+    telemetry.rollDeg = 0.0f;
+    telemetry.pitchDeg = 0.0f;
+    telemetry.heightMm = 1000.0f;
+    telemetry.attitudeValid = true;
+    telemetry.heightValid = true;
+    runner.setFrameTelemetry(telemetry);
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(0);
+    runner.process(blank);
+    const AlgorithmHorizonCurve horizon = runner.horizonCurve();
+    int edgeX = -1;
+    const int innerX = 30;
+    for (int x = 3; x < 35; ++x)
+    {
+        if (horizon.columnValid[static_cast<std::size_t>(x)] != 0U
+            && horizon.secondaryColumnValid[static_cast<std::size_t>(x)] != 0U
+            && horizon.secondaryY[static_cast<std::size_t>(x)]
+                   - horizon.y[static_cast<std::size_t>(x)] > 12.0f)
+        {
+            if (edgeX < 0 && x < 15)
+            {
+                edgeX = x;
+            }
+        }
+    }
+    QVERIFY(edgeX >= 0);
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    const int edgeY = qRound(horizon.y[static_cast<std::size_t>(edgeX)] + 1.0f);
+    const int innerY = BEACON_IMAGE_H / 2;
+    drawDownBeacon(&frame, edgeX, edgeY, 2);
+    drawDownBeacon(&frame, innerX, innerY, 2);
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.beacon_count, quint8(1U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        result.beacons[0].x, result.beacons[0].y);
+    QVERIFY(std::hypot(center.x() - innerX, center.y() - innerY) < 1.5);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftClassifiesMicroElongatedCarImmediately()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(40);
+    drawMicroEnvelopeCar(&frame, 60, 45, 250);
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(1U));
+    QCOMPARE(result.beacon_count, quint8(0U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[0].cx, result.car_lamps[0].cy);
+    QVERIFY(std::hypot(center.x() - 60.0, center.y() - 45.0) < 2.0);
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftKeepsAmbiguousCarOutOfBeaconOutput()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage ambiguous(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    ambiguous.fill(40);
+    drawWeakDownCarLamp(&ambiguous, 70, 55);
+    const beacon_result_t first = runner.process(ambiguous);
+    QCOMPARE(first.car_lamp_count, quint8(0U));
+    QCOMPARE(first.beacon_count, quint8(0U));
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(40);
+    QCOMPARE(runner.process(blank).car_lamp_count, quint8(0U));
+
+    const beacon_result_t confirmed = runner.process(ambiguous);
+    QCOMPARE(confirmed.car_lamp_count, quint8(1U));
+    QCOMPARE(confirmed.beacon_count, quint8(0U));
+}
+
+void TwoBl3AlgorithmRunnerTests::downDraftRejectsEmbeddedLateralHighlightButKeepsEdgeBeacon()
+{
+    const QString imageDirectory = downImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained down instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage embedded(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    embedded.fill(30);
+    drawEmbeddedLateralHighlight(&embedded, 6, 60);
+    const beacon_result_t rejected = runner.process(embedded);
+    QCOMPARE(rejected.car_lamp_count, quint8(0U));
+    QCOMPARE(rejected.beacon_count, quint8(0U));
+
+    runner.resetTemporal();
+    QImage edgeBeacon(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    edgeBeacon.fill(30);
+    drawDownBeacon(&edgeBeacon, 9, 60, 2);
+    const beacon_result_t kept = runner.process(edgeBeacon);
+    QCOMPARE(kept.car_lamp_count, quint8(0U));
+    QCOMPARE(kept.beacon_count, quint8(1U));
+    const QPointF center = FrameRenderer::algorithmToImagePoint(
+        kept.beacons[0].x, kept.beacons[0].y);
+    QVERIFY(std::hypot(center.x() - 9.0, center.y() - 60.0) < 1.5);
+
+    runner.resetTemporal();
+    QImage clipped(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    clipped.fill(30);
+    drawClippedDiffuseHighlight(&clipped, 70);
+    QCOMPARE(runner.process(clipped).beacon_count, quint8(0U));
+
+    runner.resetTemporal();
+    QImage nearTop(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    nearTop.fill(30);
+    drawDownBeacon(&nearTop, 30, 3, 2);
+    QCOMPARE(runner.process(nearTop).beacon_count, quint8(1U));
+
+    runner.resetTemporal();
+    QImage widenedEdgeCheck(BEACON_IMAGE_W, BEACON_IMAGE_H,
+                            QImage::Format_Grayscale8);
+    widenedEdgeCheck.fill(30);
+    drawEmbeddedLateralHighlight(&widenedEdgeCheck, 20, 60);
+    QCOMPARE(runner.process(widenedEdgeCheck).beacon_count, quint8(0U));
+
+    runner.resetTemporal();
+    QImage rightNearEdge(BEACON_IMAGE_W, BEACON_IMAGE_H,
+                         QImage::Format_Grayscale8);
+    rightNearEdge.fill(30);
+    drawDownBeacon(&rightNearEdge, 170, 60, 2);
+    QCOMPARE(runner.process(rightNearEdge).beacon_count, quint8(1U));
+
+    runner.resetTemporal();
+    QImage largeEdgeBeacon(BEACON_IMAGE_W, BEACON_IMAGE_H,
+                           QImage::Format_Grayscale8);
+    largeEdgeBeacon.fill(50);
+    drawDownBeacon(&largeEdgeBeacon, 13, 56, 4);
+    const beacon_result_t largeKept = runner.process(largeEdgeBeacon);
+    QCOMPARE(largeKept.beacon_count, quint8(1U));
+    const QPointF largeCenter = FrameRenderer::algorithmToImagePoint(
+        largeKept.beacons[0].x, largeKept.beacons[0].y);
+    QVERIFY(std::hypot(largeCenter.x() - 13.0, largeCenter.y() - 56.0) < 1.5);
 }
 
 void TwoBl3AlgorithmRunnerTests::selfContainedInstanceKeepsDiffuseCompactBeacon()

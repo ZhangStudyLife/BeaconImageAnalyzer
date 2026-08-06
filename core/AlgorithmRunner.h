@@ -38,6 +38,11 @@ struct AlgorithmHorizonCurve
     bool valid = false;
     std::array<float, BEACON_IMAGE_W> y = {};
     std::array<unsigned char, BEACON_IMAGE_W> columnValid = {};
+    bool secondaryValid = false;
+    std::array<float, BEACON_IMAGE_W> secondaryY = {};
+    std::array<unsigned char, BEACON_IMAGE_W> secondaryColumnValid = {};
+    bool closedRegion = false;
+    std::array<unsigned char, BEACON_IMAGE_W> columnState = {};
 };
 
 struct AlgorithmParameterInfo
@@ -79,6 +84,7 @@ public:
     AlgorithmProcessProfile lastProcessProfile() const;
     AlgorithmDetectionMetrics lastDetectionMetrics() const;
     QImage binaryImage(const QImage& grayImage) const;
+    quint32 processedFrameCount() const;
     bool supportsParameterTuning() const;
     quint32 algorithmBuildId() const;
     QVector<AlgorithmParameterInfo> parameterInfos() const;
@@ -96,6 +102,8 @@ private:
     using SetTelemetryFn = void (*)(quint8, float, float, float, quint8, quint8);
     using HorizonCurveFn = quint8 (*)(float[BEACON_IMAGE_W],
                                       unsigned char[BEACON_IMAGE_W]);
+    using HorizonRegionFn = quint8 (*)(unsigned char[BEACON_IMAGE_W]);
+    using ProcessedFrameCountFn = quint32 (*)();
     using BuildIdFn = quint32 (*)();
     using ParameterCountFn = quint16 (*)();
     using ParameterInfoFn = int (*)(quint16, quint16*, quint8*, float*, float*);
@@ -115,6 +123,9 @@ private:
     CarLampPixelAreasFn m_carLampPixelAreasFn = nullptr;
     SetTelemetryFn m_setTelemetryFn = nullptr;
     HorizonCurveFn m_horizonCurveFn = nullptr;
+    HorizonCurveFn m_secondaryHorizonCurveFn = nullptr;
+    HorizonRegionFn m_horizonRegionFn = nullptr;
+    ProcessedFrameCountFn m_processedFrameCountFn = nullptr;
     BuildIdFn m_buildIdFn = nullptr;
     ParameterCountFn m_parameterCountFn = nullptr;
     ParameterInfoFn m_parameterInfoFn = nullptr;

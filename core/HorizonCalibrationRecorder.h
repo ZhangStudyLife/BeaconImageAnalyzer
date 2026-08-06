@@ -16,6 +16,7 @@ struct HorizonCalibrationRecorderConfig
     QString csvPath;
     QSize imageSize;
     quint8 cameraId = 0;
+    quint8 sourceCameraId = 0xffU;
     double fps = 50.0;
 };
 
@@ -25,6 +26,7 @@ struct HorizonCalibrationRecorderFrame
     quint32 bimgSequence = 0;
     qint64 hostTimeMs = 0;
     quint8 cameraId = 0;
+    quint8 sourceCameraId = 0xffU;
     double rollDeg = 0.0;
     double pitchDeg = 0.0;
     double heightMm = 0.0;

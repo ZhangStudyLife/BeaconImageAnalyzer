@@ -1,6 +1,8 @@
 # Build outputs
 build/
 /build-codex-check/
+build-codex-*/
+build_candidate_display/
 cmake-build-*/
 out/
 temp/
@@ -36,6 +38,9 @@ build.ninja
 *_candidates.csv
 *_annotation.json
 *.bia_project.json
+test-output.txt
+__pycache__/
+*.pyc
 
 # IDE and editor files
 .vs/

@@ -2,6 +2,7 @@
 
 #include "BeaconResultUtils.h"
 #include "FrameRenderer.h"
+#include "HorizonCalibration.h"
 #include "LogWaveformWindow.h"
 #include "VideoWidget.h"
 
@@ -56,7 +57,9 @@ QString defaultCalibrationName(quint16 port, quint8 cameraId)
     return QStringLiteral("tcp_%1_port%2_%3.hcal.json")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")))
         .arg(port)
-        .arg(cameraId == 0U ? QStringLiteral("front") : QStringLiteral("back"));
+        .arg(cameraId == HorizonCameraFront ? QStringLiteral("front")
+             : cameraId == HorizonCameraBack ? QStringLiteral("back")
+                                            : QStringLiteral("down"));
 }
 
 bool frameAttitude(const BimgImageFrame& frame,
@@ -274,6 +277,9 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     auto* dirButton = new QPushButton(QStringLiteral("保存目录"), this);
     m_recordButton = new QPushButton(QStringLiteral("开始录像"), this);
     m_calibrationRecordButton = new QPushButton(QStringLiteral("开始标定录像"), this);
+    m_calibrationCameraCombo = new QComboBox(this);
+    m_calibrationCameraCombo->addItem(QStringLiteral("标定相机：自动"), -1);
+    m_calibrationCameraCombo->addItem(QStringLiteral("标定相机：Down"), (int)HorizonCameraDown);
     m_diagnosticButton = new QPushButton(QStringLiteral("区域诊断"), this);
     m_viewModeCombo = new QComboBox(this);
     m_viewModeCombo->addItem(QStringLiteral("原图"), QStringLiteral("original"));
@@ -289,6 +295,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     controls->addWidget(dirButton);
     controls->addWidget(m_recordButton);
     controls->addWidget(m_calibrationRecordButton);
+    controls->addWidget(m_calibrationCameraCombo);
     controls->addWidget(m_diagnosticButton);
     controls->addSpacing(12);
     controls->addWidget(m_viewModeCombo);
@@ -342,6 +349,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
             this,
             [this](const QString& path, int frameCount, quint64 droppedFrames) {
                 m_calibrationFinalizing = false;
+                m_activeCalibrationCameraId = 0xffU;
                 m_calibrationRecordButton->setEnabled(true);
                 m_calibrationRecordButton->setText(QStringLiteral("开始标定录像"));
                 updateStatus(m_result);
@@ -357,14 +365,21 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
             this,
             [this](const QString& message) {
                 m_calibrationFinalizing = false;
+                m_activeCalibrationCameraId = 0xffU;
                 m_calibrationRecordButton->setEnabled(true);
                 m_calibrationRecordButton->setText(QStringLiteral("开始标定录像"));
                 updateStatus(m_result);
                 QMessageBox::critical(this, QStringLiteral("标定录像失败"), message);
             });
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &TcpImageWindow::render);
-    connect(m_enableInstanceCheck, &QCheckBox::toggled, this, &TcpImageWindow::render);
-    connect(m_instanceCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &TcpImageWindow::render);
+    connect(m_enableInstanceCheck, &QCheckBox::toggled, this, [this]() {
+        processCurrentFrame();
+        render();
+    });
+    connect(m_instanceCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+        processCurrentFrame();
+        render();
+    });
     connect(m_overlayCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_showOverlay = checked;
         render();
@@ -659,25 +674,7 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
     m_streamFrame = frame;
     m_grayImage = gray;
     ++m_frameIndex;
-    if (frame.streamMode == 3U)
-    {
-        m_result = {};
-        m_processProfile = {};
-    }
-    else
-    {
-        AlgorithmRunner* runner = selectedRunner();
-        if (runner != nullptr)
-        {
-            m_result = runner->process(m_grayImage);
-            m_processProfile = runner->lastProcessProfile();
-        }
-        else
-        {
-            m_result = {};
-            m_processProfile = {};
-        }
-    }
+    processCurrentFrame();
     render();
 
     if (m_autoSave)
@@ -685,6 +682,47 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
         const QString path = defaultSavePath(QStringLiteral(".png"));
         QDir().mkpath(QFileInfo(path).absolutePath());
         m_renderedImage.save(path, "PNG");
+    }
+}
+
+void TcpImageWindow::processCurrentFrame()
+{
+    if (m_grayImage.isNull())
+    {
+        m_result = {};
+        m_processProfile = {};
+        m_horizon = {};
+        return;
+    }
+    if (m_streamFrame.streamMode == 3U)
+    {
+        m_result = {};
+        m_processProfile = {};
+        m_horizon = {};
+    }
+    else
+    {
+        AlgorithmRunner* runner = selectedRunner();
+        if (runner != nullptr)
+        {
+            AlgorithmFrameTelemetry telemetry;
+            telemetry.cameraId = m_streamFrame.cameraId;
+            telemetry.rollDeg = m_attitudeRollDeg;
+            telemetry.pitchDeg = m_attitudePitchDeg;
+            telemetry.heightMm = m_heightMm;
+            telemetry.attitudeValid = m_attitudeProvided && m_attitudeValid;
+            telemetry.heightValid = m_heightProvided && m_heightValid;
+            runner->setFrameTelemetry(telemetry);
+            m_result = runner->process(m_grayImage);
+            m_processProfile = runner->lastProcessProfile();
+            m_horizon = runner->horizonCurve();
+        }
+        else
+        {
+            m_result = {};
+            m_processProfile = {};
+            m_horizon = {};
+        }
     }
 }
 
@@ -932,7 +970,12 @@ void TcpImageWindow::render()
         {
             corrections = annotations->correctionsForFrame(qMax(0, m_frameIndex));
         }
-        m_renderedImage = FrameRenderer::render(displayImage, m_result, corrections, 1, m_showOverlay);
+        m_renderedImage = FrameRenderer::render(displayImage,
+                                                m_result,
+                                                corrections,
+                                                1,
+                                                m_showOverlay,
+                                                &m_horizon);
     }
     else
     {
@@ -1048,12 +1091,7 @@ void TcpImageWindow::resumeLiveDisplay()
     if (!m_recentRawFrames.isEmpty())
     {
         m_grayImage = m_recentRawFrames.last();
-        AlgorithmRunner* runner = selectedRunner();
-        if (runner != nullptr)
-        {
-            m_result = runner->process(m_grayImage);
-            m_processProfile = runner->lastProcessProfile();
-        }
+        processCurrentFrame();
         render();
     }
 }
@@ -1256,7 +1294,7 @@ void TcpImageWindow::startCalibrationRecording()
     QString sessionPath = QFileDialog::getSaveFileName(
         this,
         QStringLiteral("保存地平线标定会话"),
-        QDir(dir).absoluteFilePath(defaultCalibrationName(m_port, m_lastReceivedFrame.cameraId)),
+        QDir(dir).absoluteFilePath(defaultCalibrationName(m_port, calibrationCameraId())),
         QStringLiteral("Horizon Calibration (*.hcal.json)"));
     if (sessionPath.isEmpty())
     {
@@ -1284,7 +1322,8 @@ void TcpImageWindow::startCalibrationRecording()
     config.videoPath = QFileInfo(videoPath).absoluteFilePath();
     config.csvPath = QFileInfo(csvPath).absoluteFilePath();
     config.imageSize = m_lastReceivedGrayImage.size();
-    config.cameraId = m_lastReceivedFrame.cameraId;
+    config.cameraId = calibrationCameraId();
+    config.sourceCameraId = m_lastReceivedFrame.cameraId;
     config.fps = 50.0;
     QString error;
     if (!m_calibrationRecorder->begin(config, &error))
@@ -1292,6 +1331,7 @@ void TcpImageWindow::startCalibrationRecording()
         QMessageBox::critical(this, QStringLiteral("开始标定录像失败"), error);
         return;
     }
+    m_activeCalibrationCameraId = config.cameraId;
     m_calibrationRecordButton->setText(QStringLiteral("结束标定录像"));
     updateStatus(m_result);
 }
@@ -1323,7 +1363,8 @@ void TcpImageWindow::appendCalibrationFrame(const BimgImageFrame& frame, const Q
     record.image = gray;
     record.bimgSequence = frame.sequence;
     record.hostTimeMs = QDateTime::currentMSecsSinceEpoch();
-    record.cameraId = frame.cameraId;
+    record.cameraId = m_activeCalibrationCameraId;
+    record.sourceCameraId = frame.cameraId;
     record.rollDeg = std::numeric_limits<double>::quiet_NaN();
     record.pitchDeg = std::numeric_limits<double>::quiet_NaN();
     record.heightMm = std::numeric_limits<double>::quiet_NaN();
@@ -1332,6 +1373,13 @@ void TcpImageWindow::appendCalibrationFrame(const BimgImageFrame& frame, const Q
     frameAttitude(frame, &record.rollDeg, &record.pitchDeg, &record.attitudeValid);
     frameHeight(frame, &record.heightMm, &record.heightValid);
     m_calibrationRecorder->enqueue(record);
+}
+
+quint8 TcpImageWindow::calibrationCameraId() const
+{
+    const int selected = m_calibrationCameraCombo == nullptr
+        ? -1 : m_calibrationCameraCombo->currentData().toInt();
+    return selected == (int)HorizonCameraDown ? HorizonCameraDown : m_lastReceivedFrame.cameraId;
 }
 
 QString TcpImageWindow::defaultSavePath(const QString& suffix) const

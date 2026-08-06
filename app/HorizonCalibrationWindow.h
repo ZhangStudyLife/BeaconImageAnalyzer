@@ -1,6 +1,7 @@
 #ifndef HORIZON_CALIBRATION_WINDOW_H
 #define HORIZON_CALIBRATION_WINDOW_H
 
+#include "DownGroundRangeCalibration.h"
 #include "HorizonCalibration.h"
 #include "VideoReader.h"
 
@@ -38,6 +39,8 @@ private:
 
     HorizonCalibrationSession m_session;
     HorizonFisheyeModel m_importedModel;
+    DownGroundRangeModel m_importedDownModel;
+    DownGroundRangeFitResult m_downFit;
     VideoReader m_reader;
     int m_currentFrame = -1;
     int m_availableFrames = 0;

@@ -1,5 +1,6 @@
 #include "BeaconLabelSession.h"
 
+#include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -11,6 +12,7 @@ class BeaconLabelSessionTests : public QObject
 private slots:
     void defaultPathUsesVideoBaseName();
     void saveAndLoadRoundTrip();
+    void loadsVersion2AsFrontBackSession();
     void rejectInconsistentFrameState();
 };
 
@@ -19,6 +21,9 @@ void BeaconLabelSessionTests::defaultPathUsesVideoBaseName()
     const QString path = BeaconLabelSessionIO::defaultSessionPath(
         QStringLiteral("C:/recordings/front.raw.avi"));
     QVERIFY(path.endsWith(QStringLiteral("front.raw.beacon-label.json")));
+    const QString downPath = BeaconLabelSessionIO::defaultSessionPath(
+        QStringLiteral("C:/recordings/down.raw.avi"), 2U);
+    QVERIFY(downPath.endsWith(QStringLiteral("down.raw.down-label.json")));
 }
 
 void BeaconLabelSessionTests::saveAndLoadRoundTrip()
@@ -33,6 +38,7 @@ void BeaconLabelSessionTests::saveAndLoadRoundTrip()
     session.frameCount = 100;
     session.videoFps = 50.0;
     session.sampleStride = 5;
+    session.cameraId = 2U;
 
     BeaconFrameLabel annotated;
     annotated.state = BeaconLabelFrameState::Annotated;
@@ -42,6 +48,11 @@ void BeaconLabelSessionTests::saveAndLoadRoundTrip()
     BeaconFrameLabel noBeacon;
     noBeacon.state = BeaconLabelFrameState::NoBeacon;
     session.frames.insert(5, noBeacon);
+
+    BeaconFrameLabel lamps;
+    lamps.lampState = BeaconLabelFrameState::Annotated;
+    lamps.lampBoxes = {QRectF(20.0, 30.0, 40.0, 12.0)};
+    session.frames.insert(6, lamps);
 
     BeaconFrameLabel ignored;
     ignored.state = BeaconLabelFrameState::Ignored;
@@ -59,11 +70,40 @@ void BeaconLabelSessionTests::saveAndLoadRoundTrip()
     QCOMPARE(loaded.frameCount, 100);
     QCOMPARE(loaded.videoFps, 50.0);
     QCOMPARE(loaded.sampleStride, 5);
-    QCOMPARE(loaded.frames.size(), 3);
+    QCOMPARE(loaded.cameraId, quint8(2U));
+    QCOMPARE(loaded.frames.size(), 4);
     QCOMPARE(loaded.frames.value(0).state, BeaconLabelFrameState::Annotated);
     QCOMPARE(loaded.frames.value(0).points, annotated.points);
     QCOMPARE(loaded.frames.value(5).state, BeaconLabelFrameState::NoBeacon);
+    QCOMPARE(loaded.frames.value(6).lampState, BeaconLabelFrameState::Annotated);
+    QCOMPARE(loaded.frames.value(6).lampBoxes, lamps.lampBoxes);
     QCOMPARE(loaded.frames.value(10).state, BeaconLabelFrameState::Ignored);
+}
+
+void BeaconLabelSessionTests::loadsVersion2AsFrontBackSession()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("legacy.beacon-label.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({
+        "format": "beacon_label_session",
+        "version": 2,
+        "video_file": "legacy.avi",
+        "image_width": 188,
+        "image_height": 120,
+        "frame_count": 10,
+        "video_fps": 50.0,
+        "sample_stride": 5,
+        "frames": []
+    })");
+    file.close();
+
+    BeaconLabelSession loaded;
+    QString error;
+    QVERIFY2(BeaconLabelSessionIO::load(path, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.cameraId, quint8(0U));
 }
 
 void BeaconLabelSessionTests::rejectInconsistentFrameState()
