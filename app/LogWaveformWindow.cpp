@@ -83,6 +83,10 @@ bool isUsableChannelValue(const JustFloatLogRow& row, int channelIndex, double v
     {
         return false;
     }
+    if (row.layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        return true;
+    }
     if (channelIndex >= 1 && channelIndex <= 18)
     {
         const int offset = channelIndex - 1;
@@ -862,6 +866,7 @@ public:
         resumeFollowingAfterPause = false;
         pauseButton->setText(QStringLiteral("暂停"));
         csvLog = log;
+        setLogLayout(csvLog != nullptr ? csvLog->layout() : JustFloatLogLayout::Legacy);
         csvTimeline.clear();
         if (csvLog != nullptr && csvLog->rowCount() > 0)
         {
@@ -993,9 +998,10 @@ private:
 
     void populateChannels()
     {
+        channelTree->clear();
         channelItems.fill(nullptr, JustFloatLog::ChannelCount);
         QHash<QString, QTreeWidgetItem*> groups;
-        const auto& descriptors = JustFloatLog::channelDescriptors();
+        const auto& descriptors = JustFloatLog::channelDescriptors(logLayout);
         for (const JustFloatChannelDescriptor& descriptor : descriptors)
         {
             QTreeWidgetItem* group = groups.value(descriptor.group, nullptr);
@@ -1020,6 +1026,24 @@ private:
             channelItems[descriptor.index] = item;
         }
     }
+
+public:
+    void setLogLayout(JustFloatLogLayout layout)
+    {
+        if (logLayout == layout)
+        {
+            return;
+        }
+        logLayout = layout;
+        populateChannels();
+        dirty = true;
+        if (!paused)
+        {
+            refreshPlot();
+        }
+    }
+
+private:
 
     void applyStyle()
     {
@@ -1081,7 +1105,7 @@ private:
         *dataMinimum = std::numeric_limits<double>::infinity();
         *dataMaximum = -std::numeric_limits<double>::infinity();
 
-        const auto& descriptors = JustFloatLog::channelDescriptors();
+        const auto& descriptors = JustFloatLog::channelDescriptors(logLayout);
         const int count = csvLog != nullptr ? csvLog->rowCount() : 0;
         const int lastIndex = count - 1;
         int firstIndex = 0;
@@ -1229,7 +1253,7 @@ private:
             sourceLabel->setToolTip(error);
         }
 
-        const auto& descriptors = JustFloatLog::channelDescriptors();
+        const auto& descriptors = JustFloatLog::channelDescriptors(logLayout);
         result.reserve(historySeries.size());
         for (const WaveformHistorySeries& source : historySeries)
         {
@@ -1331,6 +1355,7 @@ public:
     bool paused = false;
     bool resumeFollowingAfterPause = false;
     bool dirty = true;
+    JustFloatLogLayout logLayout = JustFloatLogLayout::Legacy;
 };
 
 LogWaveformWindow::LogWaveformWindow(QWidget* parent)
@@ -1361,6 +1386,11 @@ void LogWaveformWindow::configureLiveSource(const QString& sourceName,
 void LogWaveformWindow::clearLiveData()
 {
     d->clearLiveData();
+}
+
+void LogWaveformWindow::setLogLayout(JustFloatLogLayout layout)
+{
+    d->setLogLayout(layout);
 }
 
 void LogWaveformWindow::setCsvLog(const JustFloatLog* log)

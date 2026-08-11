@@ -259,6 +259,7 @@ bool AlgorithmRunner::loadSourceFile(const QString& sourcePath, const QString& b
     {
         m_resetTemporalFn();
     }
+    setCarLampMode(m_carLampMode);
     m_sourcePath = sourceInfo.absoluteFilePath();
     return true;
 }
@@ -363,6 +364,7 @@ bool AlgorithmRunner::loadTwoBl3Firmware(const QString& imageDirectory,
     }
     m_initFn();
     m_resetTemporalFn();
+    setCarLampMode(m_carLampMode);
     m_sourcePath = imageSource;
     return true;
 }
@@ -409,6 +411,7 @@ bool AlgorithmRunner::loadTwoBl3Library(const QString& libraryPath, QString* err
     }
     m_initFn();
     m_resetTemporalFn();
+    setCarLampMode(m_carLampMode);
     m_sourcePath = libraryPath;
     return true;
 }
@@ -437,6 +440,7 @@ void AlgorithmRunner::clearDynamicFunctions()
     m_binaryFn = nullptr;
     m_carLampPixelAreasFn = nullptr;
     m_setTelemetryFn = nullptr;
+    m_setCarLampModeFn = nullptr;
     m_horizonCurveFn = nullptr;
     m_secondaryHorizonCurveFn = nullptr;
     m_horizonRegionFn = nullptr;
@@ -458,6 +462,8 @@ bool AlgorithmRunner::resolveDynamicFunctions(QString* errorMessage)
         m_library.resolve("beacon_image_debug_car_lamp_pixel_areas"));
     m_setTelemetryFn = reinterpret_cast<SetTelemetryFn>(
         m_library.resolve("beacon_image_set_telemetry"));
+    m_setCarLampModeFn = reinterpret_cast<SetCarLampModeFn>(
+        m_library.resolve("beacon_image_set_car_lamp_mode"));
     m_horizonCurveFn = reinterpret_cast<HorizonCurveFn>(
         m_library.resolve("beacon_image_debug_horizon"));
     m_secondaryHorizonCurveFn = reinterpret_cast<HorizonCurveFn>(
@@ -503,12 +509,33 @@ void AlgorithmRunner::resetTemporal() const
     if (m_resetTemporalFn != nullptr)
     {
         m_resetTemporalFn();
+        setCarLampMode(m_carLampMode);
         return;
     }
     if (m_processFn == nullptr)
     {
         beacon_image_reset_temporal();
     }
+}
+
+bool AlgorithmRunner::supportsCarLampMode() const
+{
+    return m_setCarLampModeFn != nullptr;
+}
+
+void AlgorithmRunner::setCarLampMode(CarLampMode mode) const
+{
+    m_carLampMode = (mode == CarLampMode::Dual) ?
+        CarLampMode::Dual : CarLampMode::Single;
+    if (m_setCarLampModeFn != nullptr)
+    {
+        m_setCarLampModeFn(static_cast<quint8>(m_carLampMode));
+    }
+}
+
+CarLampMode AlgorithmRunner::carLampMode() const
+{
+    return m_carLampMode;
 }
 
 void AlgorithmRunner::setFrameTelemetry(const AlgorithmFrameTelemetry& telemetry) const

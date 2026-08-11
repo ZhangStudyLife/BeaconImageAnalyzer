@@ -6,6 +6,7 @@
 #include "BeaconParameterDiagnostic.h"
 #include "BimgImageFrameParser.h"
 #include "HorizonCalibrationRecorder.h"
+#include "ImageFrameSidecar.h"
 #include "WaveformHistoryStore.h"
 #include "beacon_image.h"
 
@@ -65,7 +66,7 @@ private:
     void readSocketData(QTcpSocket* socket);
     void setParameterSnapshot(const BimgParameterSnapshot& snapshot);
     void removeSocket(QTcpSocket* socket);
-    void setFrame(const BimgImageFrame& frame, const QString& peerName);
+    void setFrame(const BimgImageFrame& frame, const QString& peerName, qint64 hostTimeMs);
     void updateAttitude(const BimgImageFrame& frame);
     void appendAttitudeSample(bool valid);
     void refreshAttitudeDisplay();
@@ -76,8 +77,11 @@ private:
     void saveCurrentFrame();
     void chooseSaveDirectory();
     void startRecording();
-    void stopRecording();
-    void appendRecordingFrame(const QImage& rendered);
+    void stopRecording(bool reportError = true);
+    void failRecording(const QString& message);
+    void appendRecordingFrame(const BimgImageFrame& frame,
+                              const QImage& gray,
+                              qint64 hostTimeMs);
     void startCalibrationRecording();
     void stopCalibrationRecording();
     void appendCalibrationFrame(const BimgImageFrame& frame, const QImage& gray);
@@ -90,6 +94,8 @@ private:
     QString defaultSavePath(const QString& suffix) const;
     quint8 calibrationCameraId() const;
     void updateStatus(const beacon_result_t& result = {});
+    CarLampMode carLampMode() const;
+    void applyCarLampMode(CarLampMode mode);
     AlgorithmRunner* selectedRunner() const;
     AnnotationModel* selectedAnnotations() const;
 
@@ -136,11 +142,16 @@ private:
     bool m_heightValid = false;
     bool m_attitudeTimeoutGapWritten = false;
     bool m_attitudeHistoryError = false;
+    CarLampMode m_carLampMode = CarLampMode::Single;
 
     beacon_result_t m_result = {};
     AlgorithmProcessProfile m_processProfile = {};
     AlgorithmHorizonCurve m_horizon = {};
     cv::VideoWriter m_writer;
+    ImageFrameSidecarWriter m_recordingSidecar;
+    QSize m_recordingFrameSize;
+    quint8 m_recordingSourceCameraId = 0xffU;
+    quint8 m_recordingPhysicalBoardId = 0xffU;
     QFutureWatcher<BeaconDiagnosticResult>* m_diagnosticWatcher = nullptr;
     LogWaveformWindow* m_attitudeWaveformWindow = nullptr;
     HorizonCalibrationRecorder* m_calibrationRecorder = nullptr;
@@ -169,6 +180,7 @@ private:
     QPushButton* m_calibrationRecordButton = nullptr;
     QPushButton* m_attitudeWaveformButton = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
+    QComboBox* m_carLampModeCombo = nullptr;
     QComboBox* m_calibrationCameraCombo = nullptr;
     QComboBox* m_instanceCombo = nullptr;
     QCheckBox* m_enableInstanceCheck = nullptr;

@@ -10,6 +10,12 @@
 
 #include <array>
 
+enum class CarLampMode : quint8
+{
+    Single = 1,
+    Dual = 2
+};
+
 struct AlgorithmProcessProfile
 {
     bool valid = false;
@@ -78,6 +84,9 @@ public:
     QString sourcePath() const;
     bool usesDynamicLibrary() const;
     void resetTemporal() const;
+    bool supportsCarLampMode() const;
+    void setCarLampMode(CarLampMode mode) const;
+    CarLampMode carLampMode() const;
     void setFrameTelemetry(const AlgorithmFrameTelemetry& telemetry) const;
     beacon_result_t process(const QImage& grayImage) const;
     AlgorithmHorizonCurve horizonCurve() const;
@@ -100,6 +109,7 @@ private:
     using CarLampPixelAreasFn = unsigned char (*)(
         unsigned short[BEACON_MAX_CAR_LAMP_COUNT]);
     using SetTelemetryFn = void (*)(quint8, float, float, float, quint8, quint8);
+    using SetCarLampModeFn = void (*)(quint8);
     using HorizonCurveFn = quint8 (*)(float[BEACON_IMAGE_W],
                                       unsigned char[BEACON_IMAGE_W]);
     using HorizonRegionFn = quint8 (*)(unsigned char[BEACON_IMAGE_W]);
@@ -122,6 +132,7 @@ private:
     BinaryFn m_binaryFn = nullptr;
     CarLampPixelAreasFn m_carLampPixelAreasFn = nullptr;
     SetTelemetryFn m_setTelemetryFn = nullptr;
+    SetCarLampModeFn m_setCarLampModeFn = nullptr;
     HorizonCurveFn m_horizonCurveFn = nullptr;
     HorizonCurveFn m_secondaryHorizonCurveFn = nullptr;
     HorizonRegionFn m_horizonRegionFn = nullptr;
@@ -133,6 +144,7 @@ private:
     ParameterSetFn m_parameterSetFn = nullptr;
     mutable AlgorithmProcessProfile m_lastProcessProfile;
     mutable AlgorithmDetectionMetrics m_lastDetectionMetrics;
+    mutable CarLampMode m_carLampMode = CarLampMode::Single;
 };
 
 #endif

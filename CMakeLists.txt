@@ -60,6 +60,8 @@ add_executable(BeaconImageAnalyzer
     app/AiInstanceDialog.cpp
     app/LogReplayWindow.h
     app/LogReplayWindow.cpp
+    app/ImageLogReviewWindow.h
+    app/ImageLogReviewWindow.cpp
     app/LogWaveformWindow.h
     app/LogWaveformWindow.cpp
     app/HorizonCalibrationWindow.h
@@ -96,6 +98,12 @@ add_executable(BeaconImageAnalyzer
     core/FrameRenderer.cpp
     core/BimgImageFrameParser.h
     core/BimgImageFrameParser.cpp
+    core/ImageFrameSidecar.h
+    core/ImageFrameSidecar.cpp
+    core/ImageLogAligner.h
+    core/ImageLogAligner.cpp
+    core/SingleLampLogDiagnostics.h
+    core/SingleLampLogDiagnostics.cpp
     core/HorizonLineGeometry.h
     core/HorizonLineGeometry.cpp
     core/HorizonCalibration.h
@@ -187,6 +195,43 @@ if (BUILD_TESTING)
 
     add_test(NAME BimgImageFrameParserTests COMMAND BimgImageFrameParserTests)
 
+    add_executable(ImageFrameSidecarTests
+        tests/ImageFrameSidecarTests.cpp
+        core/ImageFrameSidecar.h
+        core/ImageFrameSidecar.cpp
+    )
+
+    target_include_directories(ImageFrameSidecarTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+    )
+
+    target_link_libraries(ImageFrameSidecarTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+    )
+
+    add_test(NAME ImageFrameSidecarTests COMMAND ImageFrameSidecarTests)
+
+    add_executable(ImageLogAlignerTests
+        tests/ImageLogAlignerTests.cpp
+        core/ImageLogAligner.h
+        core/ImageLogAligner.cpp
+        core/ImageFrameSidecar.h
+        core/JustFloatLog.h
+        core/JustFloatLog.cpp
+    )
+
+    target_include_directories(ImageLogAlignerTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+    )
+
+    target_link_libraries(ImageLogAlignerTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+    )
+
+    add_test(NAME ImageLogAlignerTests COMMAND ImageLogAlignerTests)
+
     add_executable(HorizonCalibrationTests
         tests/HorizonCalibrationTests.cpp
         core/HorizonLineGeometry.h
@@ -195,6 +240,8 @@ if (BUILD_TESTING)
         core/HorizonCalibration.cpp
         core/HorizonCalibrationRecorder.h
         core/HorizonCalibrationRecorder.cpp
+        core/ImageFrameSidecar.h
+        core/ImageFrameSidecar.cpp
         core/DownGroundRangeCalibration.h
         core/DownGroundRangeCalibration.cpp
         core/VideoReader.h

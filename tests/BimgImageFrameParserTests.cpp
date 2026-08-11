@@ -124,6 +124,61 @@ QByteArray makeV2Frame(bool attitudeValid, bool heightValid, bool withUnknown = 
     return packet;
 }
 
+QByteArray makeV3Frame(quint8 boardId,
+                       quint8 sourceCameraId,
+                       quint32 sequence,
+                       quint32 sourceFrameSequence,
+                       quint32 captureTimeMs,
+                       bool sourceFrameValid = true,
+                       bool captureTimeValid = true)
+{
+    constexpr quint16 width = 4;
+    constexpr quint16 height = 3;
+    QByteArray image;
+    for (int value = 0; value < width * height; ++value)
+    {
+        image.append(char(value));
+    }
+
+    QByteArray markers;
+    markers.append(char(BimgMarkerType::CarLamp));
+    markers.append(char(0));
+    appendU16Le(&markers, 3);
+    appendU16Le(&markers, 1);
+
+    QByteArray debugFloats;
+    appendDebugFloat(&debugFloats, BimgDebugRollDegId, true, 18.5f);
+    appendDebugFloat(&debugFloats, BimgDebugPitchDegId, true, -7.25f);
+    appendDebugFloat(&debugFloats, BimgDebugHeightMmId, true, 1024.0f);
+
+    QByteArray packet("BIMG", 4);
+    packet.append(char(3));
+    packet.append(char(40));
+    packet.append(char(0));
+    packet.append(char(boardId));
+    appendU16Le(&packet, width);
+    appendU16Le(&packet, height);
+    appendU32Le(&packet, sequence);
+    appendU32Le(&packet, image.size());
+    packet.append(char(markers.size() / 6));
+    packet.append(char(6));
+    packet.append(char(debugFloats.size() / 8));
+    packet.append(char(8));
+    appendU32Le(&packet, image.size() + markers.size() + debugFloats.size());
+    appendU32Le(&packet, sourceFrameSequence);
+    appendU32Le(&packet, captureTimeMs);
+    packet.append(char((sourceFrameValid ? 0x01U : 0U)
+                       | (captureTimeValid ? 0x02U : 0U)));
+    packet.append(char(sourceCameraId));
+    packet.append(char(boardId));
+    packet.append(char(0));
+    packet.append(image);
+    packet.append(markers);
+    packet.append(debugFloats);
+    appendU32Le(&packet, crc32(packet));
+    return packet;
+}
+
 QByteArray makeSeekfreeFrame(quint16 width = 4, quint16 height = 3)
 {
     QByteArray packet;
@@ -203,6 +258,11 @@ private slots:
     void parsesFragmentedV2DebugFloats();
     void preservesInvalidAndUnknownDebugFloats();
     void rejectsMalformedV2DebugRecordSize();
+    void parsesFragmentedV3Metadata();
+    void parsesConcatenatedV3Frames();
+    void recoversAfterBadV3Crc();
+    void rejectsInvalidV3SourceMetadata();
+    void rejectsV3ReservedMetadata();
 };
 
 void BimgImageFrameParserTests::parsesFragmentedFrame()
@@ -219,7 +279,11 @@ void BimgImageFrameParserTests::parsesFragmentedFrame()
     QCOMPARE(frames[0].protocolVersion, quint8(1));
     QCOMPARE(frames[0].streamMode, quint8(3));
     QCOMPARE(frames[0].cameraId, quint8(1));
+    QCOMPARE(frames[0].physicalBoardId, quint8(1));
+    QCOMPARE(frames[0].sourceCameraId, quint8(0xffU));
     QCOMPARE(frames[0].sequence, quint32(42));
+    QVERIFY(!frames[0].sourceFrameValid);
+    QVERIFY(!frames[0].captureTimeValid);
     QCOMPARE(frames[0].image.size(), QSize(4, 3));
     QCOMPARE(frames[0].markers.size(), 2);
     QCOMPARE(frames[0].markers[0].type, BimgMarkerType::Beacon);
@@ -348,6 +412,10 @@ void BimgImageFrameParserTests::parsesFragmentedV2DebugFloats()
     QCOMPARE(frames.size(), 1);
     QCOMPARE(frames[0].protocolVersion, quint8(2));
     QCOMPARE(frames[0].cameraId, quint8(1));
+    QCOMPARE(frames[0].physicalBoardId, quint8(1));
+    QCOMPARE(frames[0].sourceCameraId, quint8(0xffU));
+    QVERIFY(!frames[0].sourceFrameValid);
+    QVERIFY(!frames[0].captureTimeValid);
     QCOMPARE(frames[0].debugFloats.size(), 3);
     QCOMPARE(frames[0].debugFloats[0].id, BimgDebugRollDegId);
     QVERIFY(frames[0].debugFloats[0].valid);
@@ -385,6 +453,122 @@ void BimgImageFrameParserTests::rejectsMalformedV2DebugRecordSize()
     QCOMPARE(frames.size(), 1);
     QCOMPARE(frames[0].sequence, quint32(100U));
     QVERIFY(parser.protocolErrorCount() >= 1U);
+}
+
+void BimgImageFrameParserTests::parsesFragmentedV3Metadata()
+{
+    BimgImageFrameParser parser;
+    const QByteArray packet = makeV3Frame(1U,
+                                          2U,
+                                          0x10203040U,
+                                          0xfedcba98U,
+                                          0x89abcdefU);
+    QVector<BimgImageFrame> frames;
+    for (char byte : packet)
+    {
+        frames += parser.append(QByteArray(1, byte)).frames;
+    }
+
+    QCOMPARE(frames.size(), 1);
+    const BimgImageFrame& frame = frames[0];
+    QCOMPARE(frame.protocolVersion, quint8(3));
+    QCOMPARE(frame.streamMode, quint8(0));
+    QCOMPARE(frame.cameraId, quint8(1));
+    QCOMPARE(frame.physicalBoardId, quint8(1));
+    QCOMPARE(frame.sourceCameraId, quint8(2));
+    QCOMPARE(frame.sequence, quint32(0x10203040U));
+    QCOMPARE(frame.sourceFrameSequence, quint32(0xfedcba98U));
+    QCOMPARE(frame.captureTimeMs, quint32(0x89abcdefU));
+    QVERIFY(frame.sourceFrameValid);
+    QVERIFY(frame.captureTimeValid);
+    QCOMPARE(frame.image.size(), QSize(4, 3));
+    QCOMPARE(frame.markers.size(), 1);
+    QCOMPARE(frame.markers[0].type, BimgMarkerType::CarLamp);
+    QCOMPARE(frame.debugFloats.size(), 3);
+    QCOMPARE(frame.debugFloats[0].value, 18.5f);
+    QCOMPARE(frame.debugFloats[1].value, -7.25f);
+    QCOMPARE(frame.debugFloats[2].value, 1024.0f);
+    QCOMPARE(parser.crcErrorCount(), quint64(0));
+    QCOMPARE(parser.protocolErrorCount(), quint64(0));
+}
+
+void BimgImageFrameParserTests::parsesConcatenatedV3Frames()
+{
+    BimgImageFrameParser parser;
+    const BimgParseBatch batch = parser.append(
+        makeV3Frame(0U, 0U, 7U, 1001U, 20020U)
+        + makeV3Frame(1U, 2U, 8U, 1002U, 20040U, true, false));
+
+    QCOMPARE(batch.frames.size(), 2);
+    QCOMPARE(batch.frames[0].sourceFrameSequence, quint32(1001U));
+    QCOMPARE(batch.frames[0].physicalBoardId, quint8(0));
+    QCOMPARE(batch.frames[0].sourceCameraId, quint8(0));
+    QVERIFY(batch.frames[0].captureTimeValid);
+    QCOMPARE(batch.frames[1].sourceFrameSequence, quint32(1002U));
+    QCOMPARE(batch.frames[1].physicalBoardId, quint8(1));
+    QCOMPARE(batch.frames[1].sourceCameraId, quint8(2));
+    QVERIFY(batch.frames[1].sourceFrameValid);
+    QVERIFY(!batch.frames[1].captureTimeValid);
+}
+
+void BimgImageFrameParserTests::recoversAfterBadV3Crc()
+{
+    BimgImageFrameParser parser;
+    QByteArray bad = makeV3Frame(1U, 2U, 9U, 2001U, 30020U);
+    bad[45] = char((quint8)bad.at(45) ^ 0x5aU);
+
+    const BimgParseBatch batch = parser.append(
+        bad + makeV3Frame(1U, 2U, 10U, 2002U, 30040U));
+
+    QCOMPARE(batch.frames.size(), 1);
+    QCOMPARE(batch.frames[0].sequence, quint32(10U));
+    QCOMPARE(batch.frames[0].sourceFrameSequence, quint32(2002U));
+    QCOMPARE(parser.crcErrorCount(), quint64(1));
+}
+
+void BimgImageFrameParserTests::rejectsInvalidV3SourceMetadata()
+{
+    const auto verifyRejected = [](QByteArray malformed) {
+        BimgImageFrameParser parser;
+        const BimgParseBatch batch = parser.append(
+            malformed + makeV3Frame(0U, 0U, 11U, 3001U, 40020U));
+        QCOMPARE(batch.frames.size(), 1);
+        QCOMPARE(batch.frames[0].sequence, quint32(11U));
+        QVERIFY(parser.protocolErrorCount() >= 1U);
+    };
+
+    QByteArray centerCamera = makeV3Frame(0U, 1U, 7U, 2001U, 30020U);
+    verifyRejected(centerCamera);
+
+    QByteArray wrongBoardSource = makeV3Frame(0U, 2U, 8U, 2002U, 30040U);
+    verifyRejected(wrongBoardSource);
+
+    QByteArray nonZeroReserved = makeV3Frame(1U, 2U, 9U, 2003U, 30060U);
+    nonZeroReserved[39] = char(1);
+    verifyRejected(nonZeroReserved);
+}
+
+void BimgImageFrameParserTests::rejectsV3ReservedMetadata()
+{
+    const auto verifyRejected = [](QByteArray malformed) {
+        BimgImageFrameParser parser;
+        const BimgParseBatch batch = parser.append(
+            malformed + makeV3Frame(0U, 0U, 12U, 3002U, 40040U));
+        QCOMPARE(batch.frames.size(), 1);
+        QCOMPARE(batch.frames[0].sequence, quint32(12U));
+        QVERIFY(parser.protocolErrorCount() >= 1U);
+    };
+
+    QByteArray nonZeroDebugReserved = makeV3Frame(0U, 0U, 10U, 3000U, 40000U);
+    nonZeroDebugReserved[40 + 12 + 6 + 3] = char(1);
+    verifyRejected(nonZeroDebugReserved);
+
+    QByteArray wrongDebugCount = makeV3Frame(0U, 0U, 11U, 3001U, 40020U);
+    wrongDebugCount[22] = char(2);
+    wrongDebugCount[24] = char(12 + 6 * 1 + 8 * 2);
+    wrongDebugCount.chop(8);
+    appendU32Le(&wrongDebugCount, crc32(wrongDebugCount));
+    verifyRejected(wrongDebugCount);
 }
 
 QTEST_MAIN(BimgImageFrameParserTests)

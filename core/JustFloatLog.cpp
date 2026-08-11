@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLocale>
+#include <QStringList>
 #include <QTextStream>
 #include <QtEndian>
 
@@ -13,10 +14,18 @@
 
 namespace
 {
+constexpr int SingleLampRoiPayloadValueCount = JustFloatLog::SingleLampRoiChannelCount - 1;
 constexpr int LegacyPayloadValueCount = JustFloatLog::LegacyChannelCount - 1;
 constexpr int MotionPayloadValueCount = JustFloatLog::MotionChannelCount - 1;
-constexpr int FusedPayloadValueCount = JustFloatLog::ChannelCount - 1;
+constexpr int FusedPayloadValueCount = JustFloatLog::LegacyFusedChannelCount - 1;
+constexpr int DualLampFusionPayloadValueCount = JustFloatLog::DualLampFusionChannelCount - 1;
 constexpr double InvalidSentinel = -900.0;
+constexpr double SchemaTolerance = 0.5;
+constexpr quint32 Packed24Maximum = 0x00ffffffU;
+constexpr float SingleLampWidthScale = 4.0f;
+constexpr float SingleLampLengthScale = 2.0f;
+constexpr float SingleLampAngleStepDeg = 2.0f;
+constexpr float SingleLampBeaconDistanceStep = 4.0f;
 
 using ValueArray = std::array<double, JustFloatLog::ChannelCount>;
 using HeaderMap = std::array<int, JustFloatLog::ChannelCount>;
@@ -24,6 +33,7 @@ using HeaderMap = std::array<int, JustFloatLog::ChannelCount>;
 struct ParsedValues
 {
     ValueArray values{};
+    JustFloatLogLayout layout = JustFloatLogLayout::Legacy;
     bool hasMotionData = false;
     bool hasFusedCarLampData = false;
 };
@@ -31,6 +41,12 @@ struct ParsedValues
 bool isInvalidValue(double value)
 {
     return !std::isfinite(value) || value <= InvalidSentinel;
+}
+
+bool isSchemaId(double value)
+{
+    return std::isfinite(value) &&
+           std::abs(value - JustFloatLog::DualLampFusionSchemaId) <= SchemaTolerance;
 }
 
 QStringList splitCsvLine(const QString& line)
@@ -53,8 +69,16 @@ bool parseDoubleCell(const QString& text, double* value)
     {
         return false;
     }
-
-    const QString normalized = text.trimmed().toLower();
+    QString normalized = text.trimmed().toLower();
+    const int equalIndex = normalized.indexOf(QLatin1Char('='));
+    if (equalIndex >= 0)
+    {
+        normalized = normalized.mid(equalIndex + 1).trimmed();
+    }
+    if (normalized.isEmpty())
+    {
+        return false;
+    }
     if (normalized == QStringLiteral("nan") || normalized == QStringLiteral("+nan") ||
         normalized == QStringLiteral("-nan"))
     {
@@ -72,7 +96,6 @@ bool parseDoubleCell(const QString& text, double* value)
         *value = -std::numeric_limits<double>::infinity();
         return true;
     }
-
     bool ok = false;
     const double parsed = QLocale::c().toDouble(normalized, &ok);
     if (!ok)
@@ -96,7 +119,7 @@ QString formatDouble(double value, int precision)
     return QString::number(value, 'g', precision);
 }
 
-bool looksLikeJustFloatHeader(const QStringList& cells)
+bool looksLikeHeader(const QStringList& cells)
 {
     for (const QString& cell : cells)
     {
@@ -104,10 +127,9 @@ bool looksLikeJustFloatHeader(const QStringList& cells)
         {
             continue;
         }
-
         bool ok = false;
-        const int index = cell.mid(1).toInt(&ok);
-        if (ok && index >= 0 && index < JustFloatLog::ChannelCount)
+        cell.mid(1).section(QLatin1Char(' '), 0, 0).toInt(&ok);
+        if (ok)
         {
             return true;
         }
@@ -115,142 +137,131 @@ bool looksLikeJustFloatHeader(const QStringList& cells)
     return false;
 }
 
-bool buildHeaderMap(const QStringList& cells,
-                    HeaderMap* map,
-                    bool* hasMotionColumns,
-                    bool* hasFusedCarLampColumns,
-                    QString* errorMessage)
+bool parseHeader(const QStringList& cells, HeaderMap* map, int* declaredCount, QString* error)
 {
-    map->fill(-1);
-    for (int i = 0; i < cells.size(); ++i)
+    if (map == nullptr || declaredCount == nullptr)
     {
-        const QString name = cells[i].trimmed();
-        if (!name.startsWith(QLatin1Char('I')))
+        return false;
+    }
+    map->fill(-1);
+    for (int cellIndex = 0; cellIndex < cells.size(); ++cellIndex)
+    {
+        const QString cell = cells[cellIndex].trimmed();
+        if (!cell.startsWith(QLatin1Char('I')))
         {
             continue;
         }
-
+        QString number = cell.mid(1);
+        const int space = number.indexOf(QChar(' '));
+        if (space >= 0)
+        {
+            number = number.left(space);
+        }
         bool ok = false;
-        const int index = name.mid(1).toInt(&ok);
+        const int index = number.toInt(&ok);
         if (!ok || index < 0 || index >= JustFloatLog::ChannelCount)
         {
             continue;
         }
         if ((*map)[index] >= 0)
         {
-            if (errorMessage != nullptr)
+            if (error != nullptr)
             {
-                *errorMessage = QStringLiteral("CSV 表头重复定义 I%1。").arg(index);
+                *error = QStringLiteral("duplicate CSV column I%1").arg(index);
             }
             return false;
         }
-        (*map)[index] = i;
+        (*map)[index] = cellIndex;
     }
 
-    for (int i = 0; i < JustFloatLog::LegacyChannelCount; ++i)
+    int highestIndex = -1;
+    for (int index = 0; index < JustFloatLog::ChannelCount; ++index)
     {
-        if ((*map)[i] < 0)
+        if ((*map)[index] >= 0)
         {
-            if (errorMessage != nullptr)
+            highestIndex = index;
+        }
+    }
+    const int count = highestIndex + 1;
+    for (int index = 0; index < count; ++index)
+    {
+        if ((*map)[index] < 0)
+        {
+            if (error != nullptr)
             {
-                *errorMessage = QStringLiteral("CSV 表头缺少 I%1。").arg(i);
+                *error = QStringLiteral("CSV header is missing I%1").arg(index);
             }
             return false;
         }
     }
-
-    int motionColumnCount = 0;
-    for (int i = JustFloatLog::LegacyChannelCount; i < JustFloatLog::MotionChannelCount; ++i)
+    if (count != JustFloatLog::SingleLampRoiChannelCount &&
+        count != JustFloatLog::LegacyChannelCount &&
+        count != JustFloatLog::MotionChannelCount &&
+        count != JustFloatLog::LegacyFusedChannelCount &&
+        count != JustFloatLog::DualLampFusionChannelCount)
     {
-        motionColumnCount += ((*map)[i] >= 0) ? 1 : 0;
-    }
-    if (motionColumnCount != 0 &&
-        motionColumnCount != JustFloatLog::MotionChannelCount - JustFloatLog::LegacyChannelCount)
-    {
-        if (errorMessage != nullptr)
+        if (error != nullptr)
         {
-            *errorMessage = QStringLiteral("CSV 表头中的 I38 至 I42 必须同时存在。");
+            if (count > JustFloatLog::LegacyChannelCount &&
+                count < JustFloatLog::MotionChannelCount)
+            {
+                *error = QStringLiteral("CSV header requires complete I0-I37 and I38-I42 groups");
+            }
+            else if (count > JustFloatLog::MotionChannelCount &&
+                     count < JustFloatLog::LegacyFusedChannelCount)
+            {
+                *error = QStringLiteral("CSV header requires complete I43-I46 group");
+            }
+            else
+            {
+                *error = QStringLiteral("unsupported CSV channel count %1").arg(count);
+            }
         }
         return false;
     }
-
-    *hasMotionColumns = motionColumnCount > 0;
-
-    int fusedColumnCount = 0;
-    for (int i = JustFloatLog::MotionChannelCount; i < JustFloatLog::ChannelCount; ++i)
-    {
-        fusedColumnCount += ((*map)[i] >= 0) ? 1 : 0;
-    }
-    if (fusedColumnCount != 0 &&
-        fusedColumnCount != JustFloatLog::ChannelCount - JustFloatLog::MotionChannelCount)
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("CSV 表头中的 I43 至 I46 必须同时存在。");
-        }
-        return false;
-    }
-    if (fusedColumnCount > 0 && !*hasMotionColumns)
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("CSV 表头包含 I43 至 I46 时也必须包含 I38 至 I42。");
-        }
-        return false;
-    }
-    *hasFusedCarLampColumns = fusedColumnCount > 0;
+    *declaredCount = count;
     return true;
 }
 
-bool parseRequiredValues(const QStringList& cells,
-                         const HeaderMap& map,
-                         int lineNumber,
-                         ParsedValues* parsed,
-                         QString* errorMessage)
+bool parseNumberAt(const QStringList& cells,
+                   const HeaderMap* map,
+                   int index,
+                   int lineNumber,
+                   double* value,
+                   QString* error)
 {
-    for (int i = 0; i < JustFloatLog::LegacyChannelCount; ++i)
+    const int cellIndex = map == nullptr ? index : (*map)[index];
+    if (cellIndex < 0 || cellIndex >= cells.size() ||
+        !parseDoubleCell(cells[cellIndex], value))
     {
-        const int cellIndex = map[i];
-        if (cellIndex < 0 || cellIndex >= cells.size())
+        if (error != nullptr)
         {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 行缺少 I%2。").arg(lineNumber).arg(i);
-            }
-            return false;
+            *error = QStringLiteral("line %1 has invalid I%2").arg(lineNumber).arg(index);
         }
-        if (!parseDoubleCell(cells[cellIndex], &parsed->values[i]))
-        {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 行 I%2 不是有效浮点数。").arg(lineNumber).arg(i);
-            }
-            return false;
-        }
+        return false;
     }
     return true;
 }
 
-bool parseMotionValues(const QStringList& cells,
-                       const HeaderMap& map,
-                       int lineNumber,
-                       ParsedValues* parsed,
-                       QString* errorMessage)
+bool parseOptionalGroup(const QStringList& cells,
+                        const HeaderMap* map,
+                        int first,
+                        int last,
+                        int lineNumber,
+                        ValueArray* values,
+                        bool* present,
+                        QString* error)
 {
     bool allEmpty = true;
     bool anyEmpty = false;
-    for (int channel = JustFloatLog::LegacyChannelCount;
-         channel < JustFloatLog::MotionChannelCount;
-         ++channel)
+    for (int index = first; index <= last; ++index)
     {
-        const int cellIndex = map[channel];
+        const int cellIndex = map == nullptr ? index : (*map)[index];
         if (cellIndex < 0 || cellIndex >= cells.size())
         {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 行缺少 I%2。").arg(lineNumber).arg(channel);
-            }
-            return false;
+            allEmpty = true;
+            anyEmpty = true;
+            continue;
         }
         const bool empty = cells[cellIndex].trimmed().isEmpty();
         allEmpty = allEmpty && empty;
@@ -258,214 +269,262 @@ bool parseMotionValues(const QStringList& cells,
     }
     if (allEmpty)
     {
-        parsed->hasMotionData = false;
+        *present = false;
         return true;
     }
     if (anyEmpty)
     {
-        if (errorMessage != nullptr)
+        if (error != nullptr)
         {
-            *errorMessage = QStringLiteral("第 %1 行的 I38 至 I42 必须同时有值或同时留空。").arg(lineNumber);
+            *error = QStringLiteral("line %1 contains a partial optional group I%2-I%3")
+                         .arg(lineNumber)
+                         .arg(first)
+                         .arg(last);
         }
         return false;
     }
-
-    for (int channel = JustFloatLog::LegacyChannelCount;
-         channel < JustFloatLog::MotionChannelCount;
-         ++channel)
+    for (int index = first; index <= last; ++index)
     {
-        if (!parseDoubleCell(cells[map[channel]], &parsed->values[channel]))
+        if (!parseNumberAt(cells, map, index, lineNumber, &(*values)[index], error))
         {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 行的 I%2 不是有效浮点数。")
-                                    .arg(lineNumber)
-                                    .arg(channel);
-            }
             return false;
         }
     }
-
-    parsed->hasMotionData = true;
+    *present = true;
     return true;
 }
 
-bool parseFusedCarLampValues(const QStringList& cells,
-                             const HeaderMap& map,
-                             int lineNumber,
-                             ParsedValues* parsed,
-                             QString* errorMessage)
+bool parseSingleLampRoiValues(const QStringList& cells,
+                              const HeaderMap* map,
+                              int lineNumber,
+                              ParsedValues* parsed,
+                              QString* error)
 {
-    bool allEmpty = true;
-    bool anyEmpty = false;
-    for (int channel = JustFloatLog::MotionChannelCount;
-         channel < JustFloatLog::ChannelCount;
-         ++channel)
+    parsed->layout = JustFloatLogLayout::SingleLampRoiV1;
+    parsed->values.fill(0.0);
+    for (int index = 0; index < JustFloatLog::SingleLampRoiChannelCount; ++index)
     {
-        const int cellIndex = map[channel];
-        if (cellIndex < 0 || cellIndex >= cells.size())
+        if (!parseNumberAt(cells, map, index, lineNumber, &parsed->values[index], error))
         {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 行缺少 I%2。").arg(lineNumber).arg(channel);
-            }
-            return false;
-        }
-        const bool empty = cells[cellIndex].trimmed().isEmpty();
-        allEmpty = allEmpty && empty;
-        anyEmpty = anyEmpty || empty;
-    }
-    if (allEmpty)
-    {
-        return true;
-    }
-    if (anyEmpty)
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("第 %1 行的 I43 至 I46 必须同时有值或同时留空。").arg(lineNumber);
-        }
-        return false;
-    }
-
-    for (int channel = JustFloatLog::MotionChannelCount;
-         channel < JustFloatLog::ChannelCount;
-         ++channel)
-    {
-        if (!parseDoubleCell(cells[map[channel]], &parsed->values[channel]))
-        {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 行的 I%2 不是有效浮点数。")
-                                    .arg(lineNumber)
-                                    .arg(channel);
-            }
             return false;
         }
     }
-    parsed->hasFusedCarLampData = true;
     return true;
 }
 
-bool parseMappedValues(const QStringList& cells,
-                       const HeaderMap& map,
-                       bool hasMotionColumns,
-                       bool hasFusedCarLampColumns,
+bool parseLegacyValues(const QStringList& cells,
+                       const HeaderMap* map,
+                       int declaredCount,
                        int lineNumber,
                        ParsedValues* parsed,
-                       QString* errorMessage)
+                       QString* error)
 {
-    *parsed = ParsedValues{};
-    if (!parseRequiredValues(cells, map, lineNumber, parsed, errorMessage))
+    parsed->layout = JustFloatLogLayout::Legacy;
+    parsed->values.fill(0.0);
+    for (int index = 0; index < JustFloatLog::LegacyChannelCount; ++index)
+    {
+        if (declaredCount <= index)
+        {
+            if (index < JustFloatLog::LegacyChannelCount)
+            {
+                if (error != nullptr)
+                {
+                    *error = QStringLiteral("line %1 is missing I%2").arg(lineNumber).arg(index);
+                }
+                return false;
+            }
+            break;
+        }
+        if ((index >= JustFloatLog::LegacyChannelCount) ||
+            !parseNumberAt(cells, map, index, lineNumber, &parsed->values[index], error))
+        {
+            return false;
+        }
+    }
+    if (!parseOptionalGroup(cells,
+                            map,
+                            JustFloatLog::LegacyChannelCount,
+                            JustFloatLog::MotionChannelCount - 1,
+                            lineNumber,
+                            &parsed->values,
+                            &parsed->hasMotionData,
+                            error))
     {
         return false;
     }
-    if (hasMotionColumns &&
-        !parseMotionValues(cells, map, lineNumber, parsed, errorMessage))
-    {
-        return false;
-    }
-    if (hasFusedCarLampColumns &&
-        !parseFusedCarLampValues(cells, map, lineNumber, parsed, errorMessage))
+    if (!parseOptionalGroup(cells,
+                            map,
+                            JustFloatLog::MotionChannelCount,
+                            JustFloatLog::LegacyFusedChannelCount - 1,
+                            lineNumber,
+                            &parsed->values,
+                            &parsed->hasFusedCarLampData,
+                            error))
     {
         return false;
     }
     if (parsed->hasFusedCarLampData && !parsed->hasMotionData)
     {
-        if (errorMessage != nullptr)
+        if (error != nullptr)
         {
-            *errorMessage = QStringLiteral("第 %1 行包含 I43 至 I46 时，I38 至 I42 不能留空。")
-                                .arg(lineNumber);
+            *error = QStringLiteral("fused fields require motion fields");
         }
         return false;
     }
     return true;
 }
 
-bool parseSequentialCsvValues(const QStringList& cells,
-                              int lineNumber,
-                              ParsedValues* parsed,
-                              QString* errorMessage)
+bool parseDualValues(const QStringList& cells,
+                     const HeaderMap* map,
+                     int lineNumber,
+                     ParsedValues* parsed,
+                     QString* error)
 {
-    if (cells.size() != JustFloatLog::LegacyChannelCount &&
-        cells.size() != JustFloatLog::MotionChannelCount &&
-        cells.size() != JustFloatLog::ChannelCount)
+    parsed->layout = JustFloatLogLayout::DualLampFusionV1;
+    parsed->values.fill(0.0);
+    for (int index = 0; index < JustFloatLog::DualLampFusionChannelCount; ++index)
     {
-        if (errorMessage != nullptr)
+        if (!parseNumberAt(cells, map, index, lineNumber, &parsed->values[index], error))
         {
-            *errorMessage = QStringLiteral("第 %1 行字段数量应为 38、43 或 47，实际为 %2。")
-                                .arg(lineNumber)
-                                .arg(cells.size());
+            return false;
+        }
+    }
+    if (!isSchemaId(parsed->values[1]))
+    {
+        if (error != nullptr)
+        {
+            *error = QStringLiteral("invalid DualLampFusionV1 schema identifier");
         }
         return false;
     }
+    return true;
+}
 
-    HeaderMap map;
-    map.fill(-1);
-    for (int i = 0; i < cells.size(); ++i)
+bool parseCells(const QStringList& cells,
+                const HeaderMap* map,
+                int declaredCount,
+                double fallbackTimestampMs,
+                int lineNumber,
+                ParsedValues* parsed,
+                QString* error,
+                bool allowLegacyFallback)
+{
+    if (declaredCount == JustFloatLog::SingleLampRoiChannelCount)
     {
-        map[i] = i;
+        return parseSingleLampRoiValues(cells, map, lineNumber, parsed, error);
     }
-    return parseMappedValues(cells,
-                             map,
-                             cells.size() >= JustFloatLog::MotionChannelCount,
-                             cells.size() == JustFloatLog::ChannelCount,
-                             lineNumber,
-                             parsed,
-                             errorMessage);
+    if (declaredCount == JustFloatLog::DualLampFusionChannelCount)
+    {
+        if (!parseDualValues(cells, map, lineNumber, parsed, error))
+        {
+            if (allowLegacyFallback && map != nullptr)
+            {
+                ParsedValues legacy;
+                if (parseLegacyValues(cells,
+                                       map,
+                                       declaredCount,
+                                       lineNumber,
+                                       &legacy,
+                                       nullptr))
+                {
+                    *parsed = legacy;
+                    return true;
+                }
+            }
+            return false;
+        }
+        return true;
+    }
+    if (!parseLegacyValues(cells, map, declaredCount, lineNumber, parsed, error))
+    {
+        return false;
+    }
+    if (declaredCount == LegacyPayloadValueCount ||
+        declaredCount == MotionPayloadValueCount ||
+        declaredCount == FusedPayloadValueCount)
+    {
+        parsed->values[0] = fallbackTimestampMs;
+    }
+    return true;
 }
 
 bool parseSequentialDatagramValues(const QStringList& cells,
                                    double fallbackTimestampMs,
                                    ParsedValues* parsed,
-                                   QString* errorMessage)
+                                   QString* error)
 {
     const int count = cells.size();
-    if (count != LegacyPayloadValueCount &&
+    if (count != SingleLampRoiPayloadValueCount &&
+        count != JustFloatLog::SingleLampRoiChannelCount &&
+        count != LegacyPayloadValueCount &&
         count != JustFloatLog::LegacyChannelCount &&
         count != MotionPayloadValueCount &&
         count != JustFloatLog::MotionChannelCount &&
         count != FusedPayloadValueCount &&
-        count != JustFloatLog::ChannelCount)
+        count != JustFloatLog::LegacyFusedChannelCount &&
+        count != JustFloatLog::DualLampFusionChannelCount)
     {
-        if (errorMessage != nullptr)
+        if (error != nullptr)
         {
-            *errorMessage = QStringLiteral("字段数量应为 37、38、42、43、46 或 47，实际为 %1。").arg(count);
+            *error = QStringLiteral("unsupported JustFloat field count %1").arg(count);
         }
         return false;
     }
-
-    *parsed = ParsedValues{};
-    const bool payloadWithoutRowTime = count == LegacyPayloadValueCount ||
-                                       count == MotionPayloadValueCount ||
-                                       count == FusedPayloadValueCount;
-    const int shift = payloadWithoutRowTime ? 1 : 0;
-    if (payloadWithoutRowTime)
+    if (count == SingleLampRoiPayloadValueCount)
     {
+        parsed->layout = JustFloatLogLayout::SingleLampRoiV1;
+        parsed->values.fill(0.0);
         parsed->values[0] = fallbackTimestampMs;
+        for (int i = 0; i < count; ++i)
+        {
+            if (!parseDoubleCell(cells[i], &parsed->values[i + 1]))
+            {
+                if (error != nullptr)
+                {
+                    *error = QStringLiteral("invalid datagram field %1").arg(i);
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+    if (count == LegacyPayloadValueCount ||
+        count == MotionPayloadValueCount ||
+        count == FusedPayloadValueCount)
+    {
+        parsed->layout = JustFloatLogLayout::Legacy;
+        parsed->values.fill(0.0);
+        parsed->values[0] = fallbackTimestampMs;
+        for (int i = 0; i < count; ++i)
+        {
+            if (!parseDoubleCell(cells[i], &parsed->values[i + 1]))
+            {
+                if (error != nullptr)
+                {
+                    *error = QStringLiteral("invalid datagram field %1").arg(i);
+                }
+                return false;
+            }
+        }
+        parsed->hasMotionData = count >= MotionPayloadValueCount;
+        parsed->hasFusedCarLampData = count >= FusedPayloadValueCount;
+        return true;
     }
 
+    HeaderMap identity;
+    identity.fill(-1);
     for (int i = 0; i < count; ++i)
     {
-        QString cell = cells[i].trimmed();
-        const int equalIndex = cell.indexOf(QLatin1Char('='));
-        if (equalIndex >= 0)
-        {
-            cell = cell.mid(equalIndex + 1).trimmed();
-        }
-        if (!parseDoubleCell(cell, &parsed->values[i + shift]))
-        {
-            if (errorMessage != nullptr)
-            {
-                *errorMessage = QStringLiteral("第 %1 个字段不是有效浮点数。").arg(i);
-            }
-            return false;
-        }
+        identity[i] = i;
     }
-
-    parsed->hasMotionData = count >= MotionPayloadValueCount;
-    parsed->hasFusedCarLampData = count >= FusedPayloadValueCount;
-    return true;
+    return parseCells(cells,
+                      &identity,
+                      count,
+                      fallbackTimestampMs,
+                      1,
+                      parsed,
+                      error,
+                      false);
 }
 
 bool hasVofaTail(const QByteArray& data)
@@ -491,66 +550,67 @@ QByteArray withoutVofaTail(const QByteArray& data)
 bool parseBinaryDatagram(const QByteArray& datagram,
                          double fallbackTimestampMs,
                          ParsedValues* parsed,
-                         QString* errorMessage)
+                         QString* error)
 {
     const QByteArray payload = withoutVofaTail(datagram);
-    const int floatCount = payload.size() / static_cast<int>(sizeof(float));
-    if (payload.size() % static_cast<int>(sizeof(float)) != 0 ||
-        (floatCount != LegacyPayloadValueCount &&
-         floatCount != JustFloatLog::LegacyChannelCount &&
-         floatCount != MotionPayloadValueCount &&
-         floatCount != JustFloatLog::MotionChannelCount &&
-         floatCount != FusedPayloadValueCount &&
-         floatCount != JustFloatLog::ChannelCount))
+    if (payload.size() % static_cast<int>(sizeof(float)) != 0)
     {
-        if (errorMessage != nullptr)
+        if (error != nullptr)
         {
-            *errorMessage = QStringLiteral("二进制长度不匹配：%1 字节。").arg(datagram.size());
+            *error = QStringLiteral("binary payload is not float aligned");
+        }
+        return false;
+    }
+    const int count = payload.size() / static_cast<int>(sizeof(float));
+    if (count != SingleLampRoiPayloadValueCount &&
+        count != JustFloatLog::SingleLampRoiChannelCount &&
+        count != LegacyPayloadValueCount &&
+        count != JustFloatLog::LegacyChannelCount &&
+        count != MotionPayloadValueCount &&
+        count != JustFloatLog::MotionChannelCount &&
+        count != FusedPayloadValueCount &&
+        count != JustFloatLog::LegacyFusedChannelCount &&
+        count != JustFloatLog::DualLampFusionChannelCount)
+    {
+        if (error != nullptr)
+        {
+            *error = QStringLiteral("unsupported binary float count %1").arg(count);
         }
         return false;
     }
 
-    *parsed = ParsedValues{};
-    const bool payloadWithoutRowTime = floatCount == LegacyPayloadValueCount ||
-                                       floatCount == MotionPayloadValueCount ||
-                                       floatCount == FusedPayloadValueCount;
-    const int shift = payloadWithoutRowTime ? 1 : 0;
-    if (payloadWithoutRowTime)
+    QStringList values;
+    values.reserve(count);
+    for (int i = 0; i < count; ++i)
     {
-        parsed->values[0] = fallbackTimestampMs;
-    }
-
-    for (int i = 0; i < floatCount; ++i)
-    {
-        const uchar* source = reinterpret_cast<const uchar*>(payload.constData() + i * sizeof(float));
+        const uchar* source = reinterpret_cast<const uchar*>(payload.constData() +
+                                                              i * sizeof(float));
         const quint32 bits = qFromLittleEndian<quint32>(source);
         float value = 0.0f;
         std::memcpy(&value, &bits, sizeof(value));
-        parsed->values[i + shift] = static_cast<double>(value);
+        values.push_back(QString::number(value, 'g', 9));
     }
-    parsed->hasMotionData = floatCount >= MotionPayloadValueCount;
-    parsed->hasFusedCarLampData = floatCount >= FusedPayloadValueCount;
-    return true;
+    return parseSequentialDatagramValues(values, fallbackTimestampMs, parsed, error);
 }
 
 bool parseTextDatagram(const QByteArray& datagram,
                        double fallbackTimestampMs,
                        ParsedValues* parsed,
-                       QString* errorMessage)
+                       QString* error)
 {
     const QString text = QString::fromUtf8(withoutVofaTail(datagram)).trimmed();
     if (text.isEmpty())
     {
-        if (errorMessage != nullptr)
+        if (error != nullptr)
         {
-            *errorMessage = QStringLiteral("文本 UDP 数据为空。");
+            *error = QStringLiteral("empty text datagram");
         }
         return false;
     }
-    return parseSequentialDatagramValues(splitCsvLine(text), fallbackTimestampMs, parsed, errorMessage);
+    return parseSequentialDatagramValues(splitCsvLine(text), fallbackTimestampMs, parsed, error);
 }
 
-JustFloatBeacon makeBeacon(const ValueArray& values, int offset)
+JustFloatBeacon makeLegacyBeacon(const ValueArray& values, int offset)
 {
     JustFloatBeacon beacon;
     beacon.x = static_cast<float>(values[offset]);
@@ -562,7 +622,7 @@ JustFloatBeacon makeBeacon(const ValueArray& values, int offset)
     return beacon;
 }
 
-JustFloatCarLamp makeCarLamp(const ValueArray& values, int offset)
+JustFloatCarLamp makeLegacyLamp(const ValueArray& values, int offset)
 {
     JustFloatCarLamp lamp;
     lamp.cx = static_cast<float>(values[offset]);
@@ -578,20 +638,235 @@ JustFloatCarLamp makeCarLamp(const ValueArray& values, int offset)
     return lamp;
 }
 
+JustFloatMappedPoint makeMappedPoint(const ValueArray& values, int offset)
+{
+    JustFloatMappedPoint point;
+    point.x = static_cast<float>(values[offset]);
+    point.y = static_cast<float>(values[offset + 1]);
+    point.valid = !isInvalidValue(values[offset]) && !isInvalidValue(values[offset + 1]);
+    return point;
+}
+
+JustFloatMappedCarLamp makeMappedLamp(const ValueArray& values, int offset, bool measured)
+{
+    JustFloatMappedCarLamp lamp;
+    lamp.cx = static_cast<float>(values[offset]);
+    lamp.cy = static_cast<float>(values[offset + 1]);
+    lamp.angle = static_cast<float>(values[offset + 2]);
+    lamp.valid = !isInvalidValue(values[offset]) &&
+                 !isInvalidValue(values[offset + 1]) &&
+                 !isInvalidValue(values[offset + 2]);
+    lamp.measured = measured;
+    return lamp;
+}
+
+quint32 packed24(double value)
+{
+    if (!std::isfinite(value) || value <= 0.0)
+    {
+        return 0U;
+    }
+    const double rounded = std::floor(value + 0.5);
+    return static_cast<quint32>(qBound(0.0,
+                                      rounded,
+                                      static_cast<double>(Packed24Maximum)));
+}
+
+JustFloatSingleLampShape decodeSingleLampShape(double value)
+{
+    JustFloatSingleLampShape shape;
+    shape.packed = packed24(value);
+    shape.widthCode = static_cast<quint8>(shape.packed & 0x3fU);
+    shape.lengthCode = static_cast<quint8>((shape.packed >> 6U) & 0x7fU);
+    shape.angleCode = static_cast<quint8>((shape.packed >> 13U) & 0x7fU);
+    shape.nearestBeaconDistanceCode =
+        static_cast<quint8>((shape.packed >> 20U) & 0x0fU);
+    shape.valid = shape.packed != 0U;
+    if (shape.valid)
+    {
+        shape.width = static_cast<float>(shape.widthCode) / SingleLampWidthScale;
+        shape.length = static_cast<float>(shape.lengthCode) / SingleLampLengthScale;
+        shape.angle = static_cast<float>(shape.angleCode) * SingleLampAngleStepDeg - 90.0f;
+    }
+    shape.nearestBeaconDistanceValid = shape.valid &&
+                                       shape.nearestBeaconDistanceCode < 15U;
+    if (shape.nearestBeaconDistanceValid)
+    {
+        shape.nearestBeaconDistance =
+            static_cast<float>(shape.nearestBeaconDistanceCode) *
+            SingleLampBeaconDistanceStep;
+    }
+    return shape;
+}
+
+JustFloatSingleLampTrackGeometry decodeSingleLampTrackGeometry(double value)
+{
+    JustFloatSingleLampTrackGeometry geometry;
+    geometry.packed = packed24(value);
+    geometry.valid = (geometry.packed & (1U << 23U)) != 0U;
+    if (geometry.valid)
+    {
+        geometry.centerX = static_cast<float>(geometry.packed & 0x1ffU) - 140.0f;
+        geometry.centerY = static_cast<float>((geometry.packed >> 9U) & 0xffU) - 110.0f;
+        geometry.centerRoiHalfSize =
+            static_cast<float>((geometry.packed >> 17U) & 0x3fU);
+    }
+    return geometry;
+}
+
+JustFloatSingleLampCrossCheck decodeSingleLampCrossCheck(double value)
+{
+    JustFloatSingleLampCrossCheck crossCheck;
+    crossCheck.packed = packed24(value);
+    crossCheck.state = static_cast<quint8>(crossCheck.packed & 0x07U);
+    crossCheck.supportCameraMask = static_cast<quint8>((crossCheck.packed >> 3U) & 0x07U);
+    crossCheck.roiValidMask = static_cast<quint8>((crossCheck.packed >> 6U) & 0x07U);
+    crossCheck.roiHitMask = static_cast<quint8>((crossCheck.packed >> 9U) & 0x07U);
+    crossCheck.conflictCameraMask = static_cast<quint8>((crossCheck.packed >> 12U) & 0x07U);
+    crossCheck.projectionEnabled = ((crossCheck.packed >> 15U) & 0x01U) != 0U;
+    crossCheck.fullFrameFallbackMask =
+        static_cast<quint8>((crossCheck.packed >> 16U) & 0x07U);
+    crossCheck.manuallyMarked = ((crossCheck.packed >> 19U) & 0x01U) != 0U;
+    crossCheck.measuredCameraMask =
+        static_cast<quint8>((crossCheck.packed >> 20U) & 0x07U);
+    crossCheck.roiMode = ((crossCheck.packed >> 23U) & 0x01U) != 0U;
+    return crossCheck;
+}
+
+void decodeSingleLampSourceFrames(double value, JustFloatSingleLampRoiFrame* frame)
+{
+    if (frame == nullptr)
+    {
+        return;
+    }
+    frame->frameSequencePacked = packed24(value);
+    for (int camera = 0; camera < 3; ++camera)
+    {
+        const quint8 packedFrame = static_cast<quint8>(
+            (frame->frameSequencePacked >> (camera * 8U)) & 0xffU);
+        frame->sourceFrames[camera].sequenceLow7 = packedFrame & 0x7fU;
+        frame->sourceFrames[camera].valid = (packedFrame & 0x80U) != 0U;
+    }
+}
+
+JustFloatLogRow makeSingleLampRoiRow(const ParsedValues& parsed)
+{
+    JustFloatLogRow row;
+    row.layout = JustFloatLogLayout::SingleLampRoiV1;
+    const ValueArray& values = parsed.values;
+    row.rowTime = values[0];
+    row.roll = static_cast<float>(values[7]);
+    row.pitch = static_cast<float>(values[8]);
+    row.singleLampRoi.heightMm = static_cast<float>(values[9]);
+    row.singleLampRoi.heightValid = !isInvalidValue(values[9]);
+
+    for (int camera = 0; camera < 3; ++camera)
+    {
+        JustFloatCarLamp& lamp = row.cameras[camera].carLamp;
+        lamp.cx = static_cast<float>(values[1 + camera * 2]);
+        lamp.cy = static_cast<float>(values[2 + camera * 2]);
+        row.singleLampRoi.lampShapes[camera] = decodeSingleLampShape(values[10 + camera]);
+        const JustFloatSingleLampShape& shape = row.singleLampRoi.lampShapes[camera];
+        lamp.angle = shape.angle;
+        lamp.width = shape.width;
+        lamp.length = shape.length;
+        lamp.valid = !isInvalidValue(lamp.cx) && !isInvalidValue(lamp.cy) && shape.valid;
+
+        for (int beacon = 0; beacon < 2; ++beacon)
+        {
+            const int offset = 13 + camera * 6 + beacon * 3;
+            row.cameras[camera].beacons[beacon] = makeLegacyBeacon(values, offset);
+        }
+    }
+
+    row.singleLampRoi.trackGeometry = decodeSingleLampTrackGeometry(values[31]);
+    row.singleLampRoi.crossCheck = decodeSingleLampCrossCheck(values[32]);
+    decodeSingleLampSourceFrames(values[33], &row.singleLampRoi);
+    row.singleLampRoi.relativeYawDeg = static_cast<float>(values[34]);
+    row.singleLampRoi.relativeYawValid = !isInvalidValue(values[34]);
+    row.singleLampRoi.maxSkewMs = static_cast<float>(values[35]);
+    row.singleLampRoi.maxSkewValid = !isInvalidValue(values[35]) && values[35] >= 0.0;
+    return row;
+}
+
 JustFloatLogRow makeRow(const ParsedValues& parsed)
 {
-    const ValueArray& values = parsed.values;
+    if (parsed.layout == JustFloatLogLayout::SingleLampRoiV1)
+    {
+        return makeSingleLampRoiRow(parsed);
+    }
     JustFloatLogRow row;
+    row.layout = parsed.layout;
+    const ValueArray& values = parsed.values;
     row.rowTime = values[0];
-    row.cameras[0].beacons[0] = makeBeacon(values, 1);
-    row.cameras[0].beacons[1] = makeBeacon(values, 4);
-    row.cameras[1].beacons[0] = makeBeacon(values, 7);
-    row.cameras[1].beacons[1] = makeBeacon(values, 10);
-    row.cameras[2].beacons[0] = makeBeacon(values, 13);
-    row.cameras[2].beacons[1] = makeBeacon(values, 16);
-    row.cameras[0].carLamp = makeCarLamp(values, 19);
-    row.cameras[1].carLamp = makeCarLamp(values, 24);
-    row.cameras[2].carLamp = makeCarLamp(values, 29);
+
+    if (parsed.layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        row.dualLampFusion.schemaId = static_cast<float>(values[1]);
+        row.dualLampFusion.imageSequence = static_cast<quint32>(qMax(0.0, values[2]));
+        for (int camera = 0; camera < 3; ++camera)
+        {
+            const int base = 3 + camera * 11;
+            JustFloatMappedCameraFrame& target = row.dualLampFusion.cameras[camera];
+            target.measuredMask = static_cast<quint8>(qBound(0,
+                                                              static_cast<int>(std::lround(values[base])),
+                                                              255));
+            target.carLamps[0] = makeMappedLamp(values, base + 1,
+                                                (target.measuredMask & 0x01U) != 0U);
+            target.carLamps[1] = makeMappedLamp(values, base + 4,
+                                                (target.measuredMask & 0x02U) != 0U);
+            target.beacons[0] = makeMappedPoint(values, base + 7);
+            target.beacons[1] = makeMappedPoint(values, base + 9);
+
+            row.cameras[camera].carLamp.cx = target.carLamps[0].cx;
+            row.cameras[camera].carLamp.cy = target.carLamps[0].cy;
+            row.cameras[camera].carLamp.angle = target.carLamps[0].angle;
+            row.cameras[camera].carLamp.width = 1.0f;
+            row.cameras[camera].carLamp.length = 1.0f;
+            row.cameras[camera].carLamp.valid = target.carLamps[0].valid;
+            for (int beacon = 0; beacon < 2; ++beacon)
+            {
+                row.cameras[camera].beacons[beacon].x = target.beacons[beacon].x;
+                row.cameras[camera].beacons[beacon].y = target.beacons[beacon].y;
+                row.cameras[camera].beacons[beacon].area = target.beacons[beacon].valid ? 1.0f : 0.0f;
+                row.cameras[camera].beacons[beacon].valid = target.beacons[beacon].valid;
+            }
+        }
+
+        row.dualLampFusion.control.planMode =
+            static_cast<int>(std::lround(values[36]));
+        row.dualLampFusion.control.car.cx = static_cast<float>(values[37]);
+        row.dualLampFusion.control.car.cy = static_cast<float>(values[38]);
+        row.dualLampFusion.control.car.angle = static_cast<float>(values[39]);
+        row.dualLampFusion.control.car.valid =
+            !isInvalidValue(values[37]) && !isInvalidValue(values[38]) &&
+            !isInvalidValue(values[39]);
+        row.dualLampFusion.control.beacon.x = static_cast<float>(values[40]);
+        row.dualLampFusion.control.beacon.y = static_cast<float>(values[41]);
+        row.dualLampFusion.control.beacon.valid =
+            !isInvalidValue(values[40]) && !isInvalidValue(values[41]);
+        row.dualLampFusion.shadow.confidence =
+            static_cast<int>(std::lround(values[42]));
+        row.dualLampFusion.shadow.cx = static_cast<float>(values[43]);
+        row.dualLampFusion.shadow.cy = static_cast<float>(values[44]);
+        row.dualLampFusion.shadow.axisAngle = static_cast<float>(values[45]);
+        row.dualLampFusion.shadow.valid =
+            !isInvalidValue(values[43]) && !isInvalidValue(values[44]) &&
+            !isInvalidValue(values[45]);
+        row.dualLampFusion.shadow.lamps[0] = makeMappedPoint(values, 46);
+        row.dualLampFusion.shadow.lamps[1] = makeMappedPoint(values, 48);
+        return row;
+    }
+
+    row.cameras[0].beacons[0] = makeLegacyBeacon(values, 1);
+    row.cameras[0].beacons[1] = makeLegacyBeacon(values, 4);
+    row.cameras[1].beacons[0] = makeLegacyBeacon(values, 7);
+    row.cameras[1].beacons[1] = makeLegacyBeacon(values, 10);
+    row.cameras[2].beacons[0] = makeLegacyBeacon(values, 13);
+    row.cameras[2].beacons[1] = makeLegacyBeacon(values, 16);
+    row.cameras[0].carLamp = makeLegacyLamp(values, 19);
+    row.cameras[1].carLamp = makeLegacyLamp(values, 24);
+    row.cameras[2].carLamp = makeLegacyLamp(values, 29);
     row.pitch = static_cast<float>(values[34]);
     row.roll = static_cast<float>(values[35]);
     row.yaw = static_cast<float>(values[36]);
@@ -608,7 +883,7 @@ JustFloatLogRow makeRow(const ParsedValues& parsed)
     row.hasFusedCarLampData = parsed.hasFusedCarLampData;
     if (row.hasFusedCarLampData)
     {
-        row.fusedCarLamp.valid = std::isfinite(values[43]) && values[43] != 0.0;
+        row.fusedCarLamp.valid = !isInvalidValue(values[43]);
         row.fusedCarLamp.cx = static_cast<float>(values[44]);
         row.fusedCarLamp.cy = static_cast<float>(values[45]);
         row.fusedCarLamp.angle = static_cast<float>(values[46]);
@@ -616,51 +891,168 @@ JustFloatLogRow makeRow(const ParsedValues& parsed)
     return row;
 }
 
-QVector<JustFloatChannelDescriptor> makeChannelDescriptors()
+QVector<JustFloatChannelDescriptor> makeLegacyDescriptors()
 {
     QVector<JustFloatChannelDescriptor> descriptors;
-    descriptors.reserve(JustFloatLog::ChannelCount);
-    descriptors.push_back({0, QStringLiteral("时间"), QStringLiteral("I0 时间戳"), QStringLiteral("ms")});
-
-    const QStringList cameraNames = {
-        QStringLiteral("Front"),
-        QStringLiteral("Center"),
-        QStringLiteral("Back")
-    };
+    descriptors.reserve(JustFloatLog::LegacyFusedChannelCount);
+    descriptors.push_back({0, QStringLiteral("Time"), QStringLiteral("I0 Timestamp"), QStringLiteral("ms")});
+    const QStringList cameraNames = {QStringLiteral("Front"), QStringLiteral("Center"), QStringLiteral("Back")};
     int index = 1;
-    for (int camera = 0; camera < 3; ++camera)
+    for (const QString& camera : cameraNames)
     {
-        const QString& group = cameraNames[camera];
         for (int beacon = 0; beacon < 2; ++beacon)
         {
-            descriptors.push_back({index++, group, QStringLiteral("信标 %1 X").arg(beacon), QStringLiteral("px")});
-            descriptors.push_back({index++, group, QStringLiteral("信标 %1 Y").arg(beacon), QStringLiteral("px")});
-            descriptors.push_back({index++, group, QStringLiteral("信标 %1 面积").arg(beacon), QStringLiteral("px^2")});
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 X").arg(beacon), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 Y").arg(beacon), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 Area").arg(beacon), QStringLiteral("px^2")});
         }
     }
-    for (int camera = 0; camera < 3; ++camera)
+    for (const QString& camera : cameraNames)
     {
-        const QString& group = cameraNames[camera];
-        descriptors.push_back({index++, group, QStringLiteral("车灯中心 X"), QStringLiteral("px")});
-        descriptors.push_back({index++, group, QStringLiteral("车灯中心 Y"), QStringLiteral("px")});
-        descriptors.push_back({index++, group, QStringLiteral("车灯角度"), QStringLiteral("deg")});
-        descriptors.push_back({index++, group, QStringLiteral("车灯宽度"), QStringLiteral("px")});
-        descriptors.push_back({index++, group, QStringLiteral("车灯长度"), QStringLiteral("px")});
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp X"), QStringLiteral("px")});
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp Y"), QStringLiteral("px")});
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp angle"), QStringLiteral("deg")});
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp width"), QStringLiteral("px")});
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp length"), QStringLiteral("px")});
     }
-    descriptors.push_back({index++, QStringLiteral("姿态"), QStringLiteral("Pitch"), QStringLiteral("deg")});
-    descriptors.push_back({index++, QStringLiteral("姿态"), QStringLiteral("Roll"), QStringLiteral("deg")});
-    descriptors.push_back({index++, QStringLiteral("姿态"), QStringLiteral("Yaw"), QStringLiteral("deg")});
-    descriptors.push_back({index++, QStringLiteral("时间"), QStringLiteral("同步时间"), QStringLiteral("ms")});
-    descriptors.push_back({index++, QStringLiteral("车辆运动"), QStringLiteral("实际横移速度 X"), QStringLiteral("m/s")});
-    descriptors.push_back({index++, QStringLiteral("车辆运动"), QStringLiteral("实际前进速度 Y"), QStringLiteral("m/s")});
-    descriptors.push_back({index++, QStringLiteral("车辆运动"), QStringLiteral("车辆 Yaw"), QStringLiteral("deg")});
-    descriptors.push_back({index++, QStringLiteral("车辆运动"), QStringLiteral("目标前进速度"), QStringLiteral("m/s")});
-    descriptors.push_back({index++, QStringLiteral("车辆运动"), QStringLiteral("目标横移速度"), QStringLiteral("m/s")});
-    descriptors.push_back({index++, QStringLiteral("融合车灯"), QStringLiteral("有效"), QString()});
-    descriptors.push_back({index++, QStringLiteral("融合车灯"), QStringLiteral("中心 X"), QStringLiteral("px")});
-    descriptors.push_back({index++, QStringLiteral("融合车灯"), QStringLiteral("中心 Y"), QStringLiteral("px")});
-    descriptors.push_back({index, QStringLiteral("融合车灯"), QStringLiteral("角度"), QStringLiteral("deg")});
+    descriptors.push_back({34, QStringLiteral("Attitude"), QStringLiteral("Pitch"), QStringLiteral("deg")});
+    descriptors.push_back({35, QStringLiteral("Attitude"), QStringLiteral("Roll"), QStringLiteral("deg")});
+    descriptors.push_back({36, QStringLiteral("Attitude"), QStringLiteral("Yaw"), QStringLiteral("deg")});
+    descriptors.push_back({37, QStringLiteral("Time"), QStringLiteral("Sync time"), QStringLiteral("ms")});
+    descriptors.push_back({38, QStringLiteral("Motion"), QStringLiteral("Actual velocity X"), QStringLiteral("m/s")});
+    descriptors.push_back({39, QStringLiteral("Motion"), QStringLiteral("Actual velocity Y"), QStringLiteral("m/s")});
+    descriptors.push_back({40, QStringLiteral("Motion"), QStringLiteral("Vehicle Yaw"), QStringLiteral("deg")});
+    descriptors.push_back({41, QStringLiteral("Motion"), QStringLiteral("Target forward"), QStringLiteral("m/s")});
+    descriptors.push_back({42, QStringLiteral("Motion"), QStringLiteral("Target strafe"), QStringLiteral("m/s")});
+    descriptors.push_back({43,
+                           QStringLiteral("Fused lamp"),
+                           QString::fromUtf8("\xE6\x9C\x89\xE6\x95\x88"),
+                           QString()});
+    descriptors.push_back({44, QStringLiteral("Fused lamp"), QStringLiteral("Center X"), QStringLiteral("px")});
+    descriptors.push_back({45, QStringLiteral("Fused lamp"), QStringLiteral("Center Y"), QStringLiteral("px")});
+    descriptors.push_back({46, QStringLiteral("Fused lamp"), QStringLiteral("Angle"), QStringLiteral("deg")});
+    descriptors.push_back({47, QStringLiteral("Reserved"), QStringLiteral("I47"), QString()});
+    descriptors.push_back({48, QStringLiteral("Reserved"), QStringLiteral("I48"), QString()});
+    descriptors.push_back({49, QStringLiteral("Reserved"), QStringLiteral("I49"), QString()});
     return descriptors;
+}
+
+QVector<JustFloatChannelDescriptor> makeSingleLampRoiDescriptors()
+{
+    QVector<JustFloatChannelDescriptor> descriptors;
+    descriptors.reserve(JustFloatLog::SingleLampRoiChannelCount);
+    descriptors.push_back({0, QStringLiteral("Time"), QStringLiteral("Timestamp"), QStringLiteral("ms")});
+    const QStringList cameras = {QStringLiteral("Front"), QStringLiteral("Center"), QStringLiteral("Back")};
+    int index = 1;
+    for (const QString& camera : cameras)
+    {
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp X"), QStringLiteral("px")});
+        descriptors.push_back({index++, camera, QStringLiteral("Car lamp Y"), QStringLiteral("px")});
+    }
+    descriptors.push_back({7, QStringLiteral("Attitude"), QStringLiteral("Roll"), QStringLiteral("deg")});
+    descriptors.push_back({8, QStringLiteral("Attitude"), QStringLiteral("Pitch"), QStringLiteral("deg")});
+    descriptors.push_back({9, QStringLiteral("Attitude"), QStringLiteral("Height"), QStringLiteral("mm")});
+    for (int camera = 0; camera < cameras.size(); ++camera)
+    {
+        descriptors.push_back({10 + camera,
+                               cameras[camera],
+                               QStringLiteral("Car lamp shape packed"),
+                               QString()});
+    }
+    index = 13;
+    for (const QString& camera : cameras)
+    {
+        for (int beacon = 0; beacon < 2; ++beacon)
+        {
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 X").arg(beacon), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 Y").arg(beacon), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 Area").arg(beacon), QStringLiteral("px^2")});
+        }
+    }
+    descriptors.push_back({31, QStringLiteral("ROI track"), QStringLiteral("Track geometry packed"), QString()});
+    descriptors.push_back({32, QStringLiteral("ROI track"), QStringLiteral("Cross-check packed"), QString()});
+    descriptors.push_back({33, QStringLiteral("Frame sync"), QStringLiteral("Source frames packed"), QString()});
+    descriptors.push_back({34, QStringLiteral("Attitude"), QStringLiteral("Relative yaw"), QStringLiteral("deg")});
+    descriptors.push_back({35, QStringLiteral("Frame sync"), QStringLiteral("Maximum skew"), QStringLiteral("ms")});
+    return descriptors;
+}
+
+QVector<JustFloatChannelDescriptor> makeDualDescriptors()
+{
+    QVector<JustFloatChannelDescriptor> descriptors;
+    descriptors.reserve(JustFloatLog::DualLampFusionChannelCount);
+    descriptors.push_back({0, QStringLiteral("DualLampFusionV1"), QStringLiteral("Timestamp"), QStringLiteral("ms")});
+    descriptors.push_back({1, QStringLiteral("DualLampFusionV1"), QStringLiteral("Schema"), QString()});
+    descriptors.push_back({2, QStringLiteral("DualLampFusionV1"), QStringLiteral("Image sequence"), QString()});
+    const QStringList cameras = {QStringLiteral("Front mapped"), QStringLiteral("Center observed"), QStringLiteral("Back mapped")};
+    int index = 3;
+    for (const QString& camera : cameras)
+    {
+        descriptors.push_back({index++, camera, QStringLiteral("Measured mask"), QString()});
+        for (int slot = 0; slot < 2; ++slot)
+        {
+            descriptors.push_back({index++, camera, QStringLiteral("Car lamp %1 X").arg(slot), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Car lamp %1 Y").arg(slot), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Car lamp %1 angle").arg(slot), QStringLiteral("deg")});
+        }
+        for (int beacon = 0; beacon < 2; ++beacon)
+        {
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 X").arg(beacon), QStringLiteral("px")});
+            descriptors.push_back({index++, camera, QStringLiteral("Beacon %1 Y").arg(beacon), QStringLiteral("px")});
+        }
+    }
+    descriptors.push_back({36, QStringLiteral("Control"), QStringLiteral("Plan mode"), QString()});
+    descriptors.push_back({37, QStringLiteral("Control"), QStringLiteral("Car X"), QStringLiteral("px")});
+    descriptors.push_back({38, QStringLiteral("Control"), QStringLiteral("Car Y"), QStringLiteral("px")});
+    descriptors.push_back({39, QStringLiteral("Control"), QStringLiteral("Car angle"), QStringLiteral("deg")});
+    descriptors.push_back({40, QStringLiteral("Control"), QStringLiteral("Beacon X"), QStringLiteral("px")});
+    descriptors.push_back({41, QStringLiteral("Control"), QStringLiteral("Beacon Y"), QStringLiteral("px")});
+    descriptors.push_back({42, QStringLiteral("Shadow fusion"), QStringLiteral("Confidence"), QString()});
+    descriptors.push_back({43, QStringLiteral("Shadow fusion"), QStringLiteral("Center X"), QStringLiteral("px")});
+    descriptors.push_back({44, QStringLiteral("Shadow fusion"), QStringLiteral("Center Y"), QStringLiteral("px")});
+    descriptors.push_back({45, QStringLiteral("Shadow fusion"), QStringLiteral("Axis angle"), QStringLiteral("deg")});
+    descriptors.push_back({46, QStringLiteral("Shadow fusion"), QStringLiteral("Lamp 0 X"), QStringLiteral("px")});
+    descriptors.push_back({47, QStringLiteral("Shadow fusion"), QStringLiteral("Lamp 0 Y"), QStringLiteral("px")});
+    descriptors.push_back({48, QStringLiteral("Shadow fusion"), QStringLiteral("Lamp 1 X"), QStringLiteral("px")});
+    descriptors.push_back({49, QStringLiteral("Shadow fusion"), QStringLiteral("Lamp 1 Y"), QStringLiteral("px")});
+    return descriptors;
+}
+
+bool parseDatagramValues(const QByteArray& datagram,
+                         double fallbackTimestampMs,
+                         ParsedValues* parsed,
+                         QString* error)
+{
+    const QByteArray payload = withoutVofaTail(datagram);
+    QString textError;
+    QString binaryError;
+    if (payload.contains(','))
+    {
+        if (parseTextDatagram(datagram, fallbackTimestampMs, parsed, &textError))
+        {
+            return true;
+        }
+        if (parseBinaryDatagram(datagram, fallbackTimestampMs, parsed, &binaryError))
+        {
+            return true;
+        }
+    }
+    else
+    {
+        if (parseBinaryDatagram(datagram, fallbackTimestampMs, parsed, &binaryError))
+        {
+            return true;
+        }
+        if (parseTextDatagram(datagram, fallbackTimestampMs, parsed, &textError))
+        {
+            return true;
+        }
+    }
+    if (error != nullptr)
+    {
+        *error = QStringLiteral("%1; %2").arg(binaryError, textError);
+    }
+    return false;
 }
 }
 
@@ -670,109 +1062,128 @@ bool JustFloatLog::loadCsv(const QString& path, JustFloatLog* output, QString* e
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("输出对象为空。");
+            *errorMessage = QStringLiteral("output is null");
         }
         return false;
     }
-
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("无法打开 CSV：%1").arg(file.errorString());
+            *errorMessage = file.errorString();
         }
         return false;
     }
-
     QTextStream stream(&file);
-    QString firstLine;
-    int lineNumber = 0;
-    while (!stream.atEnd())
-    {
-        firstLine = stream.readLine();
-        ++lineNumber;
-        if (!firstLine.trimmed().isEmpty())
-        {
-            break;
-        }
-    }
-
-    if (firstLine.trimmed().isEmpty())
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("CSV 为空。");
-        }
-        return false;
-    }
-
-    const QStringList firstCells = splitCsvLine(firstLine);
-    HeaderMap map;
-    bool hasMotionColumns = false;
-    bool hasFusedCarLampColumns = false;
-    const bool hasHeader = looksLikeJustFloatHeader(firstCells);
-    QVector<JustFloatLogRow> rows;
-
-    if (hasHeader)
-    {
-        if (!buildHeaderMap(firstCells,
-                            &map,
-                            &hasMotionColumns,
-                            &hasFusedCarLampColumns,
-                            errorMessage))
-        {
-            return false;
-        }
-    }
-    else
-    {
-        ParsedValues parsed;
-        if (!parseSequentialCsvValues(firstCells, lineNumber, &parsed, errorMessage))
-        {
-            return false;
-        }
-        rows.push_back(makeRow(parsed));
-    }
-
+    QStringList lines;
     while (!stream.atEnd())
     {
         const QString line = stream.readLine();
-        ++lineNumber;
-        if (line.trimmed().isEmpty())
+        if (!line.trimmed().isEmpty())
         {
-            continue;
+            lines.push_back(line);
         }
-
-        ParsedValues parsed;
-        const QStringList cells = splitCsvLine(line);
-        const bool ok = hasHeader
-                            ? parseMappedValues(cells,
-                                                map,
-                                                hasMotionColumns,
-                                                hasFusedCarLampColumns,
-                                                lineNumber,
-                                                &parsed,
-                                                errorMessage)
-                            : parseSequentialCsvValues(cells, lineNumber, &parsed, errorMessage);
-        if (!ok)
+    }
+    if (lines.isEmpty())
+    {
+        if (errorMessage != nullptr)
         {
+            *errorMessage = QStringLiteral("CSV is empty");
+        }
+        return false;
+    }
+
+    const QStringList firstCells = splitCsvLine(lines.front());
+    HeaderMap headerMap;
+    int declaredCount = 0;
+    const bool hasHeader = looksLikeHeader(firstCells);
+    const bool headerRequiresDual = hasHeader && firstCells.size() > 1 &&
+                                    firstCells[1].contains(QStringLiteral("Schema"),
+                                                           Qt::CaseInsensitive);
+    if (hasHeader && !parseHeader(firstCells, &headerMap, &declaredCount, errorMessage))
+    {
+        return false;
+    }
+
+    QVector<JustFloatLogRow> rows;
+    rows.reserve(lines.size());
+    JustFloatLogLayout detectedLayout = JustFloatLogLayout::Legacy;
+    bool layoutSet = false;
+    const int firstDataLine = hasHeader ? 1 : 0;
+    for (int lineIndex = firstDataLine; lineIndex < lines.size(); ++lineIndex)
+    {
+        const QStringList cells = splitCsvLine(lines[lineIndex]);
+        const int count = hasHeader ? declaredCount : cells.size();
+        if (!hasHeader && count != JustFloatLog::SingleLampRoiChannelCount &&
+            count != JustFloatLog::LegacyChannelCount &&
+            count != JustFloatLog::MotionChannelCount &&
+            count != JustFloatLog::LegacyFusedChannelCount &&
+            count != JustFloatLog::DualLampFusionChannelCount)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("line %1 has unsupported field count %2")
+                                    .arg(lineIndex + 1)
+                                    .arg(count);
+            }
+            return false;
+        }
+        if (hasHeader && cells.size() < declaredCount)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("line %1 has fewer cells than its header")
+                                    .arg(lineIndex + 1);
+            }
+            return false;
+        }
+        ParsedValues parsed;
+        HeaderMap identity;
+        identity.fill(-1);
+        for (int i = 0; i < count; ++i)
+        {
+            identity[i] = i;
+        }
+        const HeaderMap* map = hasHeader ? &headerMap : &identity;
+        if (!parseCells(cells,
+                        map,
+                        count,
+                        0.0,
+                        lineIndex + 1,
+                        &parsed,
+                        errorMessage,
+                        hasHeader && !headerRequiresDual &&
+                            count == JustFloatLog::DualLampFusionChannelCount))
+        {
+            return false;
+        }
+        if (!layoutSet)
+        {
+            detectedLayout = parsed.layout;
+            layoutSet = true;
+        }
+        else if (detectedLayout != parsed.layout)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("CSV cannot mix JustFloat layouts");
+            }
             return false;
         }
         rows.push_back(makeRow(parsed));
     }
-
     if (rows.isEmpty())
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("CSV 没有数据行。");
+            *errorMessage = QStringLiteral("CSV has no data rows");
         }
         return false;
     }
-
     output->m_sourcePath = QFileInfo(path).absoluteFilePath();
-    output->m_rows = rows;
+    output->m_rows = std::move(rows);
+    output->m_layout = detectedLayout;
     return true;
 }
 
@@ -785,187 +1196,190 @@ bool JustFloatLog::parseDatagram(const QByteArray& datagram,
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("输出对象为空。");
+            *errorMessage = QStringLiteral("output is null");
         }
         return false;
     }
-
     ParsedValues parsed;
-    QString binaryError;
-    QString textError;
-    const bool likelyText = withoutVofaTail(datagram).contains(',');
-    if (likelyText && parseTextDatagram(datagram, fallbackTimestampMs, &parsed, &textError))
+    QString error;
+    if (!parseDatagramValues(datagram, fallbackTimestampMs, &parsed, &error))
     {
-        *output = makeRow(parsed);
-        return true;
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = error;
+        }
+        return false;
     }
-    if (parseBinaryDatagram(datagram, fallbackTimestampMs, &parsed, &binaryError))
-    {
-        *output = makeRow(parsed);
-        return true;
-    }
-    if (!likelyText && parseTextDatagram(datagram, fallbackTimestampMs, &parsed, &textError))
-    {
-        *output = makeRow(parsed);
-        return true;
-    }
-
-    if (errorMessage != nullptr)
-    {
-        *errorMessage = QStringLiteral("%1；%2").arg(binaryError, textError);
-    }
-    return false;
+    *output = makeRow(parsed);
+    return true;
 }
 
 const QVector<JustFloatChannelDescriptor>& JustFloatLog::channelDescriptors()
 {
-    static const QVector<JustFloatChannelDescriptor> descriptors = makeChannelDescriptors();
-    return descriptors;
+    return channelDescriptors(JustFloatLogLayout::Legacy);
+}
+
+const QVector<JustFloatChannelDescriptor>& JustFloatLog::channelDescriptors(JustFloatLogLayout layout)
+{
+    static const QVector<JustFloatChannelDescriptor> legacy = makeLegacyDescriptors();
+    static const QVector<JustFloatChannelDescriptor> singleLampRoi = makeSingleLampRoiDescriptors();
+    static const QVector<JustFloatChannelDescriptor> dual = makeDualDescriptors();
+    if (layout == JustFloatLogLayout::SingleLampRoiV1)
+    {
+        return singleLampRoi;
+    }
+    return layout == JustFloatLogLayout::DualLampFusionV1 ? dual : legacy;
+}
+
+int JustFloatLog::channelCount(JustFloatLogLayout layout)
+{
+    return layout == JustFloatLogLayout::SingleLampRoiV1
+               ? SingleLampRoiChannelCount
+               : ChannelCount;
 }
 
 bool JustFloatLog::channelValue(const JustFloatLogRow& row, int channelIndex, double* value)
 {
-    if (value == nullptr || channelIndex < 0 || channelIndex >= ChannelCount)
+    if (value == nullptr || channelIndex < 0 || channelIndex >= channelCount(row.layout))
     {
         return false;
     }
-
-    if (channelIndex == 0)
+    if (row.layout == JustFloatLogLayout::SingleLampRoiV1)
     {
-        *value = row.rowTime;
-        return true;
+        const JustFloatSingleLampRoiFrame& frame = row.singleLampRoi;
+        if (channelIndex == 0) { *value = row.rowTime; return true; }
+        if (channelIndex >= 1 && channelIndex <= 6)
+        {
+            const int offset = channelIndex - 1;
+            const JustFloatCarLamp& lamp = row.cameras[offset / 2].carLamp;
+            *value = (offset % 2 == 0) ? lamp.cx : lamp.cy;
+            return true;
+        }
+        if (channelIndex == 7) { *value = row.roll; return true; }
+        if (channelIndex == 8) { *value = row.pitch; return true; }
+        if (channelIndex == 9) { *value = frame.heightMm; return true; }
+        if (channelIndex >= 10 && channelIndex <= 12)
+        {
+            *value = frame.lampShapes[channelIndex - 10].packed;
+            return true;
+        }
+        if (channelIndex >= 13 && channelIndex <= 30)
+        {
+            const int offset = channelIndex - 13;
+            const JustFloatBeacon& beacon = row.cameras[offset / 6].beacons[(offset % 6) / 3];
+            const int component = offset % 3;
+            *value = component == 0 ? beacon.x : (component == 1 ? beacon.y : beacon.area);
+            return true;
+        }
+        switch (channelIndex)
+        {
+        case 31: *value = frame.trackGeometry.packed; return true;
+        case 32: *value = frame.crossCheck.packed; return true;
+        case 33: *value = frame.frameSequencePacked; return true;
+        case 34: *value = frame.relativeYawDeg; return true;
+        case 35: *value = frame.maxSkewMs; return true;
+        default: return false;
+        }
     }
+    if (row.layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        const JustFloatDualLampFusionFrame& frame = row.dualLampFusion;
+        if (channelIndex == 0) { *value = row.rowTime; return true; }
+        if (channelIndex == 1) { *value = frame.schemaId; return true; }
+        if (channelIndex == 2) { *value = frame.imageSequence; return true; }
+        if (channelIndex >= 3 && channelIndex <= 35)
+        {
+            const int offset = channelIndex - 3;
+            const int camera = offset / 11;
+            const int field = offset % 11;
+            const JustFloatMappedCameraFrame& cameraFrame = frame.cameras[camera];
+            if (field == 0) { *value = cameraFrame.measuredMask; return true; }
+            if (field >= 1 && field <= 6)
+            {
+                const JustFloatMappedCarLamp& lamp = cameraFrame.carLamps[(field - 1) / 3];
+                const int component = (field - 1) % 3;
+                *value = component == 0 ? lamp.cx : (component == 1 ? lamp.cy : lamp.angle);
+                return true;
+            }
+            const JustFloatMappedPoint& beacon = cameraFrame.beacons[(field - 7) / 2];
+            *value = ((field - 7) % 2 == 0) ? beacon.x : beacon.y;
+            return true;
+        }
+        switch (channelIndex)
+        {
+        case 36: *value = frame.control.planMode; return true;
+        case 37: *value = frame.control.car.cx; return true;
+        case 38: *value = frame.control.car.cy; return true;
+        case 39: *value = frame.control.car.angle; return true;
+        case 40: *value = frame.control.beacon.x; return true;
+        case 41: *value = frame.control.beacon.y; return true;
+        case 42: *value = frame.shadow.confidence; return true;
+        case 43: *value = frame.shadow.cx; return true;
+        case 44: *value = frame.shadow.cy; return true;
+        case 45: *value = frame.shadow.axisAngle; return true;
+        case 46: *value = frame.shadow.lamps[0].x; return true;
+        case 47: *value = frame.shadow.lamps[0].y; return true;
+        case 48: *value = frame.shadow.lamps[1].x; return true;
+        case 49: *value = frame.shadow.lamps[1].y; return true;
+        default: return false;
+        }
+    }
+
+    if (channelIndex == 0) { *value = row.rowTime; return true; }
     if (channelIndex >= 1 && channelIndex <= 18)
     {
         const int offset = channelIndex - 1;
-        const int camera = offset / 6;
-        const int beaconOffset = offset % 6;
-        const JustFloatBeacon& beacon = row.cameras[camera].beacons[beaconOffset / 3];
-        switch (beaconOffset % 3)
-        {
-        case 0:
-            *value = beacon.x;
-            return true;
-        case 1:
-            *value = beacon.y;
-            return true;
-        default:
-            *value = beacon.area;
-            return true;
-        }
+        const JustFloatBeacon& beacon = row.cameras[offset / 6].beacons[(offset % 6) / 3];
+        const int component = offset % 3;
+        *value = component == 0 ? beacon.x : (component == 1 ? beacon.y : beacon.area);
+        return true;
     }
     if (channelIndex >= 19 && channelIndex <= 33)
     {
         const int offset = channelIndex - 19;
         const JustFloatCarLamp& lamp = row.cameras[offset / 5].carLamp;
-        switch (offset % 5)
-        {
-        case 0:
-            *value = lamp.cx;
-            return true;
-        case 1:
-            *value = lamp.cy;
-            return true;
-        case 2:
-            *value = lamp.angle;
-            return true;
-        case 3:
-            *value = lamp.width;
-            return true;
-        default:
-            *value = lamp.length;
-            return true;
-        }
+        const int component = offset % 5;
+        *value = component == 0 ? lamp.cx :
+                 (component == 1 ? lamp.cy :
+                  (component == 2 ? lamp.angle :
+                   (component == 3 ? lamp.width : lamp.length)));
+        return true;
     }
     switch (channelIndex)
     {
-    case 34:
-        *value = row.pitch;
-        return true;
-    case 35:
-        *value = row.roll;
-        return true;
-    case 36:
-        *value = row.yaw;
-        return true;
-    case 37:
-        *value = row.syncTimeMs;
-        return true;
-    case 38:
-        if (!row.hasMotionData)
-        {
-            return false;
-        }
-        *value = row.actualVelocityX;
-        return true;
-    case 39:
-        if (!row.hasMotionData)
-        {
-            return false;
-        }
-        *value = row.actualVelocityY;
-        return true;
-    case 40:
-        if (!row.hasMotionData)
-        {
-            return false;
-        }
-        *value = row.vehicleYawDeg;
-        return true;
-    case 41:
-        if (!row.hasMotionData)
-        {
-            return false;
-        }
-        *value = row.targetForwardMps;
-        return true;
-    case 42:
-        if (!row.hasMotionData)
-        {
-            return false;
-        }
-        *value = row.targetStrafeMps;
-        return true;
-    case 43:
-        if (!row.hasFusedCarLampData)
-        {
-            return false;
-        }
-        *value = row.fusedCarLamp.valid ? 1.0 : 0.0;
-        return true;
-    case 44:
-        if (!row.hasFusedCarLampData)
-        {
-            return false;
-        }
-        *value = row.fusedCarLamp.cx;
-        return true;
-    case 45:
-        if (!row.hasFusedCarLampData)
-        {
-            return false;
-        }
-        *value = row.fusedCarLamp.cy;
-        return true;
-    case 46:
-        if (!row.hasFusedCarLampData)
-        {
-            return false;
-        }
-        *value = row.fusedCarLamp.angle;
-        return true;
-    default:
-        return false;
+    case 34: *value = row.pitch; return true;
+    case 35: *value = row.roll; return true;
+    case 36: *value = row.yaw; return true;
+    case 37: *value = row.syncTimeMs; return true;
+    case 38: if (!row.hasMotionData) return false; *value = row.actualVelocityX; return true;
+    case 39: if (!row.hasMotionData) return false; *value = row.actualVelocityY; return true;
+    case 40: if (!row.hasMotionData) return false; *value = row.vehicleYawDeg; return true;
+    case 41: if (!row.hasMotionData) return false; *value = row.targetForwardMps; return true;
+    case 42: if (!row.hasMotionData) return false; *value = row.targetStrafeMps; return true;
+    case 43: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.valid ? 1.0 : 0.0; return true;
+    case 44: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.cx; return true;
+    case 45: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.cy; return true;
+    case 46: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.angle; return true;
+    default: return false;
     }
 }
 
 QString JustFloatLog::csvHeader()
 {
+    return csvHeader(JustFloatLogLayout::Legacy);
+}
+
+QString JustFloatLog::csvHeader(JustFloatLogLayout layout)
+{
     QStringList fields;
-    fields.reserve(ChannelCount);
-    for (int i = 0; i < ChannelCount; ++i)
+    const int count = channelCount(layout);
+    fields.reserve(count);
+    const auto& descriptors = channelDescriptors(layout);
+    for (int i = 0; i < count; ++i)
     {
-        fields.push_back(QStringLiteral("I%1").arg(i));
+        fields.push_back(layout != JustFloatLogLayout::Legacy
+                             ? QStringLiteral("I%1 %2").arg(i).arg(descriptors[i].name)
+                             : QStringLiteral("I%1").arg(i));
     }
     return fields.join(QLatin1Char(','));
 }
@@ -973,32 +1387,35 @@ QString JustFloatLog::csvHeader()
 QString JustFloatLog::csvRow(const JustFloatLogRow& row)
 {
     QStringList fields;
-    fields.reserve(ChannelCount);
-    for (int i = 0; i < ChannelCount; ++i)
+    const int count = channelCount(row.layout);
+    fields.reserve(count);
+    for (int i = 0; i < count; ++i)
     {
         double value = 0.0;
         if (!channelValue(row, i, &value))
         {
             fields.push_back(QString());
-            continue;
         }
-        const bool doublePrecision = i == 0 || i == 37;
-        fields.push_back(formatDouble(value, doublePrecision ? 17 : 9));
+        else
+        {
+            fields.push_back(formatDouble(value, (i == 0) ? 17 : 9));
+        }
     }
     return fields.join(QLatin1Char(','));
 }
 
-QString JustFloatLog::sourcePath() const
+QString JustFloatLog::layoutName(JustFloatLogLayout layout)
 {
-    return m_sourcePath;
+    if (layout == JustFloatLogLayout::SingleLampRoiV1)
+    {
+        return QStringLiteral("SingleLampRoiV1");
+    }
+    return layout == JustFloatLogLayout::DualLampFusionV1
+               ? QStringLiteral("DualLampFusionV1")
+               : QStringLiteral("Legacy");
 }
 
-int JustFloatLog::rowCount() const
-{
-    return m_rows.size();
-}
-
-const JustFloatLogRow& JustFloatLog::rowAt(int index) const
-{
-    return m_rows[index];
-}
+QString JustFloatLog::sourcePath() const { return m_sourcePath; }
+int JustFloatLog::rowCount() const { return m_rows.size(); }
+const JustFloatLogRow& JustFloatLog::rowAt(int index) const { return m_rows[index]; }
+JustFloatLogLayout JustFloatLog::layout() const { return m_layout; }

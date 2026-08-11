@@ -1,10 +1,12 @@
 #include "HorizonCalibration.h"
 #include "HorizonCalibrationRecorder.h"
 #include "HorizonLineGeometry.h"
+#include "ImageFrameSidecar.h"
 #include "DownGroundRangeCalibration.h"
 #include "VideoReader.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -124,6 +126,7 @@ private slots:
     void predictsAndReloadsDownBoundary();
     void downFitKeepsCoverageDraftNonExportable();
     void recordsPairedFrames();
+    void recordsLegacyV2WithoutSyncSidecar();
 };
 
 void HorizonCalibrationTests::clipsInfiniteLine()
@@ -541,6 +544,7 @@ void HorizonCalibrationTests::recordsPairedFrames()
     config.imageSize = QSize(188, 120);
     config.cameraId = HorizonCameraDown;
     config.sourceCameraId = HorizonCameraFront;
+    config.bimgProtocolVersion = 3U;
     QString error;
     QVERIFY2(recorder.begin(config, &error), qPrintable(error));
     for (int index = 0; index < 3; ++index)
@@ -552,6 +556,13 @@ void HorizonCalibrationTests::recordsPairedFrames()
         frame.hostTimeMs = 1000 + index * 20;
         frame.cameraId = HorizonCameraDown;
         frame.sourceCameraId = HorizonCameraFront;
+        frame.bimgProtocolVersion = 3U;
+        frame.sourceFrameSequence = 500U + (quint32)index;
+        frame.captureTimeMs = 2000U + (quint32)index * 20U;
+        frame.sourceFrameCameraId = 0U;
+        frame.physicalBoardId = 0U;
+        frame.sourceFrameValid = true;
+        frame.captureTimeValid = index != 1;
         frame.rollDeg = index + 0.25;
         frame.pitchDeg = -index - 0.5;
         frame.heightMm = 900.0 + index * 25.0;
@@ -571,6 +582,7 @@ void HorizonCalibrationTests::recordsPairedFrames()
     QCOMPARE(session.frames[2].bimgSequence, 102U);
     QCOMPARE(session.cameraId, HorizonCameraDown);
     QCOMPARE(session.sourceCameraId, HorizonCameraFront);
+    QCOMPARE(session.bimgProtocolVersion, 3);
     QCOMPARE(session.frames[1].cameraId, HorizonCameraDown);
     QCOMPARE(session.frames[1].sourceCameraId, HorizonCameraFront);
     QCOMPARE(session.frames[1].rollDeg, 1.25);
@@ -586,11 +598,71 @@ void HorizonCalibrationTests::recordsPairedFrames()
     QVERIFY(json.open(QIODevice::ReadOnly));
     const QJsonObject root = QJsonDocument::fromJson(json.readAll()).object();
     QCOMPARE(root.value(QStringLiteral("version")).toInt(), 4);
+    QCOMPARE(root.value(QStringLiteral("bimg_protocol_version")).toInt(), 3);
     QVERIFY(root.value(QStringLiteral("height_recorded")).toBool());
     QCOMPARE(root.value(QStringLiteral("height_unit")).toString(), QStringLiteral("mm"));
     VideoReader reader;
     QVERIFY2(reader.open(config.videoPath, &error), qPrintable(error));
     QCOMPARE(reader.frameCount(), 3);
+
+    QVector<ImageFrameSidecarRecord> sidecar;
+    QVERIFY2(loadImageFrameSidecar(imageFrameSidecarPathForVideo(config.videoPath),
+                                   &sidecar,
+                                   &error),
+             qPrintable(error));
+    QCOMPARE(sidecar.size(), reader.frameCount());
+    QCOMPARE(sidecar[0].videoFrameIndex, 0U);
+    QCOMPARE(sidecar[2].bimgSequence, 102U);
+    QCOMPARE(sidecar[2].sourceFrameSequence, 502U);
+    QCOMPARE(sidecar[2].captureTimeMs, 2040U);
+    QVERIFY(sidecar[0].sourceFrameValid);
+    QVERIFY(sidecar[0].captureTimeValid);
+    QVERIFY(!sidecar[1].captureTimeValid);
+    QCOMPARE(sidecar[0].sourceCameraId, 0U);
+    QCOMPARE(sidecar[0].physicalBoardId, 0U);
+}
+
+void HorizonCalibrationTests::recordsLegacyV2WithoutSyncSidecar()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString base = directory.filePath(QStringLiteral("legacy-v2"));
+    HorizonCalibrationRecorder recorder;
+    QSignalSpy finishedSpy(&recorder, &HorizonCalibrationRecorder::recordingFinished);
+    QSignalSpy failedSpy(&recorder, &HorizonCalibrationRecorder::recordingFailed);
+    HorizonCalibrationRecorderConfig config;
+    config.sessionPath = base + QStringLiteral(".hcal.json");
+    config.videoPath = base + QStringLiteral(".avi");
+    config.csvPath = base + QStringLiteral(".hcal.csv");
+    config.imageSize = QSize(188, 120);
+    config.cameraId = HorizonCameraFront;
+    config.sourceCameraId = HorizonCameraFront;
+    config.bimgProtocolVersion = 2U;
+    QString error;
+    QVERIFY2(recorder.begin(config, &error), qPrintable(error));
+
+    HorizonCalibrationRecorderFrame frame;
+    frame.image = QImage(config.imageSize, QImage::Format_Grayscale8);
+    frame.image.fill(80);
+    frame.bimgSequence = 10U;
+    frame.hostTimeMs = 1000;
+    frame.cameraId = HorizonCameraFront;
+    frame.sourceCameraId = HorizonCameraFront;
+    frame.bimgProtocolVersion = 2U;
+    frame.attitudeValid = true;
+    frame.heightValid = true;
+    frame.heightMm = 900.0;
+    QVERIFY(recorder.enqueue(frame));
+    recorder.finish();
+    QTRY_VERIFY_WITH_TIMEOUT(finishedSpy.count() + failedSpy.count() > 0, 20000);
+    QVERIFY2(failedSpy.isEmpty(),
+             failedSpy.isEmpty() ? "" : qPrintable(failedSpy.first().first().toString()));
+    QVERIFY(!QFileInfo::exists(imageFrameSidecarPathForVideo(config.videoPath)));
+
+    HorizonCalibrationSession session;
+    QVERIFY2(HorizonCalibration::loadSession(config.sessionPath, &session, &error),
+             qPrintable(error));
+    QCOMPARE(session.bimgProtocolVersion, 2);
 }
 
 QTEST_MAIN(HorizonCalibrationTests)

@@ -72,6 +72,7 @@ private slots:
     void openVideo();
     void configureTcpReceiver();
     void openJustFloatLogWindow();
+    void openImageLogReviewWindow();
     void openHorizonCalibrationWindow();
     void openBeaconLabelWindow();
     void saveAnnotation();
@@ -209,6 +210,8 @@ private:
     bool loadProject();
     QString projectPathForVideo(const QString& videoPath) const;
     QString viewMode() const;
+    CarLampMode carLampMode() const;
+    void applyCarLampMode(CarLampMode mode, bool rebuildCurrentFrame);
     QString defaultOutputPath(const QString& suffix) const;
     double frameTime(int frame) const;
 
@@ -234,6 +237,7 @@ private:
     QSpinBox* m_frameSpin = nullptr;
     QDoubleSpinBox* m_timeSpin = nullptr;
     QComboBox* m_viewModeCombo = nullptr;
+    QComboBox* m_carLampModeCombo = nullptr;
     QComboBox* m_speedCombo = nullptr;
     QCheckBox* m_autoPauseEnableCheck = nullptr;
     QCheckBox* m_autoPauseJumpCheck = nullptr;
@@ -247,6 +251,7 @@ private:
     bool m_globalPlaying = false;
     double m_globalUsedFps = 50.0;
     double m_globalPlaybackSpeed = 1.0;
+    CarLampMode m_carLampMode = CarLampMode::Single;
     QImage m_liveFrame;
     QString m_livePeerName;
     QString m_liveSaveDir;

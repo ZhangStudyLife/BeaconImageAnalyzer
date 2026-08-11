@@ -33,8 +33,6 @@
 
 #include <QtConcurrent>
 
-#include <opencv2/imgproc.hpp>
-
 #include <cmath>
 #include <limits>
 
@@ -119,19 +117,6 @@ bool frameHeight(const BimgImageFrame& frame, double* heightMm, bool* valid)
         return true;
     }
     return false;
-}
-
-cv::Mat qImageToBgrMat(const QImage& image)
-{
-    const QImage rgb = image.convertToFormat(QImage::Format_RGB888);
-    cv::Mat rgbMat(rgb.height(),
-                   rgb.width(),
-                   CV_8UC3,
-                   const_cast<uchar*>(rgb.bits()),
-                   (size_t)rgb.bytesPerLine());
-    cv::Mat bgr;
-    cv::cvtColor(rgbMat, bgr, cv::COLOR_RGB2BGR);
-    return bgr;
 }
 
 QString streamModeName(quint8 mode)
@@ -284,6 +269,11 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     m_viewModeCombo = new QComboBox(this);
     m_viewModeCombo->addItem(QStringLiteral("原图"), QStringLiteral("original"));
     m_viewModeCombo->addItem(QStringLiteral("二值图"), QStringLiteral("binary"));
+    m_carLampModeCombo = new QComboBox(this);
+    m_carLampModeCombo->addItem(
+        QStringLiteral("单车灯"), static_cast<int>(CarLampMode::Single));
+    m_carLampModeCombo->addItem(
+        QStringLiteral("双车灯"), static_cast<int>(CarLampMode::Dual));
     m_enableInstanceCheck = new QCheckBox(QStringLiteral("启用实例"), this);
     m_instanceCombo = new QComboBox(this);
     m_overlayCheck = new QCheckBox(QStringLiteral("检测覆盖"), this);
@@ -299,6 +289,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
     controls->addWidget(m_diagnosticButton);
     controls->addSpacing(12);
     controls->addWidget(m_viewModeCombo);
+    controls->addWidget(m_carLampModeCombo);
     controls->addWidget(m_enableInstanceCheck);
     controls->addWidget(m_instanceCombo);
     controls->addWidget(m_overlayCheck);
@@ -372,13 +363,15 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
                 QMessageBox::critical(this, QStringLiteral("标定录像失败"), message);
             });
     connect(m_viewModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &TcpImageWindow::render);
+    connect(m_carLampModeCombo,
+            qOverload<int>(&QComboBox::currentIndexChanged),
+            this,
+            [this]() { applyCarLampMode(carLampMode()); });
     connect(m_enableInstanceCheck, &QCheckBox::toggled, this, [this]() {
-        processCurrentFrame();
-        render();
+        applyCarLampMode(m_carLampMode);
     });
     connect(m_instanceCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-        processCurrentFrame();
-        render();
+        applyCarLampMode(m_carLampMode);
     });
     connect(m_overlayCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_showOverlay = checked;
@@ -423,7 +416,7 @@ TcpImageWindow::TcpImageWindow(QWidget* parent)
 TcpImageWindow::~TcpImageWindow()
 {
     m_calibrationRecorder->finish();
-    stopRecording();
+    stopRecording(false);
     stopListening();
 }
 
@@ -600,7 +593,7 @@ void TcpImageWindow::readSocketData(QTcpSocket* socket)
     }
     for (const BimgImageFrame& frame : batch.frames)
     {
-        setFrame(frame, peerName);
+        setFrame(frame, peerName, QDateTime::currentMSecsSinceEpoch());
     }
     if (batch.isEmpty())
     {
@@ -639,7 +632,9 @@ void TcpImageWindow::removeSocket(QTcpSocket* socket)
     updateStatus(m_result);
 }
 
-void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerName)
+void TcpImageWindow::setFrame(const BimgImageFrame& frame,
+                              const QString& peerName,
+                              qint64 hostTimeMs)
 {
     if (frame.image.isNull())
     {
@@ -652,6 +647,7 @@ void TcpImageWindow::setFrame(const BimgImageFrame& frame, const QString& peerNa
     m_lastReceivedFrame = frame;
     m_lastReceivedGrayImage = gray;
     appendCalibrationFrame(frame, gray);
+    appendRecordingFrame(frame, gray, hostTimeMs);
     if (frame.protocol == ImageFrameProtocol::Bimg && frame.streamMode == 0U)
     {
         m_recentRawFrames.push_back(gray);
@@ -705,6 +701,7 @@ void TcpImageWindow::processCurrentFrame()
         AlgorithmRunner* runner = selectedRunner();
         if (runner != nullptr)
         {
+            runner->setCarLampMode(m_carLampMode);
             AlgorithmFrameTelemetry telemetry;
             telemetry.cameraId = m_streamFrame.cameraId;
             telemetry.rollDeg = m_attitudeRollDeg;
@@ -973,9 +970,10 @@ void TcpImageWindow::render()
         m_renderedImage = FrameRenderer::render(displayImage,
                                                 m_result,
                                                 corrections,
-                                                1,
-                                                m_showOverlay,
-                                                &m_horizon);
+                                                 1,
+                                                 m_showOverlay,
+                                                 &m_horizon,
+                                                 m_carLampMode);
     }
     else
     {
@@ -984,7 +982,6 @@ void TcpImageWindow::render()
     m_videoWidget->setFrameGeometry(m_grayImage.size(), 1);
     m_videoWidget->setPixelSourceImage(m_grayImage);
     m_videoWidget->setImage(m_renderedImage);
-    appendRecordingFrame(m_renderedImage);
     updateStatus(m_result);
 }
 
@@ -1188,9 +1185,29 @@ void TcpImageWindow::chooseSaveDirectory()
 
 void TcpImageWindow::startRecording()
 {
-    if (m_grayImage.isNull())
+    if (m_lastReceivedGrayImage.isNull())
     {
         QMessageBox::information(this, QStringLiteral("开始录像"), QStringLiteral("请先等待收到第一帧图像。"));
+        return;
+    }
+    if (m_lastReceivedFrame.protocol != ImageFrameProtocol::Bimg
+        || m_lastReceivedFrame.protocolVersion != 3U
+        || m_lastReceivedFrame.streamMode != 0U)
+    {
+        QMessageBox::information(
+            this,
+            QStringLiteral("开始录像"),
+            QStringLiteral("同步录像只支持 BIMG v3 Raw 灰度帧，请先切换图传模式。"));
+        return;
+    }
+    if ((m_lastReceivedFrame.sourceCameraId != 0U
+         && m_lastReceivedFrame.sourceCameraId != 2U)
+        || m_lastReceivedFrame.physicalBoardId > 1U)
+    {
+        QMessageBox::information(
+            this,
+            QStringLiteral("开始录像"),
+            QStringLiteral("当前 BIMG v3 帧没有有效的前/后摄来源与物理板号，无法建立同步侧车。"));
         return;
     }
 
@@ -1207,44 +1224,196 @@ void TcpImageWindow::startRecording()
         return;
     }
 
-    const cv::Size size(m_renderedImage.width(), m_renderedImage.height());
+    const cv::Size size(m_lastReceivedGrayImage.width(), m_lastReceivedGrayImage.height());
     const int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    if (!m_writer.open(path.toStdString(), fourcc, 50.0, size, true))
+    bool writerOpened = false;
+    QString writerError;
+    try
     {
-        QMessageBox::critical(this, QStringLiteral("开始录像失败"), QStringLiteral("无法创建 AVI 文件。"));
+        writerOpened = m_writer.open(path.toStdString(), fourcc, 50.0, size, false);
+    }
+    catch (const cv::Exception& exception)
+    {
+        writerError = QString::fromLocal8Bit(exception.what());
+    }
+    if (!writerOpened)
+    {
+        const QString detail = writerError.isEmpty()
+            ? QStringLiteral("无法创建 AVI 文件。")
+            : QStringLiteral("无法创建 AVI 文件：%1").arg(writerError);
+        QMessageBox::critical(this, QStringLiteral("开始录像失败"), detail);
         return;
     }
 
+    QString sidecarError;
+    if (!m_recordingSidecar.start(path, &sidecarError))
+    {
+        m_writer.release();
+        QMessageBox::critical(
+            this,
+            QStringLiteral("开始录像失败"),
+            QStringLiteral("无法创建逐帧侧车 %1：%2")
+                .arg(imageFrameSidecarPathForVideo(path), sidecarError));
+        return;
+    }
+
+    m_recordingFrameSize = m_lastReceivedGrayImage.size();
+    m_recordingSourceCameraId = m_lastReceivedFrame.sourceCameraId;
+    m_recordingPhysicalBoardId = m_lastReceivedFrame.physicalBoardId;
     m_recording = true;
     m_recordButton->setText(QStringLiteral("结束录像"));
-    if (!m_renderedImage.isNull())
-    {
-        appendRecordingFrame(m_renderedImage);
-    }
     updateStatus(m_result);
 }
 
-void TcpImageWindow::stopRecording()
+void TcpImageWindow::stopRecording(bool reportError)
 {
+    QString error;
     if (m_writer.isOpened())
     {
-        m_writer.release();
+        try
+        {
+            m_writer.release();
+        }
+        catch (const cv::Exception& exception)
+        {
+            error = QStringLiteral("结束 AVI 写入失败：%1")
+                        .arg(QString::fromLocal8Bit(exception.what()));
+        }
+    }
+    if (m_recordingSidecar.isActive())
+    {
+        QString sidecarError;
+        if (!m_recordingSidecar.finish(&sidecarError) && error.isEmpty())
+        {
+            error = QStringLiteral("结束逐帧侧车写入失败：%1").arg(sidecarError);
+        }
     }
     m_recording = false;
+    m_recordingFrameSize = QSize();
+    m_recordingSourceCameraId = 0xffU;
+    m_recordingPhysicalBoardId = 0xffU;
     if (m_recordButton != nullptr)
     {
         m_recordButton->setText(QStringLiteral("开始录像"));
     }
     updateStatus(m_result);
+    if (reportError && !error.isEmpty())
+    {
+        QMessageBox::critical(this, QStringLiteral("结束录像失败"), error);
+    }
 }
 
-void TcpImageWindow::appendRecordingFrame(const QImage& rendered)
+void TcpImageWindow::failRecording(const QString& message)
 {
-    if (!m_recording || !m_writer.isOpened() || rendered.isNull())
+    stopRecording(false);
+    QMessageBox::critical(this, QStringLiteral("同步录像已停止"), message);
+}
+
+void TcpImageWindow::appendRecordingFrame(const BimgImageFrame& frame,
+                                          const QImage& gray,
+                                          qint64 hostTimeMs)
+{
+    if (!m_recording)
     {
         return;
     }
-    m_writer.write(qImageToBgrMat(rendered));
+    if (frame.protocol != ImageFrameProtocol::Bimg
+        || frame.protocolVersion != 3U
+        || frame.streamMode != 0U)
+    {
+        return;
+    }
+    if (!m_writer.isOpened() || !m_recordingSidecar.isActive())
+    {
+        failRecording(QStringLiteral("AVI 或逐帧侧车写入器意外关闭，已终止录像以避免帧错位。"));
+        return;
+    }
+    if (frame.sourceCameraId != m_recordingSourceCameraId
+        || frame.physicalBoardId != m_recordingPhysicalBoardId)
+    {
+        failRecording(
+            QStringLiteral("录像来源发生变化：期望来源摄像头 %1 / 物理板 %2，实际为来源摄像头 %3 / 物理板 %4。"
+                           "本次录像已结束，请为新的摄像头重新开始录像。")
+                .arg(m_recordingSourceCameraId)
+                .arg(m_recordingPhysicalBoardId)
+                .arg(frame.sourceCameraId)
+                .arg(frame.physicalBoardId));
+        return;
+    }
+    if (gray.isNull() || gray.size() != m_recordingFrameSize)
+    {
+        failRecording(
+            QStringLiteral("录像图像尺寸发生变化：期望 %1x%2，实际 %3x%4，已终止录像。")
+                .arg(m_recordingFrameSize.width())
+                .arg(m_recordingFrameSize.height())
+                .arg(gray.width())
+                .arg(gray.height()));
+        return;
+    }
+
+    ImageFrameSidecarRecord record;
+    record.videoFrameIndex = m_recordingSidecar.rowCount();
+    record.hostTimeMs = hostTimeMs;
+    record.bimgSequence = frame.sequence;
+    record.sourceFrameSequence = frame.sourceFrameSequence;
+    record.captureTimeMs = frame.captureTimeMs;
+    record.sourceFrameValid = frame.sourceFrameValid;
+    record.captureTimeValid = frame.captureTimeValid;
+    record.sourceCameraId = frame.sourceCameraId;
+    record.physicalBoardId = frame.physicalBoardId;
+
+    double rollDeg = 0.0;
+    double pitchDeg = 0.0;
+    bool attitudeValid = false;
+    record.attitudeValid = frameAttitude(frame, &rollDeg, &pitchDeg, &attitudeValid)
+                           && attitudeValid
+                           && rollDeg >= -180.0 && rollDeg <= 180.0
+                           && pitchDeg >= -180.0 && pitchDeg <= 180.0;
+    if (record.attitudeValid)
+    {
+        record.rollDeg = static_cast<float>(rollDeg);
+        record.pitchDeg = static_cast<float>(pitchDeg);
+    }
+
+    double heightMm = 0.0;
+    bool heightValid = false;
+    record.heightValid = frameHeight(frame, &heightMm, &heightValid)
+                         && heightValid && heightMm >= 0.0 && heightMm <= 100000.0;
+    if (record.heightValid)
+    {
+        record.heightMm = static_cast<float>(heightMm);
+    }
+
+    const QImage gray8 = gray.convertToFormat(QImage::Format_Grayscale8);
+    cv::Mat grayMat(gray8.height(),
+                    gray8.width(),
+                    CV_8UC1,
+                    const_cast<uchar*>(gray8.bits()),
+                    static_cast<size_t>(gray8.bytesPerLine()));
+    try
+    {
+        m_writer.write(grayMat);
+    }
+    catch (const cv::Exception& exception)
+    {
+        failRecording(QStringLiteral("写入 AVI 帧失败：%1")
+                          .arg(QString::fromLocal8Bit(exception.what())));
+        return;
+    }
+    if (!m_writer.isOpened())
+    {
+        failRecording(QStringLiteral("AVI 写入器在写帧后关闭，已终止录像以避免帧错位。"));
+        return;
+    }
+
+    QString sidecarError;
+    if (!m_recordingSidecar.append(record, &sidecarError))
+    {
+        failRecording(
+            QStringLiteral("AVI 第 %1 帧已写入，但对应逐帧侧车追加失败：%2。已立即终止录像。")
+                .arg(record.videoFrameIndex)
+                .arg(sidecarError));
+    }
 }
 
 void TcpImageWindow::startCalibrationRecording()
@@ -1257,12 +1426,13 @@ void TcpImageWindow::startCalibrationRecording()
         return;
     }
     if (m_lastReceivedFrame.protocol != ImageFrameProtocol::Bimg
-        || m_lastReceivedFrame.protocolVersion != 2U
+        || (m_lastReceivedFrame.protocolVersion != 2U
+            && m_lastReceivedFrame.protocolVersion != 3U)
         || m_lastReceivedFrame.streamMode != 0U)
     {
         QMessageBox::information(this,
                                  QStringLiteral("开始标定录像"),
-                                 QStringLiteral("标定录像只支持 BIMG v2 的 Raw 图像模式。"));
+                                 QStringLiteral("标定录像只支持 BIMG v2/v3 的 Raw 图像模式。"));
         return;
     }
     if (m_lastReceivedGrayImage.size() != QSize(188, 120))
@@ -1324,6 +1494,7 @@ void TcpImageWindow::startCalibrationRecording()
     config.imageSize = m_lastReceivedGrayImage.size();
     config.cameraId = calibrationCameraId();
     config.sourceCameraId = m_lastReceivedFrame.cameraId;
+    config.bimgProtocolVersion = m_lastReceivedFrame.protocolVersion;
     config.fps = 50.0;
     QString error;
     if (!m_calibrationRecorder->begin(config, &error))
@@ -1353,7 +1524,7 @@ void TcpImageWindow::appendCalibrationFrame(const BimgImageFrame& frame, const Q
 {
     if (!m_calibrationRecorder->isAccepting()
         || frame.protocol != ImageFrameProtocol::Bimg
-        || frame.protocolVersion != 2U
+        || (frame.protocolVersion != 2U && frame.protocolVersion != 3U)
         || frame.streamMode != 0U)
     {
         return;
@@ -1365,6 +1536,13 @@ void TcpImageWindow::appendCalibrationFrame(const BimgImageFrame& frame, const Q
     record.hostTimeMs = QDateTime::currentMSecsSinceEpoch();
     record.cameraId = m_activeCalibrationCameraId;
     record.sourceCameraId = frame.cameraId;
+    record.bimgProtocolVersion = frame.protocolVersion;
+    record.sourceFrameSequence = frame.sourceFrameSequence;
+    record.captureTimeMs = frame.captureTimeMs;
+    record.sourceFrameCameraId = frame.sourceCameraId;
+    record.physicalBoardId = frame.physicalBoardId;
+    record.sourceFrameValid = frame.sourceFrameValid;
+    record.captureTimeValid = frame.captureTimeValid;
     record.rollDeg = std::numeric_limits<double>::quiet_NaN();
     record.pitchDeg = std::numeric_limits<double>::quiet_NaN();
     record.heightMm = std::numeric_limits<double>::quiet_NaN();
@@ -1428,7 +1606,7 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
         ? QStringLiteral("等待 BIMG / 逐飞助手图像帧")
         : QStringLiteral("协议 %1 | 相机 %2 | 模式 %3 | 序号 %4 | 标记 %5（信标 %6，车灯 %7）")
               .arg(m_streamFrame.protocol == ImageFrameProtocol::Bimg
-                       ? QStringLiteral("BIMG")
+                       ? QStringLiteral("BIMG v%1").arg(m_streamFrame.protocolVersion)
                        : QStringLiteral("逐飞助手"))
               .arg(m_streamFrame.cameraId == 0U ? QStringLiteral("Front") : QStringLiteral("Back"))
               .arg(streamModeName(m_streamFrame.streamMode))
@@ -1447,8 +1625,14 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
     }
     else
     {
-        algorithmText = QStringLiteral("桌面检测 %1 个 | %2")
-                            .arg(BeaconResultUtils::totalTargetCount(result))
+        const int displayedCarLampCount = qMin(
+            BeaconResultUtils::carLampCount(result),
+            m_carLampMode == CarLampMode::Dual ? 2 : 1);
+        algorithmText = QStringLiteral("桌面检测：信标 %1，车灯 %2，总计 %3 | %4")
+                            .arg(BeaconResultUtils::beaconCount(result))
+                            .arg(displayedCarLampCount)
+                            .arg(BeaconResultUtils::beaconCount(result) +
+                                 displayedCarLampCount)
                             .arg(AlgorithmProcessProfiler::formatCompact(m_processProfile));
     }
     m_statusLabel->setText(QStringLiteral("%1 | %2 | %3 | %4 | CRC错误 %5 | 协议错误 %6 | %7 | %8")
@@ -1460,6 +1644,34 @@ void TcpImageWindow::updateStatus(const beacon_result_t& result)
                                .arg(m_protocolErrorCount)
                                .arg(recordText)
                                .arg(calibrationText));
+}
+
+CarLampMode TcpImageWindow::carLampMode() const
+{
+    if (m_carLampModeCombo == nullptr)
+    {
+        return m_carLampMode;
+    }
+    return (m_carLampModeCombo->currentData().toInt() ==
+            static_cast<int>(CarLampMode::Dual)) ?
+        CarLampMode::Dual : CarLampMode::Single;
+}
+
+void TcpImageWindow::applyCarLampMode(CarLampMode mode)
+{
+    m_carLampMode = (mode == CarLampMode::Dual) ?
+        CarLampMode::Dual : CarLampMode::Single;
+    AlgorithmRunner* runner = selectedRunner();
+    if (runner != nullptr)
+    {
+        runner->setCarLampMode(m_carLampMode);
+        runner->resetTemporal();
+    }
+    m_result = {};
+    m_processProfile = {};
+    m_horizon = {};
+    processCurrentFrame();
+    render();
 }
 
 AlgorithmRunner* TcpImageWindow::selectedRunner() const

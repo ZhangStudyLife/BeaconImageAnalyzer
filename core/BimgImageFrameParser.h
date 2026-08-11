@@ -43,9 +43,15 @@ struct BimgImageFrame
     quint8 protocolVersion = 0;
     quint8 streamMode = 0;
     quint8 cameraId = 0;
+    quint8 sourceCameraId = 0xffU;
+    quint8 physicalBoardId = 0xffU;
     quint16 width = 0;
     quint16 height = 0;
     quint32 sequence = 0;
+    quint32 sourceFrameSequence = 0;
+    quint32 captureTimeMs = 0;
+    bool sourceFrameValid = false;
+    bool captureTimeValid = false;
     QVector<BimgImageMarker> markers;
     QVector<BimgDebugFloat> debugFloats;
 };

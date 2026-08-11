@@ -115,6 +115,11 @@ void beacon_image_reset_temporal(void)
     image_algorithm_params_changed();
 }
 
+void beacon_image_set_car_lamp_mode(unsigned char mode)
+{
+    image_set_car_lamp_mode((uint8)mode);
+}
+
 void beacon_image_set_telemetry(unsigned char board_id,
                                 float roll_deg,
                                 float pitch_deg,
@@ -250,4 +255,3 @@ int beacon_image_debug_parameter_set(uint8_t type,
 {
     return image_param_set(type, parameter_id, value_bits, actual_bits);
 }
-

@@ -31,6 +31,8 @@ private:
     QTemporaryFile m_temporaryFile;
     State m_state = State::Idle;
     quint64 m_rowCount = 0;
+    JustFloatLogLayout m_layout = JustFloatLogLayout::Legacy;
+    bool m_hasLayout = false;
 };
 
 #endif

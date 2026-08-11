@@ -17,6 +17,7 @@ struct HorizonCalibrationRecorderConfig
     QSize imageSize;
     quint8 cameraId = 0;
     quint8 sourceCameraId = 0xffU;
+    quint8 bimgProtocolVersion = 2U;
     double fps = 50.0;
 };
 
@@ -27,6 +28,13 @@ struct HorizonCalibrationRecorderFrame
     qint64 hostTimeMs = 0;
     quint8 cameraId = 0;
     quint8 sourceCameraId = 0xffU;
+    quint8 bimgProtocolVersion = 2U;
+    quint32 sourceFrameSequence = 0;
+    quint32 captureTimeMs = 0;
+    quint8 sourceFrameCameraId = 0xffU;
+    quint8 physicalBoardId = 0xffU;
+    bool sourceFrameValid = false;
+    bool captureTimeValid = false;
     double rollDeg = 0.0;
     double pitchDeg = 0.0;
     double heightMm = 0.0;

@@ -20,6 +20,7 @@ public:
     void setLiveHistory(WaveformHistoryStore* history);
     void configureLiveSource(const QString& sourceName, const QVector<int>& channels);
     void clearLiveData();
+    void setLogLayout(JustFloatLogLayout layout);
     void setCsvLog(const JustFloatLog* log);
     void setCsvRow(int row);
 

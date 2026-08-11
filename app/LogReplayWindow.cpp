@@ -41,6 +41,7 @@
 namespace
 {
 constexpr int CameraCount = 3;
+constexpr int ViewCount = 4;
 constexpr int CarPlanSlotCount = 2;
 constexpr float Pi = 3.1415926f;
 constexpr double MotionArrowPixelsPerMps = 20.0;
@@ -51,6 +52,13 @@ const QStringList CameraNames = {
     QStringLiteral("Front"),
     QStringLiteral("Center"),
     QStringLiteral("Back")
+};
+
+const QStringList DualLampViewNames = {
+    QStringLiteral("前摄映射"),
+    QStringLiteral("下摄观测"),
+    QStringLiteral("后摄映射"),
+    QStringLiteral("控制与融合")
 };
 
 struct UdpListenAddress
@@ -132,6 +140,17 @@ float normalizeAngleDeg(float angle)
     return angle;
 }
 
+QString fusionConfidenceName(int confidence)
+{
+    switch (confidence)
+    {
+    case 1: return QStringLiteral("暂定");
+    case 2: return QStringLiteral("续跟");
+    case 3: return QStringLiteral("确认");
+    default: return QStringLiteral("无效");
+    }
+}
+
 QPointF motionDisplayDelta(const QPointF& velocity)
 {
     const double magnitude = std::hypot(velocity.x(), velocity.y());
@@ -183,6 +202,106 @@ void drawMotionArrow(QPainter* painter,
                       QStringLiteral("%1 %2")
                           .arg(label)
                           .arg(magnitude, 0, 'f', 2));
+}
+
+QPointF commonCoordinatePoint(float x, float y)
+{
+    return FrameRenderer::algorithmToImagePoint(x, y);
+}
+
+void drawCommonCoordinateGrid(QPainter* painter)
+{
+    if (painter == nullptr)
+    {
+        return;
+    }
+    QPen gridPen(QColor(42, 47, 52));
+    gridPen.setWidth(1);
+    painter->setPen(gridPen);
+    for (int x = -80; x <= 80; x += 20)
+    {
+        const qreal imageX = commonCoordinatePoint(static_cast<float>(x), 0.0f).x();
+        painter->drawLine(QPointF(imageX, 0.0), QPointF(imageX, BEACON_IMAGE_H - 1.0));
+    }
+    for (int y = -40; y <= 40; y += 20)
+    {
+        const qreal imageY = commonCoordinatePoint(0.0f, static_cast<float>(y)).y();
+        painter->drawLine(QPointF(0.0, imageY), QPointF(BEACON_IMAGE_W - 1.0, imageY));
+    }
+    QPen axisPen(QColor(84, 91, 98));
+    axisPen.setWidth(1);
+    painter->setPen(axisPen);
+    const QPointF origin = commonCoordinatePoint(0.0f, 0.0f);
+    painter->drawLine(QPointF(origin.x(), 0.0), QPointF(origin.x(), BEACON_IMAGE_H - 1.0));
+    painter->drawLine(QPointF(0.0, origin.y()), QPointF(BEACON_IMAGE_W - 1.0, origin.y()));
+}
+
+void drawMappedPoint(QPainter* painter,
+                     const JustFloatMappedPoint& point,
+                     const QColor& color,
+                     const QString& label)
+{
+    if (painter == nullptr || !point.valid)
+    {
+        return;
+    }
+    const QPointF center = commonCoordinatePoint(point.x, point.y);
+    QPen pen(color);
+    pen.setWidth(2);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawEllipse(center, 4.0, 4.0);
+    painter->drawLine(center + QPointF(-6.0, 0.0), center + QPointF(6.0, 0.0));
+    painter->drawLine(center + QPointF(0.0, -6.0), center + QPointF(0.0, 6.0));
+    painter->drawText(center + QPointF(6.0, -5.0), label);
+}
+
+void drawMappedLamp(QPainter* painter,
+                    const JustFloatMappedCarLamp& lamp,
+                    const QColor& color,
+                    const QString& label)
+{
+    if (painter == nullptr || !lamp.valid)
+    {
+        return;
+    }
+    const QPointF center = commonCoordinatePoint(lamp.cx, lamp.cy);
+    const qreal radians = qDegreesToRadians(static_cast<qreal>(lamp.angle));
+    const QPointF major(qCos(radians) * 10.0, qSin(radians) * 10.0);
+    const QPointF minor(-qSin(radians) * 3.0, qCos(radians) * 3.0);
+    QPen pen(color);
+    pen.setWidth(2);
+    pen.setStyle(lamp.measured ? Qt::SolidLine : Qt::DashLine);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawLine(center - major, center + major);
+    painter->drawLine(center - minor, center + minor);
+    painter->drawEllipse(center, 2.5, 2.5);
+    painter->drawText(center + QPointF(6.0, -6.0), label);
+}
+
+void drawAxis(QPainter* painter,
+              float cx,
+              float cy,
+              float angle,
+              const QColor& color,
+              Qt::PenStyle style)
+{
+    if (painter == nullptr ||
+        !std::isfinite(static_cast<double>(cx)) ||
+        !std::isfinite(static_cast<double>(cy)) ||
+        !std::isfinite(static_cast<double>(angle)))
+    {
+        return;
+    }
+    const QPointF center = commonCoordinatePoint(cx, cy);
+    const qreal radians = qDegreesToRadians(static_cast<qreal>(angle));
+    const QPointF axis(qCos(radians) * 16.0, qSin(radians) * 16.0);
+    QPen pen(color);
+    pen.setWidth(2);
+    pen.setStyle(style);
+    painter->setPen(pen);
+    painter->drawLine(center - axis, center + axis);
 }
 
 QString carPlanBuildDir()
@@ -290,7 +409,9 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
     topRow->addWidget(m_returnGridButton);
     root->addLayout(topRow);
 
-    auto* carPlanRow = new QHBoxLayout;
+    m_carPlanPanel = new QWidget(this);
+    auto* carPlanRow = new QHBoxLayout(m_carPlanPanel);
+    carPlanRow->setContentsMargins(0, 0, 0, 0);
     m_loadCarPlanButton = new QPushButton(QStringLiteral("加载 CarPlan"), this);
     m_loadCarPlanDirButton = new QPushButton(QStringLiteral("加载目录"), this);
     m_resetCarPlanButton = new QPushButton(QStringLiteral("重置 CarPlan"), this);
@@ -315,13 +436,16 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
     carPlanRow->addWidget(m_loadCarPlanButtons[1]);
     carPlanRow->addWidget(m_loadCarPlanDirButtons[1]);
     carPlanRow->addWidget(m_carPlanStatusLabels[1], 1);
-    root->addLayout(carPlanRow);
+    root->addWidget(m_carPlanPanel);
 
     m_cameraLayout = new QHBoxLayout;
     m_cameraLayout->setSpacing(8);
-    for (int i = 0; i < CameraCount; ++i)
+    for (int i = 0; i < ViewCount; ++i)
     {
-        auto* group = new QGroupBox(CameraNames[i], this);
+        auto* group = new QGroupBox(i < CameraCount
+                                        ? CameraNames[i]
+                                        : QStringLiteral("控制与融合"),
+                                    this);
         auto* groupLayout = new QVBoxLayout(group);
         groupLayout->setContentsMargins(8, 8, 8, 8);
         groupLayout->setSpacing(6);
@@ -378,6 +502,7 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
 
     populateLocalAddresses();
     updateControlState();
+    updateLogLayoutUi();
 
     connect(m_importButton, &QPushButton::clicked, this, &LogReplayWindow::importCsv);
     for (int slot = 0; slot < CarPlanSlotCount; ++slot)
@@ -671,7 +796,13 @@ void LogReplayWindow::readPendingDatagrams()
 
 void LogReplayWindow::acceptUdpRow(const JustFloatLogRow& row, const QString& peerName)
 {
-    m_liveFusedCarLamp = row.hasFusedCarLampData
+    if (m_waveformWindow != nullptr)
+    {
+        m_waveformWindow->setLogLayout(row.layout);
+    }
+    m_liveFusedCarLamp = row.layout == JustFloatLogLayout::DualLampFusionV1
+                             ? JustFloatFusedCarLamp{}
+                             : row.hasFusedCarLampData
                              ? row.fusedCarLamp
                              : m_liveCarLampFusion.update(row);
     m_liveRow = row;
@@ -915,6 +1046,9 @@ void LogReplayWindow::showWaveformWindow()
 
     m_waveformWindow->setLiveHistory(&m_waveformHistory);
     m_waveformWindow->setUdpMode(m_udpMode);
+    const JustFloatLogRow* row = currentRow();
+    m_waveformWindow->setLogLayout(row != nullptr ? row->layout
+                                                   : JustFloatLogLayout::Legacy);
     if (!m_udpMode)
     {
         if (created)
@@ -1080,6 +1214,16 @@ bool LogReplayWindow::loadCsv(const QString& path)
 
 void LogReplayWindow::updateCarPlanForCurrentRow()
 {
+    const JustFloatLogRow* activeRow = currentRow();
+    if (activeRow != nullptr && activeRow->layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        for (int slot = 0; slot < CarPlanSlotCount; ++slot)
+        {
+            m_currentCarPlanResults[slot] = {};
+            m_hasCurrentCarPlanResults[slot] = false;
+        }
+        return;
+    }
     for (int slot = 0; slot < CarPlanSlotCount; ++slot)
     {
         m_currentCarPlanResults[slot] = {};
@@ -1107,6 +1251,15 @@ void LogReplayWindow::updateCarPlanForCurrentRow()
 
 void LogReplayWindow::updateCarPlanFromLiveRow(const JustFloatLogRow& row)
 {
+    if (row.layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        for (int slot = 0; slot < CarPlanSlotCount; ++slot)
+        {
+            m_currentCarPlanResults[slot] = {};
+            m_hasCurrentCarPlanResults[slot] = false;
+        }
+        return;
+    }
     for (int slot = 0; slot < CarPlanSlotCount; ++slot)
     {
         updateCarPlanFromLiveRow(slot, row);
@@ -1206,6 +1359,16 @@ void LogReplayWindow::setCurrentRow(int row)
 
 void LogReplayWindow::renderCurrentRow()
 {
+    updateLogLayoutUi();
+    const JustFloatLogRow* row = currentRow();
+    if (row != nullptr && row->layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        for (int i = 0; i < ViewCount; ++i)
+        {
+            renderDualLampFusionView(i);
+        }
+        return;
+    }
     for (int i = 0; i < CameraCount; ++i)
     {
         renderCamera(i);
@@ -1238,6 +1401,162 @@ void LogReplayWindow::renderCamera(int cameraIndex)
                                                  .arg(camera.beacons[0].valid ? QStringLiteral("有效") : QStringLiteral("无"))
                                                  .arg(camera.beacons[1].valid ? QStringLiteral("有效") : QStringLiteral("无"))
                                                  .arg(camera.carLamp.valid ? QStringLiteral("有效") : QStringLiteral("无")));
+}
+
+QImage LogReplayWindow::dualLampFusionImage(int viewIndex) const
+{
+    QImage image(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_RGB32);
+    image.fill(QColor(10, 12, 14));
+    const JustFloatLogRow* row = currentRow();
+    if (row == nullptr ||
+        row->layout != JustFloatLogLayout::DualLampFusionV1 ||
+        viewIndex < 0 || viewIndex >= ViewCount)
+    {
+        return image;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QFont font = painter.font();
+    font.setPixelSize(8);
+    font.setBold(true);
+    painter.setFont(font);
+    drawCommonCoordinateGrid(&painter);
+
+    const JustFloatDualLampFusionFrame& frame = row->dualLampFusion;
+    if (viewIndex < CameraCount)
+    {
+        const JustFloatMappedCameraFrame& camera = frame.cameras[viewIndex];
+        const QColor lampColor(255, 205, 64);
+        const QColor beaconColor(64, 220, 150);
+        for (int slot = 0; slot < 2; ++slot)
+        {
+            drawMappedLamp(&painter,
+                           camera.carLamps[slot],
+                           lampColor,
+                           QStringLiteral("CAR"));
+        }
+        for (int beacon = 0; beacon < 2; ++beacon)
+        {
+            drawMappedPoint(&painter,
+                            camera.beacons[beacon],
+                            beaconColor,
+                            QStringLiteral("B%1").arg(beacon));
+        }
+        return image;
+    }
+
+    const JustFloatControlGeometry& control = frame.control;
+    const JustFloatShadowCarCenter& shadow = frame.shadow;
+    const QColor controlColor(255, 205, 64);
+    const QColor targetColor(255, 92, 92);
+    const QColor vectorColor(255, 128, 210);
+    const QColor shadowColor(69, 200, 255);
+
+    if (shadow.lamps[0].valid && shadow.lamps[1].valid)
+    {
+        QPen pairPen(shadowColor);
+        pairPen.setWidth(1);
+        pairPen.setStyle(Qt::DashLine);
+        painter.setPen(pairPen);
+        painter.drawLine(commonCoordinatePoint(shadow.lamps[0].x, shadow.lamps[0].y),
+                         commonCoordinatePoint(shadow.lamps[1].x, shadow.lamps[1].y));
+    }
+    drawMappedPoint(&painter, shadow.lamps[0], shadowColor, QStringLiteral("CAR"));
+    drawMappedPoint(&painter, shadow.lamps[1], shadowColor, QStringLiteral("CAR"));
+    if (shadow.valid)
+    {
+        JustFloatMappedPoint center;
+        center.x = shadow.cx;
+        center.y = shadow.cy;
+        center.valid = true;
+        drawMappedPoint(&painter, center, shadowColor, QStringLiteral("融合中心"));
+        drawAxis(&painter,
+                 shadow.cx,
+                 shadow.cy,
+                 shadow.axisAngle,
+                 shadowColor,
+                 Qt::DashLine);
+    }
+
+    if (control.car.valid && control.beacon.valid)
+    {
+        QPen vectorPen(vectorColor);
+        vectorPen.setWidth(2);
+        painter.setPen(vectorPen);
+        painter.drawLine(commonCoordinatePoint(control.car.cx, control.car.cy),
+                         commonCoordinatePoint(control.beacon.x, control.beacon.y));
+    }
+    JustFloatMappedCarLamp controlCar = control.car;
+    controlCar.measured = true;
+    drawMappedLamp(&painter, controlCar, controlColor, QStringLiteral("控制车辆"));
+    drawMappedPoint(&painter, control.beacon, targetColor, QStringLiteral("控制信标"));
+    return image;
+}
+
+void LogReplayWindow::renderDualLampFusionView(int viewIndex)
+{
+    const JustFloatLogRow* row = currentRow();
+    if (row == nullptr ||
+        row->layout != JustFloatLogLayout::DualLampFusionV1 ||
+        viewIndex < 0 || viewIndex >= ViewCount)
+    {
+        return;
+    }
+    const QImage image = dualLampFusionImage(viewIndex);
+    m_videoWidgets[viewIndex]->setPixelSourceImage(image);
+    m_videoWidgets[viewIndex]->setFrameGeometry(QSize(BEACON_IMAGE_W, BEACON_IMAGE_H), 1);
+    m_videoWidgets[viewIndex]->setImage(image);
+
+    const JustFloatDualLampFusionFrame& frame = row->dualLampFusion;
+    if (viewIndex < CameraCount)
+    {
+        const JustFloatMappedCameraFrame& camera = frame.cameras[viewIndex];
+        const int lampCount = static_cast<int>(camera.carLamps[0].valid) +
+                              static_cast<int>(camera.carLamps[1].valid);
+        const int beaconCount = static_cast<int>(camera.beacons[0].valid) +
+                                static_cast<int>(camera.beacons[1].valid);
+        m_cameraInfoLabels[viewIndex]->setText(
+            QStringLiteral("车灯 %1 | 信标 %2 | 实测掩码 0x%3")
+                .arg(lampCount)
+                .arg(beaconCount)
+                .arg(camera.measuredMask, 2, 16, QLatin1Char('0')));
+    }
+    else
+    {
+        m_cameraInfoLabels[viewIndex]->setText(
+            QStringLiteral("规划模式 %1 | 融合置信度 %2")
+                .arg(frame.control.planMode)
+                .arg(frame.shadow.confidence));
+    }
+}
+
+void LogReplayWindow::updateLogLayoutUi()
+{
+    const JustFloatLogRow* row = currentRow();
+    const bool dual = row != nullptr &&
+                      row->layout == JustFloatLogLayout::DualLampFusionV1;
+    if (m_carPlanPanel != nullptr)
+    {
+        m_carPlanPanel->setVisible(!dual);
+    }
+    for (int i = 0; i < ViewCount; ++i)
+    {
+        if (m_cameraGroups[i] == nullptr)
+        {
+            continue;
+        }
+        m_cameraGroups[i]->setTitle(dual
+                                        ? DualLampViewNames[i]
+                                        : (i < CameraCount
+                                               ? CameraNames[i]
+                                               : QStringLiteral("控制与融合")));
+    }
+    if (!dual && m_focusCamera >= CameraCount)
+    {
+        m_focusCamera = -1;
+    }
+    updateCameraVisibility();
 }
 
 void LogReplayWindow::togglePlayback()
@@ -1314,7 +1633,7 @@ int LogReplayWindow::playbackIntervalMs() const
 
 void LogReplayWindow::setFocusCamera(int cameraIndex)
 {
-    if (cameraIndex < 0 || cameraIndex >= CameraCount)
+    if (cameraIndex < 0 || cameraIndex >= ViewCount)
     {
         return;
     }
@@ -1330,9 +1649,15 @@ void LogReplayWindow::showAllCameras()
 
 void LogReplayWindow::updateCameraVisibility()
 {
-    for (int i = 0; i < CameraCount; ++i)
+    const JustFloatLogRow* row = currentRow();
+    const int activeViewCount = row != nullptr &&
+                                        row->layout == JustFloatLogLayout::DualLampFusionV1
+                                    ? ViewCount
+                                    : CameraCount;
+    for (int i = 0; i < ViewCount; ++i)
     {
-        m_cameraGroups[i]->setVisible(m_focusCamera < 0 || m_focusCamera == i);
+        m_cameraGroups[i]->setVisible(i < activeViewCount &&
+                                      (m_focusCamera < 0 || m_focusCamera == i));
     }
     m_returnGridButton->setEnabled(m_focusCamera >= 0);
 }
@@ -1344,6 +1669,55 @@ void LogReplayWindow::updateInfoText()
     {
         m_infoText->setText(m_udpMode ? QStringLiteral("UDP 未收到有效数据") :
                                         QStringLiteral("未导入日志"));
+        return;
+    }
+
+    if (row->layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        const JustFloatDualLampFusionFrame& frame = row->dualLampFusion;
+        QString text = QStringLiteral("DualLampFusionV1 | 协议 %1 | 图像序号 %2 | 规划模式 %3\n")
+                           .arg(frame.schemaId, 0, 'f', 0)
+                           .arg(frame.imageSequence)
+                           .arg(frame.control.planMode);
+        text += QStringLiteral("融合置信度: %1 (%2) | 影子中心: %3, %4 | 车辆轴: %5 deg\n")
+                    .arg(fusionConfidenceName(frame.shadow.confidence))
+                    .arg(frame.shadow.confidence)
+                    .arg(frame.shadow.valid ? QString::number(frame.shadow.cx, 'f', 2)
+                                            : QStringLiteral("--"))
+                    .arg(frame.shadow.valid ? QString::number(frame.shadow.cy, 'f', 2)
+                                            : QStringLiteral("--"))
+                    .arg(frame.shadow.valid ? QString::number(frame.shadow.axisAngle, 'f', 2)
+                                            : QStringLiteral("--"));
+        text += QStringLiteral("实际控制车辆: %1, %2, %3 deg | 选中信标: %4, %5\n")
+                    .arg(frame.control.car.valid ? QString::number(frame.control.car.cx, 'f', 2)
+                                                 : QStringLiteral("--"))
+                    .arg(frame.control.car.valid ? QString::number(frame.control.car.cy, 'f', 2)
+                                                 : QStringLiteral("--"))
+                    .arg(frame.control.car.valid ? QString::number(frame.control.car.angle, 'f', 2)
+                                                 : QStringLiteral("--"))
+                    .arg(frame.control.beacon.valid ? QString::number(frame.control.beacon.x, 'f', 2)
+                                                    : QStringLiteral("--"))
+                    .arg(frame.control.beacon.valid ? QString::number(frame.control.beacon.y, 'f', 2)
+                                                    : QStringLiteral("--"));
+        for (int camera = 0; camera < CameraCount; ++camera)
+        {
+            const JustFloatMappedCameraFrame& cameraFrame = frame.cameras[camera];
+            text += QStringLiteral("%1 | 实测掩码 0x%2 | 车灯 %3 | 信标 %4\n")
+                        .arg(DualLampViewNames[camera])
+                        .arg(cameraFrame.measuredMask, 2, 16, QLatin1Char('0'))
+                        .arg(static_cast<int>(cameraFrame.carLamps[0].valid) +
+                             static_cast<int>(cameraFrame.carLamps[1].valid))
+                        .arg(static_cast<int>(cameraFrame.beacons[0].valid) +
+                             static_cast<int>(cameraFrame.beacons[1].valid));
+        }
+        if (m_udpMode)
+        {
+            text.prepend(QStringLiteral("UDP 包 %1 | 错误 %2 | %3\n")
+                             .arg(m_udpPacketCount)
+                             .arg(m_udpErrorCount)
+                             .arg(m_lastUdpPeer));
+        }
+        m_infoText->setText(text);
         return;
     }
 
@@ -1611,7 +1985,9 @@ void LogReplayWindow::rebuildFusedCarLampCache()
     for (int rowIndex = 0; rowIndex < m_log.rowCount(); ++rowIndex)
     {
         const JustFloatLogRow& row = m_log.rowAt(rowIndex);
-        m_fusedCarLampCache.push_back(row.hasFusedCarLampData
+        m_fusedCarLampCache.push_back(row.layout == JustFloatLogLayout::DualLampFusionV1
+                                         ? JustFloatFusedCarLamp{}
+                                         : row.hasFusedCarLampData
                                          ? row.fusedCarLamp
                                          : fusion.update(row));
     }

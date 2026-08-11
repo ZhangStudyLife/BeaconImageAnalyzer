@@ -42,6 +42,107 @@ QByteArray sequentialBinary(int first, int count)
     return result;
 }
 
+QVector<float> dualFusionValues()
+{
+    QVector<float> values(JustFloatLog::DualLampFusionChannelCount, -999.0f);
+    values[0] = 1000.0f;
+    values[1] = JustFloatLog::DualLampFusionSchemaId;
+    values[2] = 42.0f;
+    for (int camera = 0; camera < 3; ++camera)
+    {
+        const int base = 3 + camera * 11;
+        values[base] = camera == 0 ? 3.0f : (camera == 1 ? 1.0f : 0.0f);
+        values[base + 1] = -20.0f + camera;
+        values[base + 2] = -10.0f + camera;
+        values[base + 3] = 5.0f;
+        values[base + 4] = 20.0f + camera;
+        values[base + 5] = -10.0f + camera;
+        values[base + 6] = 4.0f;
+        values[base + 7] = -35.0f;
+        values[base + 8] = 12.0f;
+        values[base + 9] = 37.0f;
+        values[base + 10] = 15.0f;
+    }
+    values[36] = 2.0f;
+    values[37] = 1.5f;
+    values[38] = -2.5f;
+    values[39] = 6.0f;
+    values[40] = 30.0f;
+    values[41] = 25.0f;
+    values[42] = 3.0f;
+    values[43] = 0.0f;
+    values[44] = -9.0f;
+    values[45] = 90.0f;
+    values[46] = -20.0f;
+    values[47] = -9.0f;
+    values[48] = 20.0f;
+    values[49] = -9.0f;
+    return values;
+}
+
+QVector<float> singleLampRoiPayloadValues()
+{
+    QVector<float> values(JustFloatLog::SingleLampRoiChannelCount - 1, 0.0f);
+    values[0] = 11.0f;
+    values[1] = -21.0f;
+    values[2] = 12.0f;
+    values[3] = -22.0f;
+    values[4] = 13.0f;
+    values[5] = -23.0f;
+    values[6] = 3.5f;
+    values[7] = -4.5f;
+    values[8] = 1025.0f;
+
+    const quint32 shape = 40U | (60U << 6U) | (50U << 13U) | (2U << 20U);
+    values[9] = static_cast<float>(shape);
+    values[10] = static_cast<float>(shape);
+    values[11] = static_cast<float>(shape);
+    for (int camera = 0; camera < 3; ++camera)
+    {
+        for (int beacon = 0; beacon < 2; ++beacon)
+        {
+            const int offset = 12 + camera * 6 + beacon * 3;
+            values[offset] = static_cast<float>(camera * 20 + beacon * 4 + 1);
+            values[offset + 1] = static_cast<float>(camera * 20 + beacon * 4 + 2);
+            values[offset + 2] = static_cast<float>(camera * 20 + beacon * 4 + 3);
+        }
+    }
+
+    values[30] = static_cast<float>(150U | (90U << 9U) | (20U << 17U) | (1U << 23U));
+    values[31] = static_cast<float>(2U | (3U << 3U) | (7U << 6U) | (1U << 9U)
+                                    | (4U << 12U) | (1U << 15U) | (2U << 16U)
+                                    | (1U << 19U) | (3U << 20U) | (1U << 23U));
+    values[32] = static_cast<float>(0xffU | (0x80U << 8U) | (0x81U << 16U));
+    values[33] = -35.5f;
+    values[34] = 18.0f;
+    return values;
+}
+
+QByteArray binaryValues(const QVector<float>& values)
+{
+    QByteArray result;
+    result.reserve(values.size() * static_cast<int>(sizeof(float)));
+    for (float value : values)
+    {
+        quint32 bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        const quint32 littleEndian = qToLittleEndian(bits);
+        result.append(reinterpret_cast<const char*>(&littleEndian), sizeof(littleEndian));
+    }
+    return result;
+}
+
+QString textValues(const QVector<float>& values)
+{
+    QStringList fields;
+    fields.reserve(values.size());
+    for (float value : values)
+    {
+        fields.push_back(QString::number(value, 'g', 9));
+    }
+    return fields.join(QLatin1Char(','));
+}
+
 QByteArray vofaTail()
 {
     return QByteArray::fromHex("0000807f");
@@ -121,6 +222,9 @@ private slots:
     void validateCsvHeadersAndLengths();
     void serializeAndReloadRows();
     void recorderStateAndRoundTrip();
+    void dualLayoutDatagramAndCsv();
+    void dualRecorderRejectsMixedLayout();
+    void singleLampRoiDatagramAndCsv();
     void loadExternalFlightLog();
     void waveformViewportNavigation();
     void waveformHistoryQueryAndCleanup();
@@ -309,7 +413,7 @@ void JustFloatLogTests::rejectInvalidDatagrams()
 {
     JustFloatLogRow row;
     QString error;
-    QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 36).toUtf8(), 1, &row, &error));
+    QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 34).toUtf8(), 1, &row, &error));
     QVERIFY(!error.isEmpty());
     QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 40).toUtf8(), 1, &row, &error));
     QVERIFY(!JustFloatLog::parseDatagram(sequentialText(0, 41).toUtf8(), 1, &row, &error));
@@ -511,6 +615,133 @@ void JustFloatLogTests::recorderStateAndRoundTrip()
     QCOMPARE(recorder.state(), JustFloatCsvRecorder::State::Idle);
     QCOMPARE(recorder.rowCount(), quint64(0));
     QVERIFY(!recorder.append(sampleRow(true), &error));
+}
+
+void JustFloatLogTests::dualLayoutDatagramAndCsv()
+{
+    const QVector<float> values = dualFusionValues();
+    const QList<QByteArray> datagrams = {
+        textValues(values).toUtf8(),
+        binaryValues(values) + vofaTail()
+    };
+    JustFloatLogRow parsedRow;
+    for (const QByteArray& datagram : datagrams)
+    {
+        QString error;
+        QVERIFY2(JustFloatLog::parseDatagram(datagram, 0.0, &parsedRow, &error),
+                 qPrintable(error));
+        QCOMPARE(parsedRow.layout, JustFloatLogLayout::DualLampFusionV1);
+        QCOMPARE(parsedRow.dualLampFusion.imageSequence, quint32(42));
+        QCOMPARE(parsedRow.dualLampFusion.cameras[0].measuredMask, quint8(3));
+        QVERIFY(parsedRow.dualLampFusion.cameras[0].carLamps[1].valid);
+        QVERIFY(parsedRow.dualLampFusion.cameras[0].carLamps[1].measured);
+        QVERIFY(parsedRow.dualLampFusion.cameras[1].carLamps[1].valid);
+        QVERIFY(!parsedRow.dualLampFusion.cameras[1].carLamps[1].measured);
+        QCOMPARE(parsedRow.dualLampFusion.control.planMode, 2);
+        QVERIFY(parsedRow.dualLampFusion.control.car.valid);
+        QVERIFY(parsedRow.dualLampFusion.control.beacon.valid);
+        QCOMPARE(parsedRow.dualLampFusion.shadow.confidence, 3);
+        QVERIFY(parsedRow.dualLampFusion.shadow.valid);
+    }
+
+    QVector<float> invalidSchema = values;
+    invalidSchema[1] = 123.0f;
+    QString error;
+    QVERIFY(!JustFloatLog::parseDatagram(binaryValues(invalidSchema), 0.0, &parsedRow, &error));
+    QVERIFY(error.contains(QStringLiteral("schema"), Qt::CaseInsensitive));
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("dual.csv"));
+    QVERIFY(writeTextFile(path,
+                          JustFloatLog::csvHeader(JustFloatLogLayout::DualLampFusionV1) +
+                              QLatin1Char('\n') + JustFloatLog::csvRow(parsedRow) +
+                              QLatin1Char('\n')));
+    JustFloatLog log;
+    QVERIFY2(JustFloatLog::loadCsv(path, &log, &error), qPrintable(error));
+    QCOMPARE(log.layout(), JustFloatLogLayout::DualLampFusionV1);
+    QCOMPARE(log.rowCount(), 1);
+    QCOMPARE(log.rowAt(0).dualLampFusion.control.car.cx, 1.5f);
+}
+
+void JustFloatLogTests::singleLampRoiDatagramAndCsv()
+{
+    const QVector<float> payload = singleLampRoiPayloadValues();
+    JustFloatLogRow row;
+    QString error;
+    QVERIFY2(JustFloatLog::parseDatagram(binaryValues(payload) + vofaTail(),
+                                         3210.0,
+                                         &row,
+                                         &error),
+             qPrintable(error));
+    QCOMPARE(row.layout, JustFloatLogLayout::SingleLampRoiV1);
+    QCOMPARE(row.rowTime, 3210.0);
+    QCOMPARE(row.roll, 3.5f);
+    QCOMPARE(row.pitch, -4.5f);
+    QCOMPARE(row.singleLampRoi.heightMm, 1025.0f);
+    QVERIFY(row.singleLampRoi.heightValid);
+    QCOMPARE(row.cameras[0].carLamp.cx, 11.0f);
+    QCOMPARE(row.cameras[2].carLamp.cy, -23.0f);
+    QVERIFY(row.cameras[0].carLamp.valid);
+    QCOMPARE(row.cameras[0].carLamp.width, 10.0f);
+    QCOMPARE(row.cameras[0].carLamp.length, 30.0f);
+    QCOMPARE(row.cameras[0].carLamp.angle, 10.0f);
+    QCOMPARE(row.singleLampRoi.lampShapes[0].nearestBeaconDistance, 8.0f);
+    QCOMPARE(row.cameras[2].beacons[1].x, 45.0f);
+    QCOMPARE(row.cameras[2].beacons[1].y, 46.0f);
+    QCOMPARE(row.cameras[2].beacons[1].area, 47.0f);
+    QVERIFY(row.singleLampRoi.trackGeometry.valid);
+    QCOMPARE(row.singleLampRoi.trackGeometry.centerX, 10.0f);
+    QCOMPARE(row.singleLampRoi.trackGeometry.centerY, -20.0f);
+    QCOMPARE(row.singleLampRoi.trackGeometry.centerRoiHalfSize, 20.0f);
+    QCOMPARE(row.singleLampRoi.crossCheck.state, quint8(2));
+    QCOMPARE(row.singleLampRoi.crossCheck.supportCameraMask, quint8(3));
+    QCOMPARE(row.singleLampRoi.crossCheck.roiValidMask, quint8(7));
+    QCOMPARE(row.singleLampRoi.crossCheck.conflictCameraMask, quint8(4));
+    QVERIFY(row.singleLampRoi.crossCheck.projectionEnabled);
+    QVERIFY(row.singleLampRoi.crossCheck.roiMode);
+    QVERIFY(row.singleLampRoi.sourceFrames[0].valid);
+    QCOMPARE(row.singleLampRoi.sourceFrames[0].sequenceLow7, quint8(127));
+    QVERIFY(row.singleLampRoi.sourceFrames[1].valid);
+    QCOMPARE(row.singleLampRoi.sourceFrames[1].sequenceLow7, quint8(0));
+    QVERIFY(row.singleLampRoi.sourceFrames[2].valid);
+    QCOMPARE(row.singleLampRoi.sourceFrames[2].sequenceLow7, quint8(1));
+
+    QCOMPARE(JustFloatLog::channelCount(JustFloatLogLayout::SingleLampRoiV1), 36);
+    QCOMPARE(JustFloatLog::channelDescriptors(JustFloatLogLayout::SingleLampRoiV1).size(), 36);
+    QCOMPARE(JustFloatLog::csvHeader(JustFloatLogLayout::SingleLampRoiV1)
+                 .split(QLatin1Char(',')).size(),
+             36);
+    const QString serialized = JustFloatLog::csvRow(row);
+    QCOMPARE(serialized.split(QLatin1Char(',')).size(), 36);
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("single-lamp-roi.csv"));
+    QVERIFY(writeTextFile(path,
+                          JustFloatLog::csvHeader(JustFloatLogLayout::SingleLampRoiV1)
+                              + QLatin1Char('\n') + serialized + QLatin1Char('\n')));
+    JustFloatLog loaded;
+    QVERIFY2(JustFloatLog::loadCsv(path, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.layout(), JustFloatLogLayout::SingleLampRoiV1);
+    QCOMPARE(loaded.rowCount(), 1);
+    QCOMPARE(loaded.rowAt(0).singleLampRoi.frameSequencePacked,
+             row.singleLampRoi.frameSequencePacked);
+}
+
+void JustFloatLogTests::dualRecorderRejectsMixedLayout()
+{
+    JustFloatLogRow dualRow;
+    QString error;
+    QVERIFY2(JustFloatLog::parseDatagram(binaryValues(dualFusionValues()), 0.0, &dualRow, &error),
+             qPrintable(error));
+
+    JustFloatCsvRecorder recorder;
+    QVERIFY2(recorder.start(&error), qPrintable(error));
+    QVERIFY2(recorder.append(dualRow, &error), qPrintable(error));
+    QVERIFY(!recorder.append(sampleRow(true), &error));
+    QVERIFY(error.contains(QStringLiteral("mix"), Qt::CaseInsensitive));
+    recorder.discard();
 }
 
 void JustFloatLogTests::loadExternalFlightLog()

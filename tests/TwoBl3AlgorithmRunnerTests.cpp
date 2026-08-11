@@ -79,6 +79,18 @@ QString downImageDirectory()
     return {};
 }
 
+QString dualFrontImageDirectory()
+{
+    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(
+        QStringLiteral("前后2车灯/前后摄/algorithm/Image"));
+}
+
+QString dualDownImageDirectory()
+{
+    return QDir(QStringLiteral(BEACON_SOURCE_DIR)).absoluteFilePath(
+        QStringLiteral("前后2车灯/下摄/algorithm/Image"));
+}
+
 void drawDownBeacon(QImage* image, int centerX, int centerY, int radius)
 {
     for (int y = centerY - radius; y <= centerY + radius; ++y)
@@ -393,7 +405,28 @@ private slots:
     void keepsStablePointSourceWhenNoSafeLegacyTuningExists();
     void usesCurrentMeasurementAndPredictsTwoMissingFrames();
     void rejectsInsufficientFrameHistory();
+    void optionalCarLampModeKeepsLegacyInstancesCompatible();
+    void dualFrontInstanceOutputsTwoLamps();
+    void dualDownInstanceOutputsTwoLamps();
+    void dualFirmwareKeepsLegacyPrimarySlot();
+    void dualFrontMasksBeaconInsideCarBody();
+    void dualFrontDoesNotBridgeToPredictedLamp();
+    void dualDownMasksBeaconInsideCarBody();
+    void dualDownSuppressesSplitCarLampBeacon();
+    void rendererLimitsCarLampCountByMode();
+    void coordinateConversionsKeepFirmwareConventionsSeparate();
 };
+
+void TwoBl3AlgorithmRunnerTests::coordinateConversionsKeepFirmwareConventionsSeparate()
+{
+    const QPointF legacy = FrameRenderer::algorithmToImagePoint(25.0f, -10.0f);
+    QCOMPARE(legacy.x(), 69.0);
+    QCOMPARE(legacy.y(), 50.0);
+
+    const QPointF imageData = FrameRenderer::imageDataToImagePoint(25.0f, -10.0f);
+    QCOMPARE(imageData.x(), 119.0);
+    QCOMPARE(imageData.y(), 50.0);
+}
 
 void TwoBl3AlgorithmRunnerTests::loadsParametersAndKeepsInstancesIsolated()
 {
@@ -407,7 +440,7 @@ void TwoBl3AlgorithmRunnerTests::loadsParametersAndKeepsInstancesIsolated()
                                       &error),
              qPrintable(error));
     QVERIFY(first.supportsParameterTuning());
-    QCOMPARE(first.algorithmBuildId(), quint32(0x20260974U));
+    QCOMPARE(first.algorithmBuildId(), quint32(0x20260906U));
     QCOMPARE(first.parameterInfos().size(), 57);
 
     quint32 currentBits = 0;
@@ -443,7 +476,7 @@ void TwoBl3AlgorithmRunnerTests::loadsPackagedFallbackLibrary()
                                        &error),
              qPrintable(error));
     QVERIFY(runner.supportsParameterTuning());
-    QCOMPARE(runner.algorithmBuildId(), quint32(0x20260974U));
+    QCOMPARE(runner.algorithmBuildId(), quint32(0x20260906U));
     QCOMPARE(runner.parameterInfos().size(), 57);
 }
 
@@ -2155,6 +2188,264 @@ void TwoBl3AlgorithmRunnerTests::rejectsInsufficientFrameHistory()
     const BeaconDiagnosticResult result = BeaconParameterDiagnostic::analyze(request);
     QVERIFY(!result.completed);
     QVERIFY(result.message.contains(QStringLiteral("10")));
+}
+
+void TwoBl3AlgorithmRunnerTests::optionalCarLampModeKeepsLegacyInstancesCompatible()
+{
+    const QString imageDirectory = selfContainedImageDirectory();
+    QVERIFY2(!imageDirectory.isEmpty(), "Self-contained 2BL3 instance was not found.");
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(imageDirectory, buildRoot.path(), &error),
+             qPrintable(error));
+    QVERIFY(!runner.supportsCarLampMode());
+    QCOMPARE(runner.carLampMode(), CarLampMode::Single);
+    runner.setCarLampMode(CarLampMode::Dual);
+    QCOMPARE(runner.carLampMode(), CarLampMode::Dual);
+    runner.resetTemporal();
+    QCOMPARE(runner.carLampMode(), CarLampMode::Dual);
+}
+
+void TwoBl3AlgorithmRunnerTests::dualFrontInstanceOutputsTwoLamps()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(
+                 dualFrontImageDirectory(), buildRoot.path(), &error),
+             qPrintable(error));
+    QVERIFY(runner.supportsCarLampMode());
+    QCOMPARE(runner.carLampMode(), CarLampMode::Single);
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawUniformCarLamp(&frame, 78, 82);
+    drawUniformCarLamp(&frame, 113, 82);
+    QCOMPARE(runner.process(frame).car_lamp_count, quint8(1));
+
+    runner.setCarLampMode(CarLampMode::Dual);
+    runner.resetTemporal();
+    const beacon_result_t dual = runner.process(frame);
+    QCOMPARE(dual.car_lamp_count, quint8(2));
+    QCOMPARE(runner.algorithmBuildId(), quint32(0x20261001U));
+}
+
+void TwoBl3AlgorithmRunnerTests::dualDownInstanceOutputsTwoLamps()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(
+                 dualDownImageDirectory(), buildRoot.path(), &error),
+             qPrintable(error));
+    QVERIFY(runner.supportsCarLampMode());
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownCarLamp(&frame, 68, 72);
+    drawDownCarLamp(&frame, 108, 72);
+    QCOMPARE(runner.process(frame).car_lamp_count, quint8(1));
+
+    runner.setCarLampMode(CarLampMode::Dual);
+    runner.resetTemporal();
+    const beacon_result_t dual = runner.process(frame);
+    QCOMPARE(dual.car_lamp_count, quint8(2));
+    QCOMPARE(runner.algorithmBuildId(), quint32(0x20261002U));
+}
+
+void TwoBl3AlgorithmRunnerTests::dualFirmwareKeepsLegacyPrimarySlot()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner singleRunner;
+    AlgorithmRunner dualRunner;
+    QString error;
+    const QString imageDirectory = QStringLiteral(BEACON_2BL3_TEST_IMAGE_DIR);
+
+    QVERIFY2(singleRunner.loadTwoBl3Firmware(
+                 imageDirectory,
+                 QDir(buildRoot.path()).absoluteFilePath(QStringLiteral("single")),
+                 &error),
+             qPrintable(error));
+    QVERIFY2(dualRunner.loadTwoBl3Firmware(
+                 imageDirectory,
+                 QDir(buildRoot.path()).absoluteFilePath(QStringLiteral("dual")),
+                 &error),
+             qPrintable(error));
+    QVERIFY(singleRunner.supportsCarLampMode());
+    QVERIFY(dualRunner.supportsCarLampMode());
+    singleRunner.setCarLampMode(CarLampMode::Single);
+    dualRunner.setCarLampMode(CarLampMode::Dual);
+
+    QVector<QImage> frames;
+    QImage both(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    both.fill(0);
+    drawUniformCarLamp(&both, 70, 75);
+    drawUniformCarLamp(&both, 110, 75);
+    frames.append(both);
+    frames.append(both);
+    frames.append(both);
+
+    QImage one(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    one.fill(0);
+    drawUniformCarLamp(&one, 110, 75);
+    frames.append(one);
+    frames.append(one);
+
+    QImage blank(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    blank.fill(0);
+    frames.append(blank);
+    frames.append(blank);
+
+    for (const QImage& frame : frames)
+    {
+        const beacon_result_t single = singleRunner.process(frame);
+        const beacon_result_t dual = dualRunner.process(frame);
+        QCOMPARE(dual.car_lamp_count > 0U, single.car_lamp_count > 0U);
+        if (single.car_lamp_count == 0U)
+        {
+            continue;
+        }
+
+        QCOMPARE(dual.car_lamps[0].valid, single.car_lamps[0].valid);
+        QCOMPARE(dual.car_lamps[0].cx, single.car_lamps[0].cx);
+        QCOMPARE(dual.car_lamps[0].cy, single.car_lamps[0].cy);
+        QCOMPARE(dual.car_lamps[0].width, single.car_lamps[0].width);
+        QCOMPARE(dual.car_lamps[0].length, single.car_lamps[0].length);
+        QCOMPARE(dual.car_lamps[0].angle, single.car_lamps[0].angle);
+    }
+}
+
+void TwoBl3AlgorithmRunnerTests::dualFrontMasksBeaconInsideCarBody()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(
+                 dualFrontImageDirectory(), buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawUniformCarLamp(&frame, 70, 75);
+    drawUniformCarLamp(&frame, 110, 75);
+    drawDownBeacon(&frame, 90, 75, 3);
+
+    runner.setCarLampMode(CarLampMode::Dual);
+    runner.resetTemporal();
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(2));
+    QCOMPARE(result.beacon_count, quint8(0));
+}
+
+void TwoBl3AlgorithmRunnerTests::dualFrontDoesNotBridgeToPredictedLamp()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(
+                 dualFrontImageDirectory(), buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage bothLamps(BEACON_IMAGE_W, BEACON_IMAGE_H,
+                     QImage::Format_Grayscale8);
+    bothLamps.fill(0);
+    drawUniformCarLamp(&bothLamps, 70, 75);
+    drawUniformCarLamp(&bothLamps, 110, 75);
+
+    runner.setCarLampMode(CarLampMode::Dual);
+    runner.resetTemporal();
+    for (int frameIndex = 0; frameIndex < 3; ++frameIndex)
+    {
+        QCOMPARE(runner.process(bothLamps).car_lamp_count, quint8(2));
+    }
+
+    QImage oneLampAndBeacon(BEACON_IMAGE_W, BEACON_IMAGE_H,
+                            QImage::Format_Grayscale8);
+    oneLampAndBeacon.fill(0);
+    drawUniformCarLamp(&oneLampAndBeacon, 70, 75);
+    drawDownBeacon(&oneLampAndBeacon, 90, 75, 3);
+
+    const beacon_result_t result = runner.process(oneLampAndBeacon);
+    QVERIFY(result.car_lamp_count >= quint8(1));
+    QCOMPARE(result.beacon_count, quint8(1));
+}
+
+void TwoBl3AlgorithmRunnerTests::dualDownMasksBeaconInsideCarBody()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(
+                 dualDownImageDirectory(), buildRoot.path(), &error),
+             qPrintable(error));
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    drawDownCarLamp(&frame, 60, 75);
+    drawDownCarLamp(&frame, 110, 75);
+    drawDownBeacon(&frame, 85, 75, 3);
+
+    runner.setCarLampMode(CarLampMode::Dual);
+    runner.resetTemporal();
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(2));
+    QCOMPARE(result.beacon_count, quint8(0));
+}
+
+void TwoBl3AlgorithmRunnerTests::dualDownSuppressesSplitCarLampBeacon()
+{
+    QTemporaryDir buildRoot;
+    QVERIFY(buildRoot.isValid());
+    AlgorithmRunner runner;
+    QString error;
+    QVERIFY2(runner.loadTwoBl3Firmware(
+                 dualDownImageDirectory(), buildRoot.path(), &error),
+             qPrintable(error));
+    QVERIFY(runner.supportsCarLampMode());
+    runner.setCarLampMode(CarLampMode::Dual);
+
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H,
+                 QImage::Format_Grayscale8);
+    frame.fill(30);
+    drawOccludedFragmentedCar(&frame, 78);
+    drawDownVerticalCarLamp(&frame, 120, 64, 1, 7);
+    drawDownBeacon(&frame, 150, 94, 4);
+
+    const beacon_result_t result = runner.process(frame);
+    QCOMPARE(result.car_lamp_count, quint8(2));
+    QCOMPARE(result.beacon_count, quint8(1));
+    const QPointF beaconCenter = FrameRenderer::algorithmToImagePoint(
+        result.beacons[0].x, result.beacons[0].y);
+    QVERIFY(std::hypot(beaconCenter.x() - 150.0, beaconCenter.y() - 94.0) < 2.0);
+}
+
+void TwoBl3AlgorithmRunnerTests::rendererLimitsCarLampCountByMode()
+{
+    QImage frame(BEACON_IMAGE_W, BEACON_IMAGE_H, QImage::Format_Grayscale8);
+    frame.fill(0);
+    beacon_result_t result = {};
+    result.car_lamp_count = 2U;
+    result.car_lamps[0] = {-40.0f, 0.0f, 4.0f, 20.0f, 0.0f, 1U};
+    result.car_lamps[1] = {40.0f, 0.0f, 4.0f, 20.0f, 0.0f, 1U};
+
+    const QImage single = FrameRenderer::render(
+        frame, result, {}, 1, true, nullptr, CarLampMode::Single);
+    const QImage dual = FrameRenderer::render(
+        frame, result, {}, 1, true, nullptr, CarLampMode::Dual);
+    const QPointF secondCenter = FrameRenderer::algorithmToImagePoint(
+        result.car_lamps[1].cx, result.car_lamps[1].cy);
+    const QPoint pixel(qRound(secondCenter.x()), qRound(secondCenter.y()));
+    QCOMPARE(single.pixelColor(pixel), QColor(Qt::black));
+    QVERIFY(dual.pixelColor(pixel) != QColor(Qt::black));
 }
 
 QTEST_MAIN(TwoBl3AlgorithmRunnerTests)

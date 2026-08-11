@@ -72,6 +72,9 @@ private:
     void setCurrentRow(int row);
     void renderCurrentRow();
     void renderCamera(int cameraIndex);
+    void renderDualLampFusionView(int viewIndex);
+    QImage dualLampFusionImage(int viewIndex) const;
+    void updateLogLayoutUi();
     void togglePlayback();
     void advancePlayback();
     void scheduleNextFrame();
@@ -133,6 +136,7 @@ private:
     std::array<QPushButton*, CarPlanSlotCount> m_loadCarPlanButtons = {};
     std::array<QPushButton*, CarPlanSlotCount> m_loadCarPlanDirButtons = {};
     QPushButton* m_resetCarPlanButton = nullptr;
+    QWidget* m_carPlanPanel = nullptr;
     QPushButton* m_previousButton = nullptr;
     QPushButton* m_nextButton = nullptr;
     QPushButton* m_playButton = nullptr;
@@ -143,9 +147,9 @@ private:
     QLabel* m_carPlanStatusLabel = nullptr;
     std::array<QLabel*, CarPlanSlotCount> m_carPlanStatusLabels = {};
     QHBoxLayout* m_cameraLayout = nullptr;
-    std::array<QGroupBox*, 3> m_cameraGroups = {};
-    std::array<VideoWidget*, 3> m_videoWidgets = {};
-    std::array<QLabel*, 3> m_cameraInfoLabels = {};
+    std::array<QGroupBox*, 4> m_cameraGroups = {};
+    std::array<VideoWidget*, 4> m_videoWidgets = {};
+    std::array<QLabel*, 4> m_cameraInfoLabels = {};
 };
 
 #endif

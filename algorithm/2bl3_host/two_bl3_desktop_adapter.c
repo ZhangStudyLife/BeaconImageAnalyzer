@@ -5,6 +5,9 @@
 #include "zf_common_headfile.h"
 #include "zf_device_mt9v03x.h"
 #include "Image/image.h"
+#include "Image/car_lamp_cross_check.h"
+#include "Image/car_lamp_projection.h"
+#include "Protocols/CameraSpi/camera_spi_slave.h"
 
 #define DESKTOP_IMAGE_W 188
 #define DESKTOP_IMAGE_H 120
@@ -107,7 +110,20 @@ typedef struct
 
 uint8 mt9v03x_image[MT9V03X_H][MT9V03X_W];
 volatile uint8 mt9v03x_finish_flag;
+volatile uint32 mt9v03x_frame_sequence;
+volatile uint32 mt9v03x_frame_timestamp_ms;
 uint16 g_mt9v03x_exp_time;
+static beacon_host_dwt_t g_desktop_dwt;
+static beacon_host_core_debug_t g_desktop_core_debug;
+beacon_host_dwt_t *DWT = &g_desktop_dwt;
+beacon_host_core_debug_t *CoreDebug = &g_desktop_core_debug;
+volatile float g_air_roll_deg;
+volatile float g_air_pitch_deg;
+volatile float g_air_height_mm;
+volatile uint8 g_air_attitude_valid;
+volatile uint8 g_air_height_valid;
+struct image_data g_camera_image_data[IMAGE_CAMERA_COUNT];
+image_frame_meta_t g_camera_image_meta[IMAGE_CAMERA_COUNT];
 static desktop_beacon_track_t g_desktop_beacon_track;
 static desktop_beacon_start_t g_desktop_beacon_start;
 static unsigned char g_desktop_strong_visit[DESKTOP_IMAGE_H][DESKTOP_IMAGE_W];
@@ -115,6 +131,70 @@ static uint16_t g_desktop_strong_queue[DESKTOP_IMAGE_H * DESKTOP_IMAGE_W];
 
 uint8 mt9v03x_init(void)
 {
+    mt9v03x_finish_flag = 0U;
+    mt9v03x_frame_sequence = 0U;
+    mt9v03x_frame_timestamp_ms = 0U;
+    return 0U;
+}
+
+uint8 CameraSpiSlave_StampLocalFrameMeta(void)
+{
+    return 0U;
+}
+
+uint8 CameraSpiSlave_GetCameraId(void)
+{
+    return (uint8)Front;
+}
+
+uint8 CameraSpiSlave_GetTrackSnapshot(car_lamp_track_snapshot_t *out)
+{
+    if(out != NULL)
+    {
+        memset(out, 0, sizeof(*out));
+    }
+    return 0U;
+}
+
+uint8 CarLampCrossCheck_GetRoiAtWithLampHalfLength(
+    const car_lamp_track_snapshot_t *snapshot,
+    image_camera_e camera,
+    uint32 capture_time_ms,
+    float lamp_half_length_px,
+    car_lamp_roi_t *out)
+{
+    (void)snapshot;
+    (void)camera;
+    (void)capture_time_ms;
+    (void)lamp_half_length_px;
+    if(out != NULL)
+    {
+        memset(out, 0, sizeof(*out));
+    }
+    return 0U;
+}
+
+uint8 CarLampCrossCheck_CandidateMatchesRoi(
+    const car_lamp_roi_t *roi,
+    image_camera_e camera,
+    const car_lamp_projection_point_t *source,
+    float gate_px)
+{
+    (void)roi;
+    (void)camera;
+    (void)source;
+    (void)gate_px;
+    return 0U;
+}
+
+uint8 CarLampProjection_ToCenter(
+    image_camera_e camera,
+    const car_lamp_projection_point_t *source,
+    car_lamp_projection_point_t *center)
+{
+    (void)camera;
+    (void)source;
+    (void)center;
     return 0U;
 }
 
@@ -162,6 +242,11 @@ void beacon_image_reset_temporal(void)
     memset(&g_desktop_beacon_track, 0, sizeof(g_desktop_beacon_track));
     memset(&g_desktop_beacon_start, 0, sizeof(g_desktop_beacon_start));
     image_algorithm_params_changed();
+}
+
+void beacon_image_set_car_lamp_mode(unsigned char mode)
+{
+    (void)mode;
 }
 
 static unsigned char strong_component_near_car(float x, float y)
@@ -1151,6 +1236,8 @@ void beacon_image_process(
     }
     memset(result, 0, sizeof(*result));
     memcpy(mt9v03x_image, image, sizeof(mt9v03x_image));
+    mt9v03x_frame_sequence++;
+    mt9v03x_frame_timestamp_ms += 20U;
     mt9v03x_finish_flag = 1U;
     image_update();
 

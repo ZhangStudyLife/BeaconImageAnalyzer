@@ -12,7 +12,9 @@ const QByteArray SeekfreeMagic("\xaa\x02", 2);
 const QByteArray SeekfreeDotMagic("\xaa\x03", 2);
 constexpr quint8 ProtocolVersion1 = 1;
 constexpr quint8 ProtocolVersion2 = 2;
-constexpr quint8 HeaderSize = 28;
+constexpr quint8 ProtocolVersion3 = 3;
+constexpr quint8 LegacyHeaderSize = 28;
+constexpr quint8 Version3HeaderSize = 40;
 constexpr quint8 MarkerSize = 6;
 constexpr quint8 DebugFloatSize = 8;
 constexpr quint8 ParameterHeaderSize = 28;
@@ -20,6 +22,7 @@ constexpr quint8 ParameterEntrySize = 8;
 constexpr quint8 MaxStreamMode = 3;
 constexpr quint8 MaxMarkerCount = 16;
 constexpr quint8 MaxDebugFloatCount = 32;
+constexpr quint8 Version3DebugFloatCount = 3;
 constexpr quint16 MaxParameterCount = 256;
 constexpr qsizetype CrcSize = 4;
 constexpr qsizetype MaxBufferSize = 2 * 1024 * 1024;
@@ -292,13 +295,28 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
             continue;
         }
 
-        if (m_buffer.size() < HeaderSize)
+        if (m_buffer.size() < LegacyHeaderSize)
         {
             break;
         }
 
         const quint8 version = (quint8)m_buffer.at(4);
         const quint8 headerSize = (quint8)m_buffer.at(5);
+        const quint8 expectedHeaderSize = version == ProtocolVersion3
+            ? Version3HeaderSize : LegacyHeaderSize;
+        if ((version != ProtocolVersion1 && version != ProtocolVersion2
+             && version != ProtocolVersion3)
+            || headerSize != expectedHeaderSize)
+        {
+            m_buffer.remove(0, 1);
+            ++m_protocolErrorCount;
+            continue;
+        }
+        if (m_buffer.size() < headerSize)
+        {
+            break;
+        }
+
         const quint8 streamMode = (quint8)m_buffer.at(6);
         const quint8 cameraId = (quint8)m_buffer.at(7);
         const quint16 width = readU16Le(m_buffer, 8);
@@ -313,20 +331,40 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
         const quint64 pixels = (quint64)width * (quint64)height;
         quint64 expectedPayload = (quint64)imageSize
                                   + (quint64)markerCount * markerSize;
-        if (version == ProtocolVersion2)
+        if (version >= ProtocolVersion2)
         {
             expectedPayload += (quint64)debugFloatCount * debugFloatSize;
         }
 
-        if ((version != ProtocolVersion1 && version != ProtocolVersion2)
-            || headerSize != HeaderSize
-            || streamMode > MaxStreamMode || cameraId > 1U
+        quint8 metadataFlags = 0U;
+        quint8 sourceCameraId = 0xffU;
+        quint8 physicalBoardId = cameraId;
+        if (version == ProtocolVersion3)
+        {
+            metadataFlags = (quint8)m_buffer.at(36);
+            sourceCameraId = (quint8)m_buffer.at(37);
+            physicalBoardId = (quint8)m_buffer.at(38);
+        }
+
+        const bool sourceFrameValid = (metadataFlags & 0x01U) != 0U;
+        const quint8 expectedSourceCameraId = cameraId == 0U ? 0U : 2U;
+        const bool validSourceCamera = sourceFrameValid
+            ? sourceCameraId == expectedSourceCameraId
+            : (sourceCameraId == expectedSourceCameraId || sourceCameraId == 0xffU);
+        if (streamMode > MaxStreamMode || cameraId > 1U
             || width == 0U || height == 0U || pixels > MaxImageSize
             || imageSize != pixels || markerCount > MaxMarkerCount
             || markerSize != MarkerSize
-            || (version == ProtocolVersion2
+            || (version >= ProtocolVersion2
                 && (debugFloatCount > MaxDebugFloatCount
                     || debugFloatSize != DebugFloatSize))
+            || (version == ProtocolVersion3
+                 && (debugFloatCount != Version3DebugFloatCount
+                     || (metadataFlags & 0xfcU) != 0U
+                     || !validSourceCamera
+                     || physicalBoardId > 1U
+                     || physicalBoardId != cameraId
+                     || (quint8)m_buffer.at(39) != 0U))
             || payloadSize != expectedPayload)
         {
             m_buffer.remove(0, 1);
@@ -334,7 +372,7 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
             continue;
         }
 
-        const qsizetype packetSize = (qsizetype)HeaderSize + (qsizetype)payloadSize + CrcSize;
+        const qsizetype packetSize = (qsizetype)headerSize + (qsizetype)payloadSize + CrcSize;
         if (packetSize > MaxBufferSize)
         {
             m_buffer.remove(0, 1);
@@ -346,6 +384,28 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
             break;
         }
 
+        if (version == ProtocolVersion3)
+        {
+            const qsizetype debugStart = headerSize
+                                          + static_cast<qsizetype>(imageSize)
+                                          + static_cast<qsizetype>(markerCount) * markerSize;
+            bool debugReservedBytesAreZero = true;
+            for (quint8 index = 0; index < debugFloatCount; ++index)
+            {
+                if ((quint8)m_buffer.at(debugStart + index * DebugFloatSize + 3) != 0U)
+                {
+                    debugReservedBytesAreZero = false;
+                    break;
+                }
+            }
+            if (!debugReservedBytesAreZero)
+            {
+                m_buffer.remove(0, packetSize);
+                ++m_protocolErrorCount;
+                continue;
+            }
+        }
+
         const quint32 expectedCrc = readU32Le(m_buffer, packetSize - CrcSize);
         const quint32 actualCrc = crc32(m_buffer.constData(), packetSize - CrcSize);
         if (expectedCrc != actualCrc)
@@ -355,7 +415,7 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
             continue;
         }
 
-        const QByteArray imagePayload = m_buffer.mid(HeaderSize, imageSize);
+        const QByteArray imagePayload = m_buffer.mid(headerSize, imageSize);
         QImage image = grayImageFromPayload(imagePayload, width, height);
         if (image.isNull())
         {
@@ -370,11 +430,20 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
         frame.protocolVersion = version;
         frame.streamMode = streamMode;
         frame.cameraId = cameraId;
+        frame.sourceCameraId = sourceCameraId;
+        frame.physicalBoardId = physicalBoardId;
         frame.width = width;
         frame.height = height;
         frame.sequence = sequence;
+        if (version == ProtocolVersion3)
+        {
+            frame.sourceFrameSequence = readU32Le(m_buffer, 28);
+            frame.captureTimeMs = readU32Le(m_buffer, 32);
+            frame.sourceFrameValid = (metadataFlags & 0x01U) != 0U;
+            frame.captureTimeValid = (metadataFlags & 0x02U) != 0U;
+        }
         frame.markers.reserve(markerCount);
-        qsizetype markerOffset = HeaderSize + imageSize;
+        qsizetype markerOffset = headerSize + imageSize;
         for (quint8 index = 0; index < markerCount; ++index)
         {
             const quint8 type = (quint8)m_buffer.at(markerOffset);
@@ -397,7 +466,7 @@ BimgParseBatch BimgImageFrameParser::append(const QByteArray& data)
             }
             markerOffset += MarkerSize;
         }
-        if (version == ProtocolVersion2)
+        if (version >= ProtocolVersion2)
         {
             frame.debugFloats.reserve(debugFloatCount);
             qsizetype debugOffset = markerOffset;

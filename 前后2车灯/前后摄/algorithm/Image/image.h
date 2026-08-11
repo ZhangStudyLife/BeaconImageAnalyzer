@@ -45,7 +45,7 @@ typedef struct
 
 #define IMAGE_PARAM_TYPE_FLOAT32                         (0U) /* 参数值为IEEE-754单精度浮点位模式 */
 #define IMAGE_PARAM_TYPE_INT32                           (1U) /* 参数值为有符号32位整数位模式 */
-#define IMAGE_ALGORITHM_BUILD_ID                         (0x20260906UL)
+#define IMAGE_ALGORITHM_BUILD_ID                         (0x20261001UL)
 
 #define IMAGE_PARAM_ID_BEACON_EDGE_THRESHOLD          (0x0100U) /* 边缘信标阈值 */
 #define IMAGE_PARAM_ID_BEACON_TRACK_THRESHOLD         (0x0101U) /* 跟踪补强阈值 */
@@ -181,6 +181,7 @@ extern float top_vertical_min_elongation;
 extern int32 saturated_top_min_gray;
 
 void image_init(void);
+void image_set_car_lamp_mode(uint8 mode);
 void image_update(void);
 uint8 *image_get_frame_buffer(void);
 uint8 *image_prepare_stream_frame(void);

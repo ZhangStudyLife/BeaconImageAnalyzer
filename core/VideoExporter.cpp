@@ -158,7 +158,8 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
                                      const AlgorithmRunner* runner,
                                      const AnnotationModel* annotations,
                                      const ProgressCallback& progress,
-                                     QString* errorMessage) const
+                                     QString* errorMessage,
+                                     CarLampMode carLampMode) const
 {
     VideoReader reader;
     if (!reader.open(inputPath, errorMessage))
@@ -179,6 +180,7 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
 
     AlgorithmRunner fallbackRunner;
     const AlgorithmRunner* activeRunner = runner != nullptr ? runner : &fallbackRunner;
+    activeRunner->setCarLampMode(carLampMode);
     activeRunner->resetTemporal();
     for (int frame = 0; frame < reader.frameCount(); ++frame)
     {
@@ -191,9 +193,11 @@ bool VideoExporter::exportMarkedAvi(const QString& inputPath,
         const beacon_result_t result = activeRunner->process(gray);
         const QImage rendered = FrameRenderer::render(gray,
                                                       result,
-                                                      frameCorrections(annotations, frame),
-                                                      1,
-                                                      true);
+                                                       frameCorrections(annotations, frame),
+                                                       1,
+                                                       true,
+                                                       nullptr,
+                                                       carLampMode);
         writer.write(qImageToBgrMat(rendered));
 
         if (progress && !progress(frame + 1, reader.frameCount()))
@@ -215,7 +219,8 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
                                     double fps,
                                     const AlgorithmRunner* runner,
                                     const ProgressCallback& progress,
-                                    QString* errorMessage) const
+                                    QString* errorMessage,
+                                    CarLampMode carLampMode) const
 {
     VideoReader reader;
     if (!reader.open(inputPath, errorMessage))
@@ -238,6 +243,7 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
 
     AlgorithmRunner fallbackRunner;
     const AlgorithmRunner* activeRunner = runner != nullptr ? runner : &fallbackRunner;
+    activeRunner->setCarLampMode(carLampMode);
     activeRunner->resetTemporal();
     for (int frame = 0; frame < reader.frameCount(); ++frame)
     {
@@ -264,7 +270,10 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
             writeCsvTarget(stream, frame, timeSec, QStringLiteral("beacon"), i, circle, QString());
         }
 
-        const int carLampCount = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
+        const int carLampCount = qMin(
+            BeaconResultUtils::boundedCount(
+                result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT),
+            carLampMode == CarLampMode::Dual ? 2 : 1);
         for (int i = 0; i < carLampCount; ++i)
         {
             const beacon_rect_t& rect = result.car_lamps[i];
@@ -272,7 +281,9 @@ bool VideoExporter::exportResultCsv(const QString& inputPath,
             {
                 continue;
             }
-            writeCsvRectTarget(stream, frame, timeSec, QStringLiteral("car_lamp"), i, rect, QStringLiteral("car0"));
+            writeCsvRectTarget(stream, frame, timeSec,
+                               QStringLiteral("car_lamp"), i, rect,
+                               QStringLiteral("car%1").arg(i));
         }
 
         if (progress && !progress(frame + 1, reader.frameCount()))

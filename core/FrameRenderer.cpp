@@ -325,12 +325,20 @@ QPointF FrameRenderer::algorithmToImagePoint(float x, float y)
     return QPointF(centerX, centerY);
 }
 
+QPointF FrameRenderer::imageDataToImagePoint(float x, float y)
+{
+    const float centerX = (float)BEACON_IMAGE_W * 0.5f + x;
+    const float centerY = (float)BEACON_IMAGE_H * 0.5f + y;
+    return QPointF(centerX, centerY);
+}
+
 QImage FrameRenderer::render(const QImage& grayImage,
                              const beacon_result_t& result,
                              const QVector<CorrectionShape>& corrections,
                              int scale,
                              bool showOverlay,
-                             const AlgorithmHorizonCurve* horizon)
+                             const AlgorithmHorizonCurve* horizon,
+                             CarLampMode carLampMode)
 {
     const int safeScale = qMax(1, scale);
     QImage base = grayImage.convertToFormat(QImage::Format_RGB32);
@@ -375,7 +383,12 @@ QImage FrameRenderer::render(const QImage& grayImage,
         drawTargetCircle(painter, circle, QColor(0, 255, 80), QStringLiteral("B%1").arg(i), safeScale);
     }
 
-    const int carLampCount = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
+    const int carLampDisplayLimit =
+        (carLampMode == CarLampMode::Dual) ? 2 : 1;
+    const int carLampCount = qMin(
+        BeaconResultUtils::boundedCount(
+            result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT),
+        carLampDisplayLimit);
     for (int i = 0; i < carLampCount; ++i)
     {
         const beacon_rect_t& lamp = result.car_lamps[i];
@@ -387,7 +400,7 @@ QImage FrameRenderer::render(const QImage& grayImage,
         drawTargetRect(painter,
                        lamp,
                        QColor(255, 95, 45),
-                       QStringLiteral("CAR %1").arg(i),
+                       QStringLiteral("CAR"),
                        safeScale);
     }
 
@@ -404,8 +417,10 @@ QImage FrameRenderer::render(const QImage& grayImage,
         drawTargetCircle(painter, circle, QColor(255, 220, 40), QStringLiteral("KB%1").arg(i), safeScale);
     }
 
-    const int temporalCarLampCount = BeaconResultUtils::boundedCount(result.temporal_car_lamp_count,
-                                                                     BEACON_MAX_CAR_LAMP_COUNT);
+    const int temporalCarLampCount = qMin(
+        BeaconResultUtils::boundedCount(result.temporal_car_lamp_count,
+                                        BEACON_MAX_CAR_LAMP_COUNT),
+        carLampDisplayLimit);
     for (int i = 0; i < temporalCarLampCount; ++i)
     {
         const beacon_rect_t& lamp = result.temporal_car_lamps[i];
@@ -417,7 +432,7 @@ QImage FrameRenderer::render(const QImage& grayImage,
         drawTargetRect(painter,
                        lamp,
                        QColor(70, 150, 255),
-                       QStringLiteral("KCAR%1").arg(i),
+                       QStringLiteral("CAR"),
                        safeScale);
     }
 

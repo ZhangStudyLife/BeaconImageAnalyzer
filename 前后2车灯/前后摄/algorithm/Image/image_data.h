@@ -37,6 +37,7 @@ struct image_data
 {
     beacon_data beacon_data[IMAGE_MAX_BEACON_COUNT];
     car_lamp_data car_lamp_data[IMAGE_MAX_CAR_LAMP_COUNT];
+    uint8 car_lamp_measured_mask;
 };
 
 static inline void image_data_clear_beacon(beacon_data *beacon)
@@ -102,6 +103,7 @@ static inline void image_data_clear(struct image_data *data)
     {
         image_data_clear_car_lamp(&data->car_lamp_data[i]);
     }
+    data->car_lamp_measured_mask = 0U;
 }
 
 #endif /* IMAGE_DATA_H_ */

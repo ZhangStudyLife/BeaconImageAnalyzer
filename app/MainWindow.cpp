@@ -7,6 +7,7 @@
 #include "BeaconResultUtils.h"
 #include "FrameRenderer.h"
 #include "HorizonCalibration.h"
+#include "ImageLogReviewWindow.h"
 #include "LogReplayWindow.h"
 #include "TcpImageWindow.h"
 #include "HorizonCalibrationWindow.h"
@@ -1149,6 +1150,7 @@ AnalyzerInstance* MainWindow::createInstance(const QString& rootDir,
         }
     }
 
+    instance->runner.setCarLampMode(m_carLampMode);
     m_instances.push_back(instance);
     if (m_currentInstanceId < 0)
     {
@@ -1898,9 +1900,10 @@ void MainWindow::renderInstance(AnalyzerInstance* instance,
     const QImage rendered = FrameRenderer::render(displayImage,
                                                   result,
                                                   visibleCorrections,
-                                                  1,
-                                                  m_showOverlay,
-                                                  &instance->currentHorizon);
+                                                   1,
+                                                   m_showOverlay,
+                                                   &instance->currentHorizon,
+                                                   m_carLampMode);
 
     const int slot = slotForInstance(instance->id);
     if (slot >= 0 && slot < m_videoWidgets.size())
@@ -2010,13 +2013,17 @@ void MainWindow::showLiveFrame(const QImage& gray, quint16 localPort, const QStr
                                   .arg(m_liveFrame.height())
                                   .arg(m_currentFrame));
     updateFrameInfo(result);
+    const int liveCarLampCount = qMin(
+        BeaconResultUtils::carLampCount(result),
+        m_carLampMode == CarLampMode::Dual ? 2 : 1);
     m_frameInfoLabel->setText(QStringLiteral("TCP 实时帧: %1\n本地端口: %2\n来源: %3\n信标: %4  车灯: %5  总目标: %6")
                                   .arg(m_currentFrame)
                                   .arg(m_liveLocalPort)
                                   .arg(m_livePeerName)
                                   .arg(BeaconResultUtils::beaconCount(result))
-                                  .arg(BeaconResultUtils::carLampCount(result))
-                                  .arg(BeaconResultUtils::totalTargetCount(result)));
+                                  .arg(liveCarLampCount)
+                                  .arg(BeaconResultUtils::beaconCount(result) +
+                                       liveCarLampCount));
     m_frameInfoLabel->setText(m_frameInfoLabel->text() + QStringLiteral("\n") +
                               AlgorithmProcessProfiler::format(m_currentProfile, m_usedFps));
     updateTcpStatusLabel(QStringLiteral("最近收到图像：%1").arg(peerName));
@@ -2311,6 +2318,12 @@ void MainWindow::buildUi()
     m_viewModeCombo->addItem(QStringLiteral("原始图像"), QStringLiteral("original"));
     m_viewModeCombo->addItem(QStringLiteral("二值化图像"), QStringLiteral("binary"));
     m_viewModeCombo->setFixedWidth(128);
+    m_carLampModeCombo = new QComboBox(controlsFrame);
+    m_carLampModeCombo->addItem(
+        QStringLiteral("单车灯"), static_cast<int>(CarLampMode::Single));
+    m_carLampModeCombo->addItem(
+        QStringLiteral("双车灯"), static_cast<int>(CarLampMode::Dual));
+    m_carLampModeCombo->setFixedWidth(100);
     m_speedCombo = new QComboBox(controlsFrame);
     m_speedCombo->addItem(QStringLiteral("1/8倍速"), 0.125);
     m_speedCombo->addItem(QStringLiteral("1/4倍速"), 0.25);
@@ -2334,6 +2347,8 @@ void MainWindow::buildUi()
     viewLabel->setObjectName(QStringLiteral("SoftLabel"));
     auto* speedLabel = new QLabel(QStringLiteral("倍速"), controlsFrame);
     speedLabel->setObjectName(QStringLiteral("SoftLabel"));
+    auto* carLampModeLabel = new QLabel(QStringLiteral("车灯模式"), controlsFrame);
+    carLampModeLabel->setObjectName(QStringLiteral("SoftLabel"));
     auto* frameLabel = new QLabel(QStringLiteral("Frame"), controlsFrame);
     frameLabel->setObjectName(QStringLiteral("SoftLabel"));
     auto* timeLabel = new QLabel(QStringLiteral("Time"), controlsFrame);
@@ -2347,6 +2362,8 @@ void MainWindow::buildUi()
     transportRow->addSpacing(10);
     transportRow->addWidget(viewLabel);
     transportRow->addWidget(m_viewModeCombo);
+    transportRow->addWidget(carLampModeLabel);
+    transportRow->addWidget(m_carLampModeCombo);
     transportRow->addWidget(speedLabel);
     transportRow->addWidget(m_speedCombo);
     transportRow->addStretch(1);
@@ -2403,6 +2420,16 @@ void MainWindow::buildUi()
         renderAllDisplayedInstances();
         refreshCurrentInstanceUi();
     });
+    connect(m_carLampModeCombo,
+            qOverload<int>(&QComboBox::currentIndexChanged),
+            this,
+            [this]() {
+                if (m_updatingControls)
+                {
+                    return;
+                }
+                applyCarLampMode(carLampMode(), true);
+            });
     connect(m_speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
         setPlaybackSpeed(m_speedCombo->currentData().toDouble());
     });
@@ -2469,6 +2496,7 @@ void MainWindow::buildMenus()
     fileMenu->addAction(QStringLiteral("打开视频"), this, &MainWindow::openVideo);
     fileMenu->addAction(QStringLiteral("新增 TCP 监视窗口"), this, &MainWindow::configureTcpReceiver);
     fileMenu->addAction(QStringLiteral("打开 JustFloat 日志"), this, &MainWindow::openJustFloatLogWindow);
+    fileMenu->addAction(QStringLiteral("图像-日志联调"), this, &MainWindow::openImageLogReviewWindow);
     fileMenu->addAction(QStringLiteral("地平线标定"), this, &MainWindow::openHorizonCalibrationWindow);
     fileMenu->addAction(QStringLiteral("信标样本标注"), this, &MainWindow::openBeaconLabelWindow);
     fileMenu->addAction(QStringLiteral("保存标注"), this, &MainWindow::saveAnnotation);
@@ -2792,6 +2820,14 @@ void MainWindow::openJustFloatLogWindow()
     statusBar()->showMessage(QStringLiteral("已打开 JustFloat 日志回放窗口。"), 3000);
 }
 
+void MainWindow::openImageLogReviewWindow()
+{
+    auto* window = new ImageLogReviewWindow;
+    window->show();
+    window->raise();
+    statusBar()->showMessage(QStringLiteral("已打开图像-日志联调窗口。"), 3000);
+}
+
 void MainWindow::openHorizonCalibrationWindow()
 {
     auto* window = new HorizonCalibrationWindow;
@@ -2997,7 +3033,8 @@ void MainWindow::exportMarkedAvi()
                                                  QApplication::processEvents();
                                                  return !progress.wasCanceled();
                                              },
-                                             &error);
+                                             &error,
+                                             m_carLampMode);
     progress.setValue(progress.maximum());
     if (!ok)
     {
@@ -3040,7 +3077,8 @@ void MainWindow::exportCsv()
                                                  QApplication::processEvents();
                                                  return !progress.wasCanceled();
                                              },
-                                             &error);
+                                             &error,
+                                             m_carLampMode);
     progress.setValue(progress.maximum());
     if (!ok)
     {
@@ -3404,6 +3442,11 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
         ? currentInstance()->currentDetectionMetrics
         : AlgorithmDetectionMetrics{};
     const QString profileText = AlgorithmProcessProfiler::format(profile, m_usedFps);
+    const int displayedCarLampCount = qMin(
+        BeaconResultUtils::carLampCount(result),
+        m_carLampMode == CarLampMode::Dual ? 2 : 1);
+    const int displayedTargetCount =
+        BeaconResultUtils::beaconCount(result) + displayedCarLampCount;
     const bool useLegacyBeacons = BeaconResultUtils::usesLegacyBeacons(result);
     const beacon_circle_t* beacons = useLegacyBeacons ? result.circles : result.beacons;
     const int beaconLimit = useLegacyBeacons
@@ -3425,7 +3468,7 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
                     .arg(pixelArea);
     }
 
-    const int carLampLimit = BeaconResultUtils::boundedCount(result.car_lamp_count, BEACON_MAX_CAR_LAMP_COUNT);
+    const int carLampLimit = displayedCarLampCount;
     for (int i = 0; i < carLampLimit; ++i)
     {
         const beacon_rect_t& rect = result.car_lamps[i];
@@ -3440,8 +3483,7 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
             pixelAreaText = QStringLiteral("%1 px").arg(
                 metrics.carLampPixelAreas[static_cast<std::size_t>(i)]);
         }
-        text += QStringLiteral("车灯 #%1  CX=%2  CY=%3  L=%4  W=%5  Angle=%6  PixelArea=%7  FitArea=%8\n")
-                    .arg(i)
+        text += QStringLiteral("车灯  CX=%1  CY=%2  L=%3  W=%4  Angle=%5  PixelArea=%6  FitArea=%7\n")
                     .arg(rect.cx, 0, 'f', 2)
                     .arg(rect.cy, 0, 'f', 2)
                     .arg(rect.length, 0, 'f', 2)
@@ -3457,8 +3499,8 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
                                   .arg(frameTime(m_currentFrame), 0, 'f', 3)
                                   .arg(frameTime(qMax(0, m_reader.frameCount() - 1)), 0, 'f', 3)
                                   .arg(BeaconResultUtils::beaconCount(result))
-                                  .arg(BeaconResultUtils::carLampCount(result))
-                                  .arg(BeaconResultUtils::totalTargetCount(result)));
+                                  .arg(displayedCarLampCount)
+                                  .arg(displayedTargetCount));
     m_frameInfoLabel->setText(m_frameInfoLabel->text() + QStringLiteral("\n") + profileText);
 
     if (text.isEmpty())
@@ -3469,8 +3511,8 @@ void MainWindow::updateFrameInfo(const beacon_result_t& result)
     {
         text.prepend(QStringLiteral("信标: %1  车灯: %2  总目标: %3\n")
                          .arg(BeaconResultUtils::beaconCount(result))
-                         .arg(BeaconResultUtils::carLampCount(result))
-                         .arg(BeaconResultUtils::totalTargetCount(result)));
+                         .arg(displayedCarLampCount)
+                         .arg(displayedTargetCount));
     }
     text.prepend(profileText + QStringLiteral("\n"));
     m_resultText->setPlainText(text);
@@ -4502,6 +4544,9 @@ void MainWindow::saveProject()
     session.insert(QStringLiteral("zoom"), m_zoom);
     session.insert(QStringLiteral("show_overlay"), m_showOverlay);
     session.insert(QStringLiteral("view_mode"), viewMode());
+    session.insert(QStringLiteral("car_lamp_mode"),
+                   m_carLampMode == CarLampMode::Dual ?
+                       QStringLiteral("dual") : QStringLiteral("single"));
     session.insert(QStringLiteral("window_geometry"), QString::fromLatin1(saveGeometry().toBase64()));
     root.insert(QStringLiteral("session"), session);
 
@@ -4581,6 +4626,11 @@ bool MainWindow::loadProject()
     m_currentFrame = session.value(QStringLiteral("current_frame")).toInt(m_currentFrame);
     m_zoom = 1;
     m_showOverlay = session.value(QStringLiteral("show_overlay")).toBool(m_showOverlay);
+    const CarLampMode restoredCarLampMode =
+        session.value(QStringLiteral("car_lamp_mode"))
+                    .toString(QStringLiteral("single")) == QStringLiteral("dual") ?
+            CarLampMode::Dual : CarLampMode::Single;
+    applyCarLampMode(restoredCarLampMode, false);
 
     const QString restoredViewMode = session.value(QStringLiteral("view_mode")).toString(QStringLiteral("original"));
     const int viewIndex = m_viewModeCombo->findData(restoredViewMode);
@@ -4621,6 +4671,60 @@ QString MainWindow::viewMode() const
         return QStringLiteral("original");
     }
     return m_viewModeCombo->currentData().toString();
+}
+
+CarLampMode MainWindow::carLampMode() const
+{
+    if (m_carLampModeCombo == nullptr)
+    {
+        return m_carLampMode;
+    }
+    return (m_carLampModeCombo->currentData().toInt() ==
+            static_cast<int>(CarLampMode::Dual)) ?
+        CarLampMode::Dual : CarLampMode::Single;
+}
+
+void MainWindow::applyCarLampMode(CarLampMode mode, bool rebuildCurrentFrame)
+{
+    m_carLampMode = (mode == CarLampMode::Dual) ?
+        CarLampMode::Dual : CarLampMode::Single;
+    if (m_carLampModeCombo != nullptr)
+    {
+        const int index = m_carLampModeCombo->findData(
+            static_cast<int>(m_carLampMode));
+        if (index >= 0 && index != m_carLampModeCombo->currentIndex())
+        {
+            QSignalBlocker blocker(m_carLampModeCombo);
+            m_carLampModeCombo->setCurrentIndex(index);
+        }
+    }
+    for (AnalyzerInstance* instance : m_instances)
+    {
+        if (instance == nullptr)
+        {
+            continue;
+        }
+        instance->runner.setCarLampMode(m_carLampMode);
+        resetInstanceTemporal(instance);
+    }
+    if (!rebuildCurrentFrame)
+    {
+        return;
+    }
+    if (m_liveMode && !m_liveFrame.isNull())
+    {
+        renderAllDisplayedInstances();
+        refreshCurrentInstanceUi();
+    }
+    else if (m_reader.isOpen())
+    {
+        showFrame(m_currentFrame);
+    }
+    else
+    {
+        renderAllDisplayedInstances();
+        refreshCurrentInstanceUi();
+    }
 }
 
 QString MainWindow::defaultOutputPath(const QString& suffix) const

@@ -9,6 +9,8 @@
 
 extern uint8 mt9v03x_image[MT9V03X_H][MT9V03X_W];
 extern volatile uint8 mt9v03x_finish_flag;
+extern volatile uint32 mt9v03x_frame_sequence;
+extern volatile uint32 mt9v03x_frame_timestamp_ms;
 extern uint16 g_mt9v03x_exp_time;
 
 uint8 mt9v03x_init(void);

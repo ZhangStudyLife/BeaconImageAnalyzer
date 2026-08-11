@@ -74,6 +74,10 @@ bool isWaveformValueAvailable(const JustFloatLogRow& row,
     {
         return false;
     }
+    if (row.layout == JustFloatLogLayout::DualLampFusionV1)
+    {
+        return true;
+    }
     if (channelIndex >= 1 && channelIndex <= 18)
     {
         const int offset = channelIndex - 1;

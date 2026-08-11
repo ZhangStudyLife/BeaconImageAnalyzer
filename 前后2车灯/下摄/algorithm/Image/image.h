@@ -4,7 +4,7 @@
 #include "zf_common_headfile.h"
 #include "Image/image_data.h"
 
-#define IMAGE_ALGORITHM_BUILD_ID (0x20260816UL)
+#define IMAGE_ALGORITHM_BUILD_ID (0x20261002UL)
 
 #define IPC_REMOTE_PARAM_OP_SET                (1U)
 #define IPC_REMOTE_PARAM_OP_GET                (2U)

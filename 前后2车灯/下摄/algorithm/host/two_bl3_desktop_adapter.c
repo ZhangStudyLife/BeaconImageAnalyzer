@@ -67,6 +67,7 @@ struct image_data image_data[IMAGE_CAMERA_COUNT];
 static uint8 s_screen_mode;
 static desktop_telemetry_t s_telemetry;
 static uint32_t s_processed_frame_count;
+static unsigned char s_car_lamp_mode = 1U;
 
 static float desktop_x(float board_x)
 {
@@ -114,6 +115,7 @@ void beacon_image_init(void)
     mt9v03x_finish_flag = 0U;
     s_screen_mode = IMAGE_DEBUG_SCREEN_MODE_DATA;
     s_processed_frame_count = 0U;
+    s_car_lamp_mode = 1U;
     image_down_horizon_init();
     image_down_init();
 }
@@ -124,6 +126,13 @@ void beacon_image_reset_temporal(void)
     s_processed_frame_count = 0U;
     image_down_horizon_invalidate();
     image_down_init();
+    image_down_set_car_lamp_mode(s_car_lamp_mode);
+}
+
+void beacon_image_set_car_lamp_mode(unsigned char mode)
+{
+    s_car_lamp_mode = (mode == 2U) ? 2U : 1U;
+    image_down_set_car_lamp_mode(s_car_lamp_mode);
 }
 
 void beacon_image_set_telemetry(unsigned char board_id,

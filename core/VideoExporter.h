@@ -2,6 +2,7 @@
 #define VIDEO_EXPORTER_H
 
 #include "AnnotationModel.h"
+#include "AlgorithmRunner.h"
 
 #include <QString>
 
@@ -20,14 +21,16 @@ public:
                          const AlgorithmRunner* runner,
                          const AnnotationModel* annotations,
                          const ProgressCallback& progress,
-                         QString* errorMessage) const;
+                         QString* errorMessage,
+                         CarLampMode carLampMode = CarLampMode::Single) const;
 
     bool exportResultCsv(const QString& inputPath,
                          const QString& outputPath,
                          double fps,
                          const AlgorithmRunner* runner,
                          const ProgressCallback& progress,
-                         QString* errorMessage) const;
+                         QString* errorMessage,
+                         CarLampMode carLampMode = CarLampMode::Single) const;
 };
 
 #endif
