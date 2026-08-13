@@ -5,8 +5,6 @@
 #include "zf_common_headfile.h"
 #include "zf_device_mt9v03x.h"
 #include "Image/image.h"
-#include "Image/car_lamp_cross_check.h"
-#include "Image/car_lamp_projection.h"
 #include "Protocols/CameraSpi/camera_spi_slave.h"
 
 #define DESKTOP_IMAGE_W 188
@@ -122,8 +120,6 @@ volatile float g_air_pitch_deg;
 volatile float g_air_height_mm;
 volatile uint8 g_air_attitude_valid;
 volatile uint8 g_air_height_valid;
-struct image_data g_camera_image_data[IMAGE_CAMERA_COUNT];
-image_frame_meta_t g_camera_image_meta[IMAGE_CAMERA_COUNT];
 static desktop_beacon_track_t g_desktop_beacon_track;
 static desktop_beacon_start_t g_desktop_beacon_start;
 static unsigned char g_desktop_strong_visit[DESKTOP_IMAGE_H][DESKTOP_IMAGE_W];
@@ -145,57 +141,6 @@ uint8 CameraSpiSlave_StampLocalFrameMeta(void)
 uint8 CameraSpiSlave_GetCameraId(void)
 {
     return (uint8)Front;
-}
-
-uint8 CameraSpiSlave_GetTrackSnapshot(car_lamp_track_snapshot_t *out)
-{
-    if(out != NULL)
-    {
-        memset(out, 0, sizeof(*out));
-    }
-    return 0U;
-}
-
-uint8 CarLampCrossCheck_GetRoiAtWithLampHalfLength(
-    const car_lamp_track_snapshot_t *snapshot,
-    image_camera_e camera,
-    uint32 capture_time_ms,
-    float lamp_half_length_px,
-    car_lamp_roi_t *out)
-{
-    (void)snapshot;
-    (void)camera;
-    (void)capture_time_ms;
-    (void)lamp_half_length_px;
-    if(out != NULL)
-    {
-        memset(out, 0, sizeof(*out));
-    }
-    return 0U;
-}
-
-uint8 CarLampCrossCheck_CandidateMatchesRoi(
-    const car_lamp_roi_t *roi,
-    image_camera_e camera,
-    const car_lamp_projection_point_t *source,
-    float gate_px)
-{
-    (void)roi;
-    (void)camera;
-    (void)source;
-    (void)gate_px;
-    return 0U;
-}
-
-uint8 CarLampProjection_ToCenter(
-    image_camera_e camera,
-    const car_lamp_projection_point_t *source,
-    car_lamp_projection_point_t *center)
-{
-    (void)camera;
-    (void)source;
-    (void)center;
-    return 0U;
 }
 
 void flash_init(void)

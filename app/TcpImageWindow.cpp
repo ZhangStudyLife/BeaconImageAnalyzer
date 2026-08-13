@@ -1191,18 +1191,20 @@ void TcpImageWindow::startRecording()
         return;
     }
     if (m_lastReceivedFrame.protocol != ImageFrameProtocol::Bimg
-        || m_lastReceivedFrame.protocolVersion != 3U
+        || (m_lastReceivedFrame.protocolVersion != 2U
+            && m_lastReceivedFrame.protocolVersion != 3U)
         || m_lastReceivedFrame.streamMode != 0U)
     {
         QMessageBox::information(
             this,
             QStringLiteral("开始录像"),
-            QStringLiteral("同步录像只支持 BIMG v3 Raw 灰度帧，请先切换图传模式。"));
+            QStringLiteral("录像只支持 BIMG v2/v3 Raw 灰度帧，请先切换图传模式。"));
         return;
     }
-    if ((m_lastReceivedFrame.sourceCameraId != 0U
-         && m_lastReceivedFrame.sourceCameraId != 2U)
-        || m_lastReceivedFrame.physicalBoardId > 1U)
+    if (m_lastReceivedFrame.protocolVersion == 3U &&
+        ((m_lastReceivedFrame.sourceCameraId != 0U
+          && m_lastReceivedFrame.sourceCameraId != 2U)
+         || m_lastReceivedFrame.physicalBoardId > 1U))
     {
         QMessageBox::information(
             this,
@@ -1318,7 +1320,7 @@ void TcpImageWindow::appendRecordingFrame(const BimgImageFrame& frame,
         return;
     }
     if (frame.protocol != ImageFrameProtocol::Bimg
-        || frame.protocolVersion != 3U
+        || (frame.protocolVersion != 2U && frame.protocolVersion != 3U)
         || frame.streamMode != 0U)
     {
         return;
@@ -1447,9 +1449,13 @@ void TcpImageWindow::startCalibrationRecording()
     double heightMm = 0.0;
     bool attitudeValid = false;
     bool heightValid = false;
-    if (!frameAttitude(m_lastReceivedFrame, &rollDeg, &pitchDeg, &attitudeValid)
-        || !frameHeight(m_lastReceivedFrame, &heightMm, &heightValid)
-        || !attitudeValid || !heightValid)
+    const bool hasAttitude = frameAttitude(m_lastReceivedFrame,
+                                           &rollDeg,
+                                           &pitchDeg,
+                                           &attitudeValid);
+    const bool hasHeight = frameHeight(m_lastReceivedFrame, &heightMm, &heightValid);
+    if (m_lastReceivedFrame.protocolVersion == 3U &&
+        (!hasAttitude || !hasHeight || !attitudeValid || !heightValid))
     {
         QMessageBox::information(this,
                                  QStringLiteral("开始标定录像"),
