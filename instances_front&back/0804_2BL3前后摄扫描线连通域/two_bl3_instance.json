@@ -1,7 +1,0 @@
-{
-    "type": "two_bl3_firmware_snapshot",
-    "image_directory": "algorithm/Image",
-    "host_adapter": "algorithm/host/two_bl3_desktop_adapter.c",
-    "algorithm_build_id": "0x20260933",
-    "self_contained": true
-}
