@@ -1,0 +1,11 @@
+********* Start testing of ImageFrameSidecarTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 15.2.0), windows 11
+PASS   : ImageFrameSidecarTests::initTestCase()
+PASS   : ImageFrameSidecarTests::roundTripsRecords()
+PASS   : ImageFrameSidecarTests::rejectsBadHeader()
+PASS   : ImageFrameSidecarTests::rejectsNonContinuousIndices()
+PASS   : ImageFrameSidecarTests::rejectsOutOfRangeValues()
+PASS   : ImageFrameSidecarTests::rejectsInvalidSourceBoardMapping()
+PASS   : ImageFrameSidecarTests::cleanupTestCase()
+Totals: 7 passed, 0 failed, 0 skipped, 0 blacklisted, 89ms
+********* Finished testing of ImageFrameSidecarTests *********

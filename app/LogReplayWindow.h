@@ -29,6 +29,7 @@ class QTimer;
 class QUdpSocket;
 class LogWaveformWindow;
 class VideoWidget;
+class AlertTimelineSlider;
 
 class LogReplayWindow : public QWidget
 {
@@ -83,6 +84,7 @@ private:
     void showAllCameras();
     void updateCameraVisibility();
     void updateInfoText();
+    void updateAlertPresentation();
     void drawCarPlanOverlay(QImage* image, int cameraIndex, int slot) const;
     void drawMappedDetectionsOverlay(QImage* image, int cameraIndex) const;
     void drawMotionOverlay(QImage* image, int cameraIndex) const;
@@ -141,7 +143,7 @@ private:
     QPushButton* m_nextButton = nullptr;
     QPushButton* m_playButton = nullptr;
     QPushButton* m_returnGridButton = nullptr;
-    QSlider* m_slider = nullptr;
+    AlertTimelineSlider* m_slider = nullptr;
     QSpinBox* m_frameSpin = nullptr;
     QComboBox* m_speedCombo = nullptr;
     QLabel* m_carPlanStatusLabel = nullptr;

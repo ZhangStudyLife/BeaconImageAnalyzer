@@ -1,0 +1,36 @@
+********* Start testing of JustFloatLogTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 15.2.0), windows 11
+PASS   : JustFloatLogTests::initTestCase()
+PASS   : JustFloatLogTests::channelCatalogAndValues()
+PASS   : JustFloatLogTests::motionCoordinateTransform()
+PASS   : JustFloatLogTests::parseTextDatagram(legacy-payload)
+PASS   : JustFloatLogTests::parseTextDatagram(legacy-full-tail)
+PASS   : JustFloatLogTests::parseTextDatagram(motion-payload-tail)
+PASS   : JustFloatLogTests::parseTextDatagram(crsf-payload)
+PASS   : JustFloatLogTests::parseTextDatagram(fused-payload)
+PASS   : JustFloatLogTests::parseTextDatagram(fused-full-tail)
+PASS   : JustFloatLogTests::parseBinaryDatagram(legacy-payload)
+PASS   : JustFloatLogTests::parseBinaryDatagram(legacy-full-tail)
+PASS   : JustFloatLogTests::parseBinaryDatagram(motion-payload-tail)
+PASS   : JustFloatLogTests::parseBinaryDatagram(crsf-payload)
+PASS   : JustFloatLogTests::parseBinaryDatagram(fused-payload)
+PASS   : JustFloatLogTests::parseBinaryDatagram(fused-full-tail)
+PASS   : JustFloatLogTests::preferTextForBinarySizedPayload()
+PASS   : JustFloatLogTests::rejectInvalidDatagrams()
+PASS   : JustFloatLogTests::loadLegacyAndCurrentCsv()
+PASS   : JustFloatLogTests::validateCsvHeadersAndLengths()
+PASS   : JustFloatLogTests::serializeAndReloadRows()
+QWARN  : JustFloatLogTests::recorderStateAndRoundTrip() Empty filename passed to function
+PASS   : JustFloatLogTests::recorderStateAndRoundTrip()
+PASS   : JustFloatLogTests::udpCrsfRecordingRoundTrip()
+PASS   : JustFloatLogTests::dualLayoutDatagramAndCsv()
+PASS   : JustFloatLogTests::dualRecorderRejectsMixedLayout()
+PASS   : JustFloatLogTests::singleLampRoiDatagramAndCsv()
+SKIP   : JustFloatLogTests::loadExternalFlightLog() BEACON_TEST_FLIGHT_LOG is not set
+C:/danpianji/BeaconImageAnalyzer/tests/JustFloatLogTests.cpp(844) : failure location
+PASS   : JustFloatLogTests::waveformViewportNavigation()
+PASS   : JustFloatLogTests::waveformHistoryQueryAndCleanup()
+PASS   : JustFloatLogTests::waveformHistorySparseContinuityAndGaps()
+PASS   : JustFloatLogTests::cleanupTestCase()
+Totals: 29 passed, 0 failed, 1 skipped, 0 blacklisted, 84ms
+********* Finished testing of JustFloatLogTests *********

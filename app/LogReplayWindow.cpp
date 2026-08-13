@@ -25,6 +25,8 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QStyle>
+#include <QStyleOptionSlider>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStringList>
@@ -37,6 +39,80 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+
+class AlertTimelineSlider final : public QSlider
+{
+public:
+    explicit AlertTimelineSlider(QWidget* parent = nullptr)
+        : QSlider(Qt::Horizontal, parent)
+    {
+    }
+
+    void setAlertFrames(const QVector<int>& frames)
+    {
+        m_alertRanges.clear();
+        for (int frame : frames)
+        {
+            if (!m_alertRanges.isEmpty() && frame == m_alertRanges.last().second + 1)
+            {
+                m_alertRanges.last().second = frame;
+            }
+            else
+            {
+                m_alertRanges.push_back(qMakePair(frame, frame));
+            }
+        }
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        QSlider::paintEvent(event);
+        if (m_alertRanges.isEmpty() || maximum() <= minimum())
+        {
+            return;
+        }
+
+        QStyleOptionSlider option;
+        initStyleOption(&option);
+        const QRect groove = style()->subControlRect(QStyle::CC_Slider,
+                                                      &option,
+                                                      QStyle::SC_SliderGroove,
+                                                      this);
+        const QRect handle = style()->subControlRect(QStyle::CC_Slider,
+                                                      &option,
+                                                      QStyle::SC_SliderHandle,
+                                                      this);
+        const int startX = groove.left() + handle.width() / 2;
+        const int endX = groove.right() - handle.width() / 2;
+        const int span = qMax(1, endX - startX);
+        constexpr int MinimumAlertWidth = 1;
+
+        QPainter painter(this);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(255, 45, 45));
+        for (const QPair<int, int>& range : m_alertRanges)
+        {
+            const qreal firstRatio = static_cast<qreal>(range.first - minimum()) /
+                                     static_cast<qreal>(maximum() - minimum());
+            const qreal lastRatio = static_cast<qreal>(range.second - minimum()) /
+                                    static_cast<qreal>(maximum() - minimum());
+            const int firstX = startX + qRound(firstRatio * span);
+            const int lastX = startX + qRound(lastRatio * span);
+            const int width = qMax(MinimumAlertWidth, lastX - firstX + 1);
+            painter.drawRoundedRect(QRect(firstX - MinimumAlertWidth / 2,
+                                          groove.center().y() - 3,
+                                          width,
+                                          6),
+                                    2,
+                                    2);
+        }
+    }
+
+private:
+    QVector<QPair<int, int>> m_alertRanges;
+};
 
 namespace
 {
@@ -474,7 +550,7 @@ LogReplayWindow::LogReplayWindow(QWidget* parent)
     m_playButton = new QPushButton(QStringLiteral("播放"), this);
     m_previousButton = new QPushButton(QStringLiteral("上一帧"), this);
     m_nextButton = new QPushButton(QStringLiteral("下一帧"), this);
-    m_slider = new QSlider(Qt::Horizontal, this);
+    m_slider = new AlertTimelineSlider(this);
     m_slider->setRange(0, 0);
     m_frameSpin = new QSpinBox(this);
     m_frameSpin->setRange(0, 0);
@@ -1197,6 +1273,15 @@ bool LogReplayWindow::loadCsv(const QString& path)
 
     const int lastRow = qMax(0, m_log.rowCount() - 1);
     m_slider->setRange(0, lastRow);
+    QVector<int> alertFrames;
+    for (int rowIndex = 0; rowIndex < m_log.rowCount(); ++rowIndex)
+    {
+        if (m_log.rowAt(rowIndex).crsfStd8)
+        {
+            alertFrames.push_back(rowIndex);
+        }
+    }
+    m_slider->setAlertFrames(alertFrames);
     m_frameSpin->setRange(0, lastRow);
     m_statusLabel->setText(QStringLiteral("%1 | %2 行")
                                .arg(QFileInfo(path).fileName())
@@ -1360,6 +1445,7 @@ void LogReplayWindow::setCurrentRow(int row)
 void LogReplayWindow::renderCurrentRow()
 {
     updateLogLayoutUi();
+    updateAlertPresentation();
     const JustFloatLogRow* row = currentRow();
     if (row != nullptr && row->layout == JustFloatLogLayout::DualLampFusionV1)
     {
@@ -1372,6 +1458,19 @@ void LogReplayWindow::renderCurrentRow()
     for (int i = 0; i < CameraCount; ++i)
     {
         renderCamera(i);
+    }
+}
+
+void LogReplayWindow::updateAlertPresentation()
+{
+    const JustFloatLogRow* row = currentRow();
+    const bool highlighted = row != nullptr && row->crsfStd8;
+    for (VideoWidget* widget : m_videoWidgets)
+    {
+        if (widget != nullptr)
+        {
+            widget->setAlertHighlighted(highlighted);
+        }
     }
 }
 

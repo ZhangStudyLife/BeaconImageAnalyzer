@@ -1,0 +1,19 @@
+********* Start testing of HorizonCalibrationTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 15.2.0), windows 11
+PASS   : HorizonCalibrationTests::initTestCase()
+PASS   : HorizonCalibrationTests::clipsInfiniteLine()
+PASS   : HorizonCalibrationTests::savesAndLoadsCurveSession()
+PASS   : HorizonCalibrationTests::loadsLegacyLineSession()
+PASS   : HorizonCalibrationTests::loadsVersion2Session()
+PASS   : HorizonCalibrationTests::fitsSyntheticCurvesWithOutliers()
+PASS   : HorizonCalibrationTests::rejectsTooFewSamples()
+PASS   : HorizonCalibrationTests::exportsPortableHeader()
+PASS   : HorizonCalibrationTests::loadsPhysicalModel()
+PASS   : HorizonCalibrationTests::loadsHeightCompensatedModel()
+PASS   : HorizonCalibrationTests::predictsAndReloadsDownBoundary()
+PASS   : HorizonCalibrationTests::downFitKeepsCoverageDraftNonExportable()
+PASS   : HorizonCalibrationTests::recordsPairedFrames()
+PASS   : HorizonCalibrationTests::recordsLegacyV2WithoutSyncSidecar()
+PASS   : HorizonCalibrationTests::cleanupTestCase()
+Totals: 15 passed, 0 failed, 0 skipped, 0 blacklisted, 933ms
+********* Finished testing of HorizonCalibrationTests *********

@@ -1,0 +1,123 @@
+Start testing: Aug 13 23:16 中国标准时间
+----------------------------------------------------------
+1/8 Testing: BeaconImageAnalyzerTests
+1/8 Test: BeaconImageAnalyzerTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/BeaconImageAnalyzerTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"BeaconImageAnalyzerTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.11 sec
+----------------------------------------------------------
+Test Passed.
+"BeaconImageAnalyzerTests" end time: Aug 13 23:16 中国标准时间
+"BeaconImageAnalyzerTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/8 Testing: BimgImageFrameParserTests
+2/8 Test: BimgImageFrameParserTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/BimgImageFrameParserTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"BimgImageFrameParserTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Failed.
+"BimgImageFrameParserTests" end time: Aug 13 23:16 中国标准时间
+"BimgImageFrameParserTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/8 Testing: ImageFrameSidecarTests
+3/8 Test: ImageFrameSidecarTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/ImageFrameSidecarTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"ImageFrameSidecarTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Failed.
+"ImageFrameSidecarTests" end time: Aug 13 23:16 中国标准时间
+"ImageFrameSidecarTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/8 Testing: ImageLogAlignerTests
+4/8 Test: ImageLogAlignerTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/ImageLogAlignerTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"ImageLogAlignerTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Failed.
+"ImageLogAlignerTests" end time: Aug 13 23:16 中国标准时间
+"ImageLogAlignerTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/8 Testing: HorizonCalibrationTests
+5/8 Test: HorizonCalibrationTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/HorizonCalibrationTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"HorizonCalibrationTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Failed.
+"HorizonCalibrationTests" end time: Aug 13 23:16 中国标准时间
+"HorizonCalibrationTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/8 Testing: BeaconLabelSessionTests
+6/8 Test: BeaconLabelSessionTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/BeaconLabelSessionTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"BeaconLabelSessionTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Failed.
+"BeaconLabelSessionTests" end time: Aug 13 23:16 中国标准时间
+"BeaconLabelSessionTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/8 Testing: TwoBl3AlgorithmRunnerTests
+7/8 Test: TwoBl3AlgorithmRunnerTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/TwoBl3AlgorithmRunnerTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"TwoBl3AlgorithmRunnerTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Failed.
+"TwoBl3AlgorithmRunnerTests" end time: Aug 13 23:16 中国标准时间
+"TwoBl3AlgorithmRunnerTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/8 Testing: DownHorizonImplicitTests
+8/8 Test: DownHorizonImplicitTests
+Command: "C:/danpianji/BeaconImageAnalyzer/build-crsf-check/DownHorizonImplicitTests.exe"
+Directory: C:/danpianji/BeaconImageAnalyzer/build-crsf-check
+"DownHorizonImplicitTests" start time: Aug 13 23:16 中国标准时间
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Failed.
+"DownHorizonImplicitTests" end time: Aug 13 23:16 中国标准时间
+"DownHorizonImplicitTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Aug 13 23:16 中国标准时间

@@ -108,6 +108,16 @@ void VideoWidget::setSelected(bool selected)
     update();
 }
 
+void VideoWidget::setAlertHighlighted(bool highlighted)
+{
+    if (m_alertHighlighted == highlighted)
+    {
+        return;
+    }
+    m_alertHighlighted = highlighted;
+    update();
+}
+
 QSize VideoWidget::sizeHint() const
 {
     if (!m_image.isNull())
@@ -322,6 +332,11 @@ void VideoWidget::paintEvent(QPaintEvent* event)
             painter.setPen(selectedPen);
             painter.drawRect(rect().adjusted(2, 2, -2, -2));
         }
+        if (m_alertHighlighted)
+        {
+            painter.setPen(QPen(QColor(255, 45, 45), 6));
+            painter.drawRect(rect().adjusted(3, 3, -4, -4));
+        }
         return;
     }
 
@@ -339,6 +354,11 @@ void VideoWidget::paintEvent(QPaintEvent* event)
             selectedPen.setWidth(4);
             painter.setPen(selectedPen);
             painter.drawRect(rect().adjusted(2, 2, -2, -2));
+        }
+        if (m_alertHighlighted)
+        {
+            painter.setPen(QPen(QColor(255, 45, 45), 6));
+            painter.drawRect(rect().adjusted(3, 3, -4, -4));
         }
         return;
     }
@@ -376,6 +396,12 @@ void VideoWidget::paintEvent(QPaintEvent* event)
         painter.setPen(selectedPen);
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(rect().adjusted(2, 2, -2, -2));
+    }
+    if (m_alertHighlighted)
+    {
+        painter.setPen(QPen(QColor(255, 45, 45), 6));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(rect().adjusted(3, 3, -4, -4));
     }
 }
 

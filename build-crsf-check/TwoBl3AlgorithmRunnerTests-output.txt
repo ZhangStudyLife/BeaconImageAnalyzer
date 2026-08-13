@@ -1,0 +1,56 @@
+********* Start testing of TwoBl3AlgorithmRunnerTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 15.2.0), windows 11
+PASS   : TwoBl3AlgorithmRunnerTests::initTestCase()
+FAIL!  : TwoBl3AlgorithmRunnerTests::loadsParametersAndKeepsInstancesIsolated() 'first.loadTwoBl3Firmware(QStringLiteral(BEACON_2BL3_TEST_IMAGE_DIR), QDir(buildRoot.path()).absoluteFilePath(QStringLiteral("first")), &error)' returned FALSE. (Œ¥’“µΩ 2BL3 πÃº˛‘¥¬ÎªÚ‘§±‡“Î’Ô∂œø‚£∫C:/danpianji/BeaconImageAnalyzer/build-crsf-check/two_bl3_diagnostic.dll)
+C:/danpianji/BeaconImageAnalyzer/tests/TwoBl3AlgorithmRunnerTests.cpp(438) : failure location
+FAIL!  : TwoBl3AlgorithmRunnerTests::loadsPackagedFallbackLibrary() 'runner.loadTwoBl3Firmware(QStringLiteral("Z:/missing-2bl3-image-source"), buildRoot.path(), &error)' returned FALSE. (Œ¥’“µΩ 2BL3 πÃº˛‘¥¬ÎªÚ‘§±‡“Î’Ô∂œø‚£∫C:/danpianji/BeaconImageAnalyzer/build-crsf-check/two_bl3_diagnostic.dll)
+C:/danpianji/BeaconImageAnalyzer/tests/TwoBl3AlgorithmRunnerTests.cpp(474) : failure location
+PASS   : TwoBl3AlgorithmRunnerTests::loadsSelfContainedInstanceSnapshot()
+PASS   : TwoBl3AlgorithmRunnerTests::loadsDownDraftInstance()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftProcessesEachFrameExactlyOnce()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftRendersExactClosedRegionBoundary()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftDoesNotRenderClosedRegionAtViewportEdges()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftUsesAreaOrderedB0B1AndTwoFrameCoast()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftDoesNotCoastUnconfirmedBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftMasksCarLampBeforeBeaconSelection()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftFiltersBeaconOutsideClosedBoundary()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftKeepsCurrentRotatedCarMeasurement()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftMergesOnlyGrayConnectedCarFragments()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftSuppressesOccludedCarFragmentBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftPrefersFullyVisibleCarCandidate()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftUsesTrackToChooseWeakCar()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftRejectsCarGlareOutsideClosedBoundary()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftSeparatesTinyThinCarFromCompactBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftAcceptsScaleChangeWithoutMinorAxisLimit()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftRejectsBoundaryBandStructureButKeepsInnerBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftClassifiesMicroElongatedCarImmediately()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftKeepsAmbiguousCarOutOfBeaconOutput()
+PASS   : TwoBl3AlgorithmRunnerTests::downDraftRejectsEmbeddedLateralHighlightButKeepsEdgeBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::selfContainedInstanceKeepsDiffuseCompactBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::selfContainedInstanceRejectsEmbeddedCompactHighlights()
+PASS   : TwoBl3AlgorithmRunnerTests::selfContainedInstanceFiltersBeaconsByHorizonGeometry()
+PASS   : TwoBl3AlgorithmRunnerTests::selfContainedInstanceUsesCurrentB0AndTwoFrameCoast()
+PASS   : TwoBl3AlgorithmRunnerTests::selfContainedInstanceHandlesDistantBeaconAndLampCompetition()
+PASS   : TwoBl3AlgorithmRunnerTests::selfContainedInstanceRejectsCarLampAboveHorizon()
+PASS   : TwoBl3AlgorithmRunnerTests::catalogMatchesFirmwareParameters()
+FAIL!  : TwoBl3AlgorithmRunnerTests::analyzesCompleteSnapshotWithoutUnsafeSuggestion() 'source.loadTwoBl3Firmware(QStringLiteral(BEACON_2BL3_TEST_IMAGE_DIR), QDir(buildRoot.path()).absoluteFilePath(QStringLiteral("source")), &error)' returned FALSE. (Œ¥’“µΩ 2BL3 πÃº˛‘¥¬ÎªÚ‘§±‡“Î’Ô∂œø‚£∫C:/danpianji/BeaconImageAnalyzer/build-crsf-check/two_bl3_diagnostic.dll)
+C:/danpianji/BeaconImageAnalyzer/tests/TwoBl3AlgorithmRunnerTests.cpp(2017) : failure location
+FAIL!  : TwoBl3AlgorithmRunnerTests::keepsStablePointSourceWhenNoSafeLegacyTuningExists() 'source.loadTwoBl3Firmware(QStringLiteral(BEACON_2BL3_TEST_IMAGE_DIR), QDir(buildRoot.path()).absoluteFilePath(QStringLiteral("source-wide")), &error)' returned FALSE. (Œ¥’“µΩ 2BL3 πÃº˛‘¥¬ÎªÚ‘§±‡“Î’Ô∂œø‚£∫C:/danpianji/BeaconImageAnalyzer/build-crsf-check/two_bl3_diagnostic.dll)
+C:/danpianji/BeaconImageAnalyzer/tests/TwoBl3AlgorithmRunnerTests.cpp(2048) : failure location
+FAIL!  : TwoBl3AlgorithmRunnerTests::usesCurrentMeasurementAndPredictsTwoMissingFrames() 'runner.loadTwoBl3Firmware(QStringLiteral(BEACON_2BL3_TEST_IMAGE_DIR), buildRoot.path(), &error)' returned FALSE. (Œ¥’“µΩ 2BL3 πÃº˛‘¥¬ÎªÚ‘§±‡“Î’Ô∂œø‚£∫C:/danpianji/BeaconImageAnalyzer/build-crsf-check/two_bl3_diagnostic.dll)
+C:/danpianji/BeaconImageAnalyzer/tests/TwoBl3AlgorithmRunnerTests.cpp(2098) : failure location
+PASS   : TwoBl3AlgorithmRunnerTests::rejectsInsufficientFrameHistory()
+PASS   : TwoBl3AlgorithmRunnerTests::optionalCarLampModeKeepsLegacyInstancesCompatible()
+PASS   : TwoBl3AlgorithmRunnerTests::dualFrontInstanceOutputsTwoLamps()
+PASS   : TwoBl3AlgorithmRunnerTests::dualDownInstanceOutputsTwoLamps()
+FAIL!  : TwoBl3AlgorithmRunnerTests::dualFirmwareKeepsLegacyPrimarySlot() 'singleRunner.loadTwoBl3Firmware( imageDirectory, QDir(buildRoot.path()).absoluteFilePath(QStringLiteral("single")), &error)' returned FALSE. (Œ¥’“µΩ 2BL3 πÃº˛‘¥¬ÎªÚ‘§±‡“Î’Ô∂œø‚£∫C:/danpianji/BeaconImageAnalyzer/build-crsf-check/two_bl3_diagnostic.dll)
+C:/danpianji/BeaconImageAnalyzer/tests/TwoBl3AlgorithmRunnerTests.cpp(2270) : failure location
+PASS   : TwoBl3AlgorithmRunnerTests::dualFrontMasksBeaconInsideCarBody()
+PASS   : TwoBl3AlgorithmRunnerTests::dualFrontDoesNotBridgeToPredictedLamp()
+PASS   : TwoBl3AlgorithmRunnerTests::dualDownMasksBeaconInsideCarBody()
+PASS   : TwoBl3AlgorithmRunnerTests::dualDownSuppressesSplitCarLampBeacon()
+PASS   : TwoBl3AlgorithmRunnerTests::rendererLimitsCarLampCountByMode()
+PASS   : TwoBl3AlgorithmRunnerTests::coordinateConversionsKeepFirmwareConventionsSeparate()
+PASS   : TwoBl3AlgorithmRunnerTests::cleanupTestCase()
+Totals: 40 passed, 6 failed, 0 skipped, 0 blacklisted, 60757ms
+********* Finished testing of TwoBl3AlgorithmRunnerTests *********

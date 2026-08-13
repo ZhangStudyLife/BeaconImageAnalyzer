@@ -1,0 +1,23 @@
+********* Start testing of BimgImageFrameParserTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 15.2.0), windows 11
+PASS   : BimgImageFrameParserTests::initTestCase()
+PASS   : BimgImageFrameParserTests::parsesFragmentedFrame()
+PASS   : BimgImageFrameParserTests::parsesConcatenatedFrames()
+PASS   : BimgImageFrameParserTests::recoversAfterGarbageAndBadCrc()
+PASS   : BimgImageFrameParserTests::parsesFragmentedSeekfreeFrame()
+PASS   : BimgImageFrameParserTests::parsesMixedProtocols()
+PASS   : BimgImageFrameParserTests::skipsSeekfreeBoundaryPacket()
+PASS   : BimgImageFrameParserTests::parsesFragmentedParameterSnapshot()
+PASS   : BimgImageFrameParserTests::parsesMixedImageAndParameterPackets()
+PASS   : BimgImageFrameParserTests::rejectsBadParameterSnapshotCrc()
+PASS   : BimgImageFrameParserTests::parsesFragmentedV2DebugFloats()
+PASS   : BimgImageFrameParserTests::preservesInvalidAndUnknownDebugFloats()
+PASS   : BimgImageFrameParserTests::rejectsMalformedV2DebugRecordSize()
+PASS   : BimgImageFrameParserTests::parsesFragmentedV3Metadata()
+PASS   : BimgImageFrameParserTests::parsesConcatenatedV3Frames()
+PASS   : BimgImageFrameParserTests::recoversAfterBadV3Crc()
+PASS   : BimgImageFrameParserTests::rejectsInvalidV3SourceMetadata()
+PASS   : BimgImageFrameParserTests::rejectsV3ReservedMetadata()
+PASS   : BimgImageFrameParserTests::cleanupTestCase()
+Totals: 19 passed, 0 failed, 0 skipped, 0 blacklisted, 3ms
+********* Finished testing of BimgImageFrameParserTests *********

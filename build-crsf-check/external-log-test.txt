@@ -1,0 +1,10 @@
+********* Start testing of JustFloatLogTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 15.2.0), windows 11
+PASS   : JustFloatLogTests::initTestCase()
+FAIL!  : JustFloatLogTests::loadExternalFlightLog() Compared values are not the same
+   Actual   (log.rowCount()): 21034
+   Expected (16234)         : 16234
+C:/danpianji/BeaconImageAnalyzer/tests/JustFloatLogTests.cpp(786) : failure location
+PASS   : JustFloatLogTests::cleanupTestCase()
+Totals: 2 passed, 1 failed, 0 skipped, 0 blacklisted, 300ms
+********* Finished testing of JustFloatLogTests *********

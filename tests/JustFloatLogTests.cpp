@@ -222,6 +222,7 @@ private slots:
     void validateCsvHeadersAndLengths();
     void serializeAndReloadRows();
     void recorderStateAndRoundTrip();
+    void udpCrsfRecordingRoundTrip();
     void dualLayoutDatagramAndCsv();
     void dualRecorderRejectsMixedLayout();
     void singleLampRoiDatagramAndCsv();
@@ -246,8 +247,8 @@ void JustFloatLogTests::channelCatalogAndValues()
     QCOMPARE(descriptors[40].unit, QStringLiteral("deg"));
     QCOMPARE(descriptors[41].unit, QStringLiteral("m/s"));
     QCOMPARE(descriptors[42].unit, QStringLiteral("m/s"));
-    QCOMPARE(descriptors[43].name, QStringLiteral("有效"));
-    QCOMPARE(descriptors[46].unit, QStringLiteral("deg"));
+    QCOMPARE(descriptors[43].name, QStringLiteral("CRSF_STD[8]"));
+    QCOMPARE(descriptors[47].unit, QStringLiteral("deg"));
 
     JustFloatLogRow row = sampleRow(false);
     double value = 0.0;
@@ -265,11 +266,15 @@ void JustFloatLogTests::channelCatalogAndValues()
     QVERIFY(JustFloatLog::channelValue(row, 42, &value));
     QCOMPARE(value, static_cast<double>(row.targetStrafeMps));
     QVERIFY(!JustFloatLog::channelValue(row, 43, &value));
-    row.hasFusedCarLampData = true;
-    row.fusedCarLamp = {true, -43.168f, -62.867f, 3.967f};
+    row.hasCrsfStd8Data = true;
+    row.crsfStd8 = true;
     QVERIFY(JustFloatLog::channelValue(row, 43, &value));
     QCOMPARE(value, 1.0);
-    QVERIFY(JustFloatLog::channelValue(row, 46, &value));
+    row.hasFusedCarLampData = true;
+    row.fusedCarLamp = {true, -43.168f, -62.867f, 3.967f};
+    QVERIFY(JustFloatLog::channelValue(row, 44, &value));
+    QCOMPARE(value, 1.0);
+    QVERIFY(JustFloatLog::channelValue(row, 47, &value));
     QCOMPARE(value, static_cast<double>(row.fusedCarLamp.angle));
 }
 
@@ -307,7 +312,7 @@ void JustFloatLogTests::parseTextDatagram_data()
     QTest::newRow("legacy-payload") << 37 << false << false << false << 500.0 << 0.0;
     QTest::newRow("legacy-full-tail") << 38 << true << false << false << 0.0 << 0.0;
     QTest::newRow("motion-payload-tail") << 42 << true << true << false << 500.0 << 38.0;
-    QTest::newRow("motion-full") << 43 << false << true << false << 0.0 << 38.0;
+    QTest::newRow("crsf-payload") << 43 << false << true << false << 500.0 << 38.0;
     QTest::newRow("fused-payload") << 46 << false << true << true << 500.0 << 38.0;
     QTest::newRow("fused-full-tail") << 47 << true << true << true << 0.0 << 38.0;
 }
@@ -321,7 +326,16 @@ void JustFloatLogTests::parseTextDatagram()
     QFETCH(double, expectedRowTime);
     QFETCH(double, expectedActualVelocityX);
 
-    QByteArray datagram = sequentialText(count == 37 || count == 42 || count == 46 ? 1 : 0, count).toUtf8();
+    QStringList fields = sequentialText(count == 37 || count == 42 || count == 43 || count == 46
+                                            ? 1
+                                            : 0,
+                                        count)
+                             .split(QLatin1Char(','));
+    if (count == 43)
+    {
+        fields[42] = QStringLiteral("1");
+    }
+    QByteArray datagram = fields.join(QLatin1Char(',')).toUtf8();
     if (withTail)
     {
         datagram += vofaTail();
@@ -341,6 +355,11 @@ void JustFloatLogTests::parseTextDatagram()
         QCOMPARE(static_cast<double>(row.vehicleYawDeg), 40.0);
         QCOMPARE(static_cast<double>(row.targetForwardMps), 41.0);
         QCOMPARE(static_cast<double>(row.targetStrafeMps), 42.0);
+    }
+    if (count == 43)
+    {
+        QVERIFY(row.hasCrsfStd8Data);
+        QVERIFY(row.crsfStd8);
     }
     if (hasFused)
     {
@@ -365,7 +384,17 @@ void JustFloatLogTests::parseBinaryDatagram()
     QFETCH(double, expectedRowTime);
     QFETCH(double, expectedActualVelocityX);
 
-    QByteArray datagram = sequentialBinary(count == 37 || count == 42 || count == 46 ? 1 : 0, count);
+    QVector<float> values;
+    const int start = count == 37 || count == 42 || count == 43 || count == 46 ? 1 : 0;
+    for (int i = 0; i < count; ++i)
+    {
+        values.push_back(static_cast<float>(start + i));
+    }
+    if (count == 43)
+    {
+        values[42] = 1.0f;
+    }
+    QByteArray datagram = binaryValues(values);
     if (withTail)
     {
         datagram += vofaTail();
@@ -517,8 +546,8 @@ void JustFloatLogTests::validateCsvHeadersAndLengths()
                           headerForCount(46) + QLatin1Char('\n') +
                               sequentialText(0, 46) + QLatin1Char('\n')));
     QVERIFY(!JustFloatLog::loadCsv(partialFusedPath, &log, &error));
-    QVERIFY(error.contains(QStringLiteral("I43")));
-    QVERIFY(error.contains(QStringLiteral("I46")));
+    QVERIFY(error.contains(QStringLiteral("I44")));
+    QVERIFY(error.contains(QStringLiteral("I47")));
 }
 
 void JustFloatLogTests::serializeAndReloadRows()
@@ -615,6 +644,81 @@ void JustFloatLogTests::recorderStateAndRoundTrip()
     QCOMPARE(recorder.state(), JustFloatCsvRecorder::State::Idle);
     QCOMPARE(recorder.rowCount(), quint64(0));
     QVERIFY(!recorder.append(sampleRow(true), &error));
+}
+
+void JustFloatLogTests::udpCrsfRecordingRoundTrip()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+
+    JustFloatCsvRecorder recorder;
+    QString error;
+    QVERIFY2(recorder.start(&error), qPrintable(error));
+    for (int crsfStd8 : {1, 0})
+    {
+        QVector<float> payload;
+        payload.reserve(JustFloatLog::CrsfStd8ChannelCount - 1);
+        for (int value = 1; value <= JustFloatLog::MotionChannelCount - 1; ++value)
+        {
+            payload.push_back(static_cast<float>(value));
+        }
+        payload.push_back(static_cast<float>(crsfStd8));
+
+        JustFloatLogRow row;
+        QVERIFY2(JustFloatLog::parseDatagram(binaryValues(payload) + vofaTail(),
+                                             1000.0 + crsfStd8,
+                                             &row,
+                                             &error),
+                 qPrintable(error));
+        QVERIFY(row.hasCrsfStd8Data);
+        QCOMPARE(row.crsfStd8, crsfStd8 == 1);
+        QVERIFY2(recorder.append(row, &error), qPrintable(error));
+    }
+    QVERIFY2(recorder.stop(&error), qPrintable(error));
+
+    const QString path = directory.filePath(QStringLiteral("udp-crsf.csv"));
+    QVERIFY2(recorder.saveAs(path, &error), qPrintable(error));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'));
+    QCOMPARE(lines[0].split(QLatin1Char(',')).at(43), QStringLiteral("I43"));
+    QCOMPARE(lines[1].split(QLatin1Char(',')).at(43), QStringLiteral("1"));
+    QCOMPARE(lines[2].split(QLatin1Char(',')).at(43), QStringLiteral("0"));
+
+    JustFloatLog replay;
+    QVERIFY2(JustFloatLog::loadCsv(path, &replay, &error), qPrintable(error));
+    QCOMPARE(replay.rowCount(), 2);
+    QVERIFY(replay.rowAt(0).hasCrsfStd8Data);
+    QVERIFY(replay.rowAt(0).crsfStd8);
+    QVERIFY(replay.rowAt(1).hasCrsfStd8Data);
+    QVERIFY(!replay.rowAt(1).crsfStd8);
+
+    QVector<float> timestamped(JustFloatLog::MotionChannelCount, 0.0f);
+    timestamped[0] = 1234.0f;
+    timestamped[37] = 1234.0f;
+    timestamped[42] = 1.0f;
+    JustFloatLogRow legacyFullRow;
+    QVERIFY2(JustFloatLog::parseDatagram(binaryValues(timestamped),
+                                         9999.0,
+                                         &legacyFullRow,
+                                         &error),
+             qPrintable(error));
+    QCOMPARE(legacyFullRow.rowTime, 1234.0);
+    QCOMPARE(legacyFullRow.syncTimeMs, 1234.0);
+    QVERIFY(!legacyFullRow.hasCrsfStd8Data);
+    QCOMPARE(legacyFullRow.targetStrafeMps, 1.0f);
+
+    QVector<float> stationaryPayload(JustFloatLog::CrsfStd8ChannelCount - 1, 0.0f);
+    stationaryPayload[42] = 1.0f;
+    JustFloatLogRow stationaryRow;
+    QVERIFY2(JustFloatLog::parseDatagram(binaryValues(stationaryPayload),
+                                         2000.0,
+                                         &stationaryRow,
+                                         &error),
+             qPrintable(error));
+    QCOMPARE(stationaryRow.rowTime, 2000.0);
+    QVERIFY(stationaryRow.hasCrsfStd8Data);
+    QVERIFY(stationaryRow.crsfStd8);
 }
 
 void JustFloatLogTests::dualLayoutDatagramAndCsv()

@@ -168,6 +168,8 @@ struct JustFloatLogRow
     float targetForwardMps = 0.0f;
     float targetStrafeMps = 0.0f;
     bool hasMotionData = false;
+    bool crsfStd8 = false;
+    bool hasCrsfStd8Data = false;
     JustFloatFusedCarLamp fusedCarLamp;
     bool hasFusedCarLampData = false;
     JustFloatSingleLampRoiFrame singleLampRoi;
@@ -188,7 +190,9 @@ public:
     static constexpr int SingleLampRoiChannelCount = 36;
     static constexpr int LegacyChannelCount = 38;
     static constexpr int MotionChannelCount = 43;
-    static constexpr int LegacyFusedChannelCount = 47;
+    static constexpr int CrsfStd8ChannelCount = 44;
+    static constexpr int LegacyFusedV0ChannelCount = 47;
+    static constexpr int LegacyFusedChannelCount = 48;
     static constexpr int DualLampFusionChannelCount = 50;
     static constexpr int ChannelCount = DualLampFusionChannelCount;
     static constexpr float DualLampFusionSchemaId = 260808.0f;

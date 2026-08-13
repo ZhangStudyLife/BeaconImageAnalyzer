@@ -1,0 +1,16 @@
+BeaconImageAnalyzerTests 1 0.108437
+BimgImageFrameParserTests 0 0
+ImageFrameSidecarTests 0 0
+ImageLogAlignerTests 0 0
+HorizonCalibrationTests 0 0
+BeaconLabelSessionTests 0 0
+TwoBl3AlgorithmRunnerTests 0 0
+DownHorizonImplicitTests 0 0
+---
+BimgImageFrameParserTests
+ImageFrameSidecarTests
+ImageLogAlignerTests
+HorizonCalibrationTests
+BeaconLabelSessionTests
+TwoBl3AlgorithmRunnerTests
+DownHorizonImplicitTests

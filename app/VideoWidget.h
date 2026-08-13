@@ -25,6 +25,7 @@ public:
     void undoCorrectionPoint();
     void cancelCorrection();
     void setSelected(bool selected);
+    void setAlertHighlighted(bool highlighted);
     QSize sizeHint() const override;
 
 signals:
@@ -62,6 +63,7 @@ private:
     bool m_hasHoverPoint = false;
     bool m_drawing = false;
     bool m_selected = false;
+    bool m_alertHighlighted = false;
     bool m_middleDragging = false;
     QVector<QPointF> m_previewPoints;
 };

@@ -17,6 +17,8 @@ namespace
 constexpr int SingleLampRoiPayloadValueCount = JustFloatLog::SingleLampRoiChannelCount - 1;
 constexpr int LegacyPayloadValueCount = JustFloatLog::LegacyChannelCount - 1;
 constexpr int MotionPayloadValueCount = JustFloatLog::MotionChannelCount - 1;
+constexpr int CrsfStd8PayloadValueCount = JustFloatLog::CrsfStd8ChannelCount - 1;
+constexpr int FusedV0PayloadValueCount = JustFloatLog::LegacyFusedV0ChannelCount - 1;
 constexpr int FusedPayloadValueCount = JustFloatLog::LegacyFusedChannelCount - 1;
 constexpr int DualLampFusionPayloadValueCount = JustFloatLog::DualLampFusionChannelCount - 1;
 constexpr double InvalidSentinel = -900.0;
@@ -35,7 +37,9 @@ struct ParsedValues
     ValueArray values{};
     JustFloatLogLayout layout = JustFloatLogLayout::Legacy;
     bool hasMotionData = false;
+    bool hasCrsfStd8Data = false;
     bool hasFusedCarLampData = false;
+    bool usesLegacyFusedV0 = false;
 };
 
 bool isInvalidValue(double value)
@@ -197,6 +201,8 @@ bool parseHeader(const QStringList& cells, HeaderMap* map, int* declaredCount, Q
     if (count != JustFloatLog::SingleLampRoiChannelCount &&
         count != JustFloatLog::LegacyChannelCount &&
         count != JustFloatLog::MotionChannelCount &&
+        count != JustFloatLog::CrsfStd8ChannelCount &&
+        count != JustFloatLog::LegacyFusedV0ChannelCount &&
         count != JustFloatLog::LegacyFusedChannelCount &&
         count != JustFloatLog::DualLampFusionChannelCount)
     {
@@ -207,10 +213,10 @@ bool parseHeader(const QStringList& cells, HeaderMap* map, int* declaredCount, Q
             {
                 *error = QStringLiteral("CSV header requires complete I0-I37 and I38-I42 groups");
             }
-            else if (count > JustFloatLog::MotionChannelCount &&
+            else if (count > JustFloatLog::CrsfStd8ChannelCount &&
                      count < JustFloatLog::LegacyFusedChannelCount)
             {
-                *error = QStringLiteral("CSV header requires complete I43-I46 group");
+                *error = QStringLiteral("CSV header requires complete I44-I47 group");
             }
             else
             {
@@ -352,9 +358,36 @@ bool parseLegacyValues(const QStringList& cells,
     {
         return false;
     }
+    if (declaredCount == JustFloatLog::LegacyFusedV0ChannelCount)
+    {
+        if (!parseOptionalGroup(cells,
+                                map,
+                                JustFloatLog::MotionChannelCount,
+                                JustFloatLog::LegacyFusedV0ChannelCount - 1,
+                                lineNumber,
+                                &parsed->values,
+                                &parsed->hasFusedCarLampData,
+                                error))
+        {
+            return false;
+        }
+        parsed->usesLegacyFusedV0 = parsed->hasFusedCarLampData;
+        return true;
+    }
     if (!parseOptionalGroup(cells,
                             map,
                             JustFloatLog::MotionChannelCount,
+                            JustFloatLog::CrsfStd8ChannelCount - 1,
+                            lineNumber,
+                            &parsed->values,
+                            &parsed->hasCrsfStd8Data,
+                            error))
+    {
+        return false;
+    }
+    if (!parseOptionalGroup(cells,
+                            map,
+                            JustFloatLog::CrsfStd8ChannelCount,
                             JustFloatLog::LegacyFusedChannelCount - 1,
                             lineNumber,
                             &parsed->values,
@@ -439,12 +472,6 @@ bool parseCells(const QStringList& cells,
     {
         return false;
     }
-    if (declaredCount == LegacyPayloadValueCount ||
-        declaredCount == MotionPayloadValueCount ||
-        declaredCount == FusedPayloadValueCount)
-    {
-        parsed->values[0] = fallbackTimestampMs;
-    }
     return true;
 }
 
@@ -454,12 +481,35 @@ bool parseSequentialDatagramValues(const QStringList& cells,
                                    QString* error)
 {
     const int count = cells.size();
+    double possibleCrsfStd8 = 0.0;
+    double possibleRowTime = 0.0;
+    double possibleSyncTime = 0.0;
+    const bool hasCrsfFlagAtPayloadPosition =
+        count > 42 && parseDoubleCell(cells[42], &possibleCrsfStd8) &&
+        (possibleCrsfStd8 == 0.0 || possibleCrsfStd8 == 1.0);
+    const bool looksLikeTimestampedMotionRow =
+        count == JustFloatLog::MotionChannelCount &&
+        parseDoubleCell(cells[0], &possibleRowTime) &&
+        parseDoubleCell(cells[37], &possibleSyncTime) &&
+        std::isfinite(possibleRowTime) && std::isfinite(possibleSyncTime) &&
+        possibleRowTime >= 100.0 && possibleSyncTime >= 100.0 &&
+        std::abs(possibleRowTime - possibleSyncTime) <=
+            qMax(1.0, qMax(possibleRowTime, possibleSyncTime) * 0.01);
+    const bool isCrsfPayload = count == CrsfStd8PayloadValueCount &&
+                               hasCrsfFlagAtPayloadPosition &&
+                               !looksLikeTimestampedMotionRow;
+    const bool isFusedPayload = count == FusedPayloadValueCount &&
+                                hasCrsfFlagAtPayloadPosition;
     if (count != SingleLampRoiPayloadValueCount &&
         count != JustFloatLog::SingleLampRoiChannelCount &&
         count != LegacyPayloadValueCount &&
         count != JustFloatLog::LegacyChannelCount &&
         count != MotionPayloadValueCount &&
+        count != CrsfStd8PayloadValueCount &&
         count != JustFloatLog::MotionChannelCount &&
+        count != JustFloatLog::CrsfStd8ChannelCount &&
+        count != FusedV0PayloadValueCount &&
+        count != JustFloatLog::LegacyFusedV0ChannelCount &&
         count != FusedPayloadValueCount &&
         count != JustFloatLog::LegacyFusedChannelCount &&
         count != JustFloatLog::DualLampFusionChannelCount)
@@ -490,7 +540,9 @@ bool parseSequentialDatagramValues(const QStringList& cells,
     }
     if (count == LegacyPayloadValueCount ||
         count == MotionPayloadValueCount ||
-        count == FusedPayloadValueCount)
+        isCrsfPayload ||
+        count == FusedV0PayloadValueCount ||
+        isFusedPayload)
     {
         parsed->layout = JustFloatLogLayout::Legacy;
         parsed->values.fill(0.0);
@@ -507,7 +559,10 @@ bool parseSequentialDatagramValues(const QStringList& cells,
             }
         }
         parsed->hasMotionData = count >= MotionPayloadValueCount;
-        parsed->hasFusedCarLampData = count >= FusedPayloadValueCount;
+        parsed->usesLegacyFusedV0 = count == FusedV0PayloadValueCount;
+        parsed->hasCrsfStd8Data = count >= CrsfStd8PayloadValueCount &&
+                                  !parsed->usesLegacyFusedV0;
+        parsed->hasFusedCarLampData = count >= FusedV0PayloadValueCount;
         return true;
     }
 
@@ -567,7 +622,11 @@ bool parseBinaryDatagram(const QByteArray& datagram,
         count != LegacyPayloadValueCount &&
         count != JustFloatLog::LegacyChannelCount &&
         count != MotionPayloadValueCount &&
+        count != CrsfStd8PayloadValueCount &&
         count != JustFloatLog::MotionChannelCount &&
+        count != JustFloatLog::CrsfStd8ChannelCount &&
+        count != FusedV0PayloadValueCount &&
+        count != JustFloatLog::LegacyFusedV0ChannelCount &&
         count != FusedPayloadValueCount &&
         count != JustFloatLog::LegacyFusedChannelCount &&
         count != JustFloatLog::DualLampFusionChannelCount)
@@ -880,13 +939,16 @@ JustFloatLogRow makeRow(const ParsedValues& parsed)
         row.targetForwardMps = static_cast<float>(values[41]);
         row.targetStrafeMps = static_cast<float>(values[42]);
     }
+    row.hasCrsfStd8Data = parsed.hasCrsfStd8Data;
+    row.crsfStd8 = row.hasCrsfStd8Data && values[43] == 1.0;
     row.hasFusedCarLampData = parsed.hasFusedCarLampData;
     if (row.hasFusedCarLampData)
     {
-        row.fusedCarLamp.valid = !isInvalidValue(values[43]);
-        row.fusedCarLamp.cx = static_cast<float>(values[44]);
-        row.fusedCarLamp.cy = static_cast<float>(values[45]);
-        row.fusedCarLamp.angle = static_cast<float>(values[46]);
+        const int base = parsed.usesLegacyFusedV0 ? 43 : 44;
+        row.fusedCarLamp.valid = !isInvalidValue(values[base]);
+        row.fusedCarLamp.cx = static_cast<float>(values[base + 1]);
+        row.fusedCarLamp.cy = static_cast<float>(values[base + 2]);
+        row.fusedCarLamp.angle = static_cast<float>(values[base + 3]);
     }
     return row;
 }
@@ -924,14 +986,14 @@ QVector<JustFloatChannelDescriptor> makeLegacyDescriptors()
     descriptors.push_back({40, QStringLiteral("Motion"), QStringLiteral("Vehicle Yaw"), QStringLiteral("deg")});
     descriptors.push_back({41, QStringLiteral("Motion"), QStringLiteral("Target forward"), QStringLiteral("m/s")});
     descriptors.push_back({42, QStringLiteral("Motion"), QStringLiteral("Target strafe"), QStringLiteral("m/s")});
-    descriptors.push_back({43,
+    descriptors.push_back({43, QStringLiteral("CRSF"), QStringLiteral("CRSF_STD[8]"), QString()});
+    descriptors.push_back({44,
                            QStringLiteral("Fused lamp"),
                            QString::fromUtf8("\xE6\x9C\x89\xE6\x95\x88"),
                            QString()});
-    descriptors.push_back({44, QStringLiteral("Fused lamp"), QStringLiteral("Center X"), QStringLiteral("px")});
-    descriptors.push_back({45, QStringLiteral("Fused lamp"), QStringLiteral("Center Y"), QStringLiteral("px")});
-    descriptors.push_back({46, QStringLiteral("Fused lamp"), QStringLiteral("Angle"), QStringLiteral("deg")});
-    descriptors.push_back({47, QStringLiteral("Reserved"), QStringLiteral("I47"), QString()});
+    descriptors.push_back({45, QStringLiteral("Fused lamp"), QStringLiteral("Center X"), QStringLiteral("px")});
+    descriptors.push_back({46, QStringLiteral("Fused lamp"), QStringLiteral("Center Y"), QStringLiteral("px")});
+    descriptors.push_back({47, QStringLiteral("Fused lamp"), QStringLiteral("Angle"), QStringLiteral("deg")});
     descriptors.push_back({48, QStringLiteral("Reserved"), QStringLiteral("I48"), QString()});
     descriptors.push_back({49, QStringLiteral("Reserved"), QStringLiteral("I49"), QString()});
     return descriptors;
@@ -1118,6 +1180,8 @@ bool JustFloatLog::loadCsv(const QString& path, JustFloatLog* output, QString* e
         if (!hasHeader && count != JustFloatLog::SingleLampRoiChannelCount &&
             count != JustFloatLog::LegacyChannelCount &&
             count != JustFloatLog::MotionChannelCount &&
+            count != JustFloatLog::CrsfStd8ChannelCount &&
+            count != JustFloatLog::LegacyFusedV0ChannelCount &&
             count != JustFloatLog::LegacyFusedChannelCount &&
             count != JustFloatLog::DualLampFusionChannelCount)
         {
@@ -1356,10 +1420,11 @@ bool JustFloatLog::channelValue(const JustFloatLogRow& row, int channelIndex, do
     case 40: if (!row.hasMotionData) return false; *value = row.vehicleYawDeg; return true;
     case 41: if (!row.hasMotionData) return false; *value = row.targetForwardMps; return true;
     case 42: if (!row.hasMotionData) return false; *value = row.targetStrafeMps; return true;
-    case 43: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.valid ? 1.0 : 0.0; return true;
-    case 44: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.cx; return true;
-    case 45: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.cy; return true;
-    case 46: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.angle; return true;
+    case 43: if (!row.hasCrsfStd8Data) return false; *value = row.crsfStd8 ? 1.0 : 0.0; return true;
+    case 44: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.valid ? 1.0 : 0.0; return true;
+    case 45: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.cx; return true;
+    case 46: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.cy; return true;
+    case 47: if (!row.hasFusedCarLampData) return false; *value = row.fusedCarLamp.angle; return true;
     default: return false;
     }
 }
