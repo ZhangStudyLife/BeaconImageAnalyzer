@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "CameraView.h"
+#include "CoordinateWindow.h"
 
 #include <QCloseEvent>
 #include <QComboBox>
@@ -17,7 +18,7 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QStatusBar>
-#include <QTextStream>
+#include <QTime>
 #include <QTimer>
 #include <QUdpSocket>
 #include <QVBoxLayout>
@@ -33,7 +34,11 @@ const QStringList CameraNames = {QStringLiteral("Front"), QStringLiteral("Center
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       m_udpSocket(new QUdpSocket(this)),
-      m_playbackTimer(new QTimer(this))
+      m_playbackTimer(new QTimer(this)),
+      m_recordingTimer(new QTimer(this)),
+      m_uiTimer(new QTimer(this)),
+      m_centerWindow(new CoordinateWindow(CoordinateView::Mode::CenterMapped, this)),
+      m_modelWindow(new CoordinateWindow(CoordinateView::Mode::CameraModel, this))
 {
     setWindowTitle(QStringLiteral("JustFloat 三摄接收与回放"));
     resize(1420, 900);
@@ -42,6 +47,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(m_udpSocket, &QUdpSocket::readyRead, this, &MainWindow::readPendingDatagrams);
     connect(m_playbackTimer, &QTimer::timeout, this, &MainWindow::advancePlayback);
+    m_uiTimer->setInterval(16);
+    connect(m_uiTimer, &QTimer::timeout, this, &MainWindow::flushLiveFrame);
+    m_uiTimer->start();
+    m_recordingTimer->setInterval(200);
+    connect(m_recordingTimer, &QTimer::timeout, this, [this]() { updateStatus(); });
     connect(m_modeCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index == 0)
         {
@@ -63,6 +73,16 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
     connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+    connect(m_centerWindowButton, &QPushButton::clicked, this, [this]() {
+        m_centerWindow->show();
+        m_centerWindow->raise();
+        m_centerWindow->activateWindow();
+    });
+    connect(m_modelWindowButton, &QPushButton::clicked, this, [this]() {
+        m_modelWindow->show();
+        m_modelWindow->raise();
+        m_modelWindow->activateWindow();
+    });
     connect(m_importButton, &QPushButton::clicked, this, &MainWindow::importCsv);
     connect(m_playButton, &QPushButton::clicked, this, &MainWindow::togglePlayback);
     connect(m_previousButton, &QPushButton::clicked, this, [this]() { setReplayIndex(m_replayIndex - 1); });
@@ -92,6 +112,8 @@ void MainWindow::buildUi()
     m_portSpin->setValue(1347);
     m_listenButton = new QPushButton(QStringLiteral("开始监听"), this);
     m_recordButton = new QPushButton(QStringLiteral("开始记录"), this);
+    m_centerWindowButton = new QPushButton(QStringLiteral("Center 坐标窗口"), this);
+    m_modelWindowButton = new QPushButton(QStringLiteral("解耦坐标窗口"), this);
     controls->addWidget(m_modeCombo);
     controls->addWidget(m_importButton);
     controls->addWidget(new QLabel(QStringLiteral("本机 IP"), this));
@@ -100,6 +122,8 @@ void MainWindow::buildUi()
     controls->addWidget(m_portSpin);
     controls->addWidget(m_listenButton);
     controls->addWidget(m_recordButton);
+    controls->addWidget(m_centerWindowButton);
+    controls->addWidget(m_modelWindowButton);
     controls->addStretch(1);
     root->addLayout(controls);
 
@@ -109,11 +133,12 @@ void MainWindow::buildUi()
     {
         auto* group = new QGroupBox(CameraNames[index], this);
         auto* layout = new QVBoxLayout(group);
-        m_cameraViews[index] = new CameraView(group);
-        m_cameraInfoLabels[index] = new QLabel(QStringLiteral("无数据"), group);
-        m_cameraInfoLabels[index]->setStyleSheet(QStringLiteral("color:#b6c0c8;"));
+        const bool backCamera = index == 2;
+        m_cameraViews[index] = new CameraView(CameraNames[index],
+                                              backCamera,
+                                              backCamera,
+                                              group);
         layout->addWidget(m_cameraViews[index], 1);
-        layout->addWidget(m_cameraInfoLabels[index]);
         camerasLayout->addWidget(group, 1);
     }
     root->addLayout(camerasLayout, 1);
@@ -144,8 +169,8 @@ void MainWindow::buildUi()
 
     auto* infoGroup = new QGroupBox(QStringLiteral("状态"), this);
     auto* infoLayout = new QVBoxLayout(infoGroup);
-    m_flightInfoLabel = new QLabel(QStringLiteral("时间戳 -- | Pitch -- Roll -- Yaw --"), infoGroup);
-    m_motionInfoLabel = new QLabel(QStringLiteral("车辆前向 -- | 车辆 Yaw -- | 规划前进 -- | 规划横移 --"), infoGroup);
+    m_flightInfoLabel = new QLabel(QStringLiteral("时间戳 -- | 高度 -- | Roll -- Pitch -- Yaw --"), infoGroup);
+    m_motionInfoLabel = new QLabel(QStringLiteral("车 yaw -- | 实际速度 X/Y -- | 目标速度 X/Y --"), infoGroup);
     m_statusLabel = new QLabel(infoGroup);
     m_statusLabel->setWordWrap(true);
     infoLayout->addWidget(m_flightInfoLabel);
@@ -223,7 +248,10 @@ void MainWindow::startListening()
     m_packetCount = 0;
     m_errorCount = 0;
     m_lastSender.clear();
+    m_hasPendingFrame = false;
     m_listenButton->setText(QStringLiteral("停止监听"));
+    m_centerWindow->setUdpState(true);
+    m_modelWindow->setUdpState(true);
     updateStatus(QStringLiteral("UDP 监听中：%1:%2")
                      .arg(m_addressCombo->currentText())
                      .arg(m_portSpin->value()));
@@ -232,12 +260,15 @@ void MainWindow::startListening()
 
 void MainWindow::stopListening()
 {
-    if (m_recordFile.isOpen())
+    if (m_recording)
     {
-        stopRecording();
+        stopAndSaveRecording();
     }
     m_udpSocket->close();
+    m_hasPendingFrame = false;
     m_listenButton->setText(QStringLiteral("开始监听"));
+    m_centerWindow->setUdpState(false);
+    m_modelWindow->setUdpState(false);
     updateStatus(QStringLiteral("UDP 已停止"));
     updateControls();
 }
@@ -249,23 +280,36 @@ void MainWindow::readPendingDatagrams()
         const QNetworkDatagram datagram = m_udpSocket->receiveDatagram();
         TelemetryFrame frame;
         QString error;
-        ++m_packetCount;
         if (!TelemetryProtocol::parseDatagram(datagram.data(), &frame, &error))
         {
             ++m_errorCount;
-            updateStatus(QStringLiteral("UDP 解析失败：%1").arg(error));
             continue;
         }
+        ++m_packetCount;
         m_lastSender = QStringLiteral("%1:%2")
                            .arg(datagram.senderAddress().toString())
                            .arg(datagram.senderPort());
-        showFrame(frame);
-        if (m_recordFile.isOpen())
+        if (m_recording)
         {
-            QTextStream stream(&m_recordFile);
-            stream << TelemetryProtocol::csvRow(frame) << Qt::endl;
-            ++m_recordedCount;
+            m_recordedFrames.push_back(frame);
         }
+        m_pendingFrame = frame;
+        m_hasPendingFrame = true;
+    }
+}
+
+void MainWindow::flushLiveFrame()
+{
+    if (m_liveMode && m_hasPendingFrame)
+    {
+        const TelemetryFrame frame = m_pendingFrame;
+        m_hasPendingFrame = false;
+        showFrame(frame);
+        m_centerWindow->setLiveFrame(frame, m_packetCount, m_lastSender);
+        m_modelWindow->setLiveFrame(frame, m_packetCount, m_lastSender);
+    }
+    if (m_liveMode && m_udpSocket->state() == QAbstractSocket::BoundState)
+    {
         updateStatus();
     }
 }
@@ -299,9 +343,9 @@ void MainWindow::importCsv()
 
 void MainWindow::toggleRecording()
 {
-    if (m_recordFile.isOpen())
+    if (m_recording)
     {
-        stopRecording();
+        stopAndSaveRecording();
         return;
     }
     if (m_udpSocket->state() != QAbstractSocket::BoundState)
@@ -309,6 +353,39 @@ void MainWindow::toggleRecording()
         QMessageBox::information(this, QStringLiteral("UDP 记录"), QStringLiteral("请先开始 UDP 监听。"));
         return;
     }
+    startRecording();
+}
+
+void MainWindow::startRecording()
+{
+    m_recordedFrames.clear();
+    m_recordingElapsed.start();
+    m_recording = true;
+    m_recordingTimer->start();
+    m_recordButton->setText(QStringLiteral("● 停止并保存"));
+    m_recordButton->setStyleSheet(QStringLiteral("color:#ff5c68;font-weight:600;"));
+    updateControls();
+    updateStatus(QStringLiteral("● 正在记录"));
+}
+
+void MainWindow::stopAndSaveRecording()
+{
+    if (!m_recording)
+    {
+        return;
+    }
+    m_recording = false;
+    m_recordingTimer->stop();
+    m_recordButton->setText(QStringLiteral("开始记录"));
+    m_recordButton->setStyleSheet(QString());
+
+    if (m_recordedFrames.isEmpty())
+    {
+        updateControls();
+        updateStatus(QStringLiteral("未收到数据，记录已丢弃"));
+        return;
+    }
+
     const QString path = QFileDialog::getSaveFileName(this,
                                                       QStringLiteral("保存 JustFloat CSV"),
                                                       QStringLiteral("justfloat_%1.csv")
@@ -316,56 +393,45 @@ void MainWindow::toggleRecording()
                                                       QStringLiteral("CSV 文件 (*.csv)"));
     if (path.isEmpty())
     {
+        m_recordedFrames.clear();
+        updateControls();
+        updateStatus(QStringLiteral("记录已丢弃"));
         return;
     }
-    m_recordFile.setFileName(path);
-    if (!m_recordFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+    QString error;
+    if (!TelemetryProtocol::saveCsv(path, m_recordedFrames, &error))
     {
-        QMessageBox::warning(this, QStringLiteral("记录失败"), m_recordFile.errorString());
-        return;
+        QMessageBox::warning(this, QStringLiteral("保存记录失败"), error);
+        updateStatus(QStringLiteral("保存失败，记录已丢弃"));
     }
-    QTextStream stream(&m_recordFile);
-    stream << TelemetryProtocol::csvHeader() << Qt::endl;
-    m_recordedCount = 0;
-    m_recordButton->setText(QStringLiteral("停止记录"));
-    updateStatus(QStringLiteral("正在记录：%1").arg(path));
-}
-
-void MainWindow::stopRecording()
-{
-    if (!m_recordFile.isOpen())
+    else
     {
-        return;
+        updateStatus(QStringLiteral("记录已保存：%1，共 %2 帧")
+                         .arg(path)
+                         .arg(m_recordedFrames.size()));
     }
-    m_recordFile.flush();
-    m_recordFile.close();
-    m_recordButton->setText(QStringLiteral("开始记录"));
-    updateStatus(QStringLiteral("记录已保存，共 %1 帧").arg(m_recordedCount));
+    m_recordedFrames.clear();
+    updateControls();
 }
 
 void MainWindow::showFrame(const TelemetryFrame& frame)
 {
     for (int index = 0; index < 3; ++index)
     {
-        m_cameraViews[index]->setSample(frame.cameras[index]);
-        const CameraSample& camera = frame.cameras[index];
-        m_cameraInfoLabels[index]->setText(QStringLiteral("B0:%1  B1:%2  CAR:%3")
-                                                .arg(camera.beacons[0].valid ? QStringLiteral("有效") : QStringLiteral("无"))
-                                                .arg(camera.beacons[1].valid ? QStringLiteral("有效") : QStringLiteral("无"))
-                                                .arg(camera.carLamp.valid ? QStringLiteral("有效") : QStringLiteral("无")));
+        m_cameraViews[index]->setFrame(frame, index, frame.markerActive);
     }
-    m_flightInfoLabel->setText(QStringLiteral("时间戳 %1 ms | Pitch %2°  Roll %3°  Yaw %4° | Sync %5 ms | I38=%6")
+    m_flightInfoLabel->setText(QStringLiteral("时间戳 %1 ms | 高度 %2 mm | Roll %3°  Pitch %4°  Yaw %5°")
                                    .arg(frame.timestampMs, 0, 'f', 1)
-                                   .arg(frame.pitch, 0, 'f', 2)
-                                   .arg(frame.roll, 0, 'f', 2)
-                                   .arg(frame.yaw, 0, 'f', 2)
-                                   .arg(frame.syncTimestampMs, 0, 'f', 1)
-                                   .arg(frame.reserved, 0, 'f', 2));
-    m_motionInfoLabel->setText(QStringLiteral("车端前向 %1 m/s | 车端 Yaw %2° | 规划前进 %3 m/s | 规划横移 %4 m/s")
-                                   .arg(frame.carForwardVelocity, 0, 'f', 3)
-                                   .arg(frame.carYaw, 0, 'f', 2)
-                                   .arg(frame.plannedForwardVelocity, 0, 'f', 3)
-                                   .arg(frame.plannedStrafeVelocity, 0, 'f', 3));
+                                   .arg(frame.aircraftHeightMm, 0, 'f', 1)
+                                   .arg(frame.aircraftRollDeg, 0, 'f', 2)
+                                   .arg(frame.aircraftPitchDeg, 0, 'f', 2)
+                                   .arg(frame.aircraftYawDeg, 0, 'f', 2));
+    m_motionInfoLabel->setText(QStringLiteral("车 yaw %1° | 实际 right X %2 / forward Y %3 m/s | 目标 right X %4 / forward Y %5 m/s")
+                                   .arg(frame.carYawDeg, 0, 'f', 2)
+                                   .arg(frame.carActualVelocityX, 0, 'f', 3)
+                                   .arg(frame.carActualVelocityY, 0, 'f', 3)
+                                   .arg(frame.carTargetVelocityX, 0, 'f', 3)
+                                   .arg(frame.carTargetVelocityY, 0, 'f', 3));
 }
 
 void MainWindow::setReplayIndex(int index)
@@ -382,6 +448,12 @@ void MainWindow::setReplayIndex(int index)
         m_timeline->setValue(m_replayIndex);
     }
     showFrame(m_replayFrames[m_replayIndex]);
+    m_centerWindow->setReplayFrame(m_replayFrames[m_replayIndex],
+                                   m_replayIndex,
+                                   m_replayFrames.size());
+    m_modelWindow->setReplayFrame(m_replayFrames[m_replayIndex],
+                                  m_replayIndex,
+                                  m_replayFrames.size());
     updateControls();
 }
 
@@ -453,8 +525,8 @@ void MainWindow::updateControls()
     const bool listening = m_udpSocket->state() == QAbstractSocket::BoundState;
     const bool hasReplay = !m_replayFrames.isEmpty();
     m_listenButton->setEnabled(m_liveMode || listening);
-    m_recordButton->setEnabled(listening || m_recordFile.isOpen());
-    m_importButton->setEnabled(!m_recordFile.isOpen());
+    m_recordButton->setEnabled(listening || m_recording);
+    m_importButton->setEnabled(!m_recording);
     m_playButton->setEnabled(!m_liveMode && hasReplay);
     m_previousButton->setEnabled(!m_liveMode && hasReplay);
     m_nextButton->setEnabled(!m_liveMode && hasReplay);
@@ -469,10 +541,16 @@ void MainWindow::updateStatus(const QString& message)
     {
         status = m_liveMode ? QStringLiteral("UDP 实时") : QStringLiteral("CSV 回放");
     }
-    status += QStringLiteral(" | 包 %1 | 错 %2 | 记录 %3")
+    status += QStringLiteral(" | 包 %1 | 错 %2")
                   .arg(m_packetCount)
-                  .arg(m_errorCount)
-                  .arg(m_recordedCount);
+                  .arg(m_errorCount);
+    if (m_recording)
+    {
+        status += QStringLiteral(" | ● REC %1 | %2 帧")
+                      .arg(QTime::fromMSecsSinceStartOfDay(m_recordingElapsed.elapsed())
+                               .toString(QStringLiteral("mm:ss.zzz")))
+                      .arg(m_recordedFrames.size());
+    }
     if (!m_lastSender.isEmpty())
     {
         status += QStringLiteral(" | 来源 %1").arg(m_lastSender);
@@ -482,10 +560,12 @@ void MainWindow::updateStatus(const QString& message)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (m_recordFile.isOpen())
+    if (m_recording)
     {
-        stopRecording();
+        stopAndSaveRecording();
     }
     m_udpSocket->close();
+    m_centerWindow->hide();
+    m_modelWindow->hide();
     QMainWindow::closeEvent(event);
 }

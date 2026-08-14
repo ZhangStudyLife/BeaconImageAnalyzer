@@ -16,6 +16,10 @@ add_executable(JustFloatMonitor WIN32
     src/MainWindow.cpp
     src/CameraView.h
     src/CameraView.cpp
+    src/CoordinateView.h
+    src/CoordinateView.cpp
+    src/CoordinateWindow.h
+    src/CoordinateWindow.cpp
     src/TelemetryProtocol.h
     src/TelemetryProtocol.cpp
 )
