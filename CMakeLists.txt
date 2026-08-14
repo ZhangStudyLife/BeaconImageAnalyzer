@@ -22,6 +22,8 @@ add_executable(JustFloatMonitor WIN32
     src/CoordinateWindow.cpp
     src/TelemetryProtocol.h
     src/TelemetryProtocol.cpp
+    src/CarPlan3Model.h
+    src/CarPlan3Model.cpp
 )
 
 target_link_libraries(JustFloatMonitor PRIVATE
@@ -36,6 +38,8 @@ if (BUILD_TESTING)
         tests/TelemetryProtocolTests.cpp
         src/TelemetryProtocol.h
         src/TelemetryProtocol.cpp
+        src/CarPlan3Model.h
+        src/CarPlan3Model.cpp
     )
 
     target_include_directories(JustFloatMonitorTests PRIVATE src)

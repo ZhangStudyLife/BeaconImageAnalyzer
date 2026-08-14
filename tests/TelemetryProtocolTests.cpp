@@ -1,4 +1,5 @@
 #include "TelemetryProtocol.h"
+#include "CarPlan3Model.h"
 
 #include <QFile>
 #include <QTemporaryDir>
@@ -51,10 +52,10 @@ Values realisticValues(int selectedTarget = 1)
     return values;
 }
 
-QByteArray binaryFrame(const Values& values, bool withTail)
+QByteArray binaryFrame(const Values& values, int channelCount, bool withTail)
 {
-    QByteArray data(TelemetryProtocol::PayloadBytes, Qt::Uninitialized);
-    for (int index = 0; index < TelemetryProtocol::ChannelCount; ++index)
+    QByteArray data(channelCount * static_cast<int>(sizeof(float)), Qt::Uninitialized);
+    for (int index = 0; index < channelCount; ++index)
     {
         quint32 bits = 0;
         std::memcpy(&bits, &values[index], sizeof(float));
@@ -65,6 +66,24 @@ QByteArray binaryFrame(const Values& values, bool withTail)
         data.append(QByteArray::fromHex("0000807f"));
     }
     return data;
+}
+
+Values carPlan3Values()
+{
+    Values values{};
+    values.fill(-999.0f);
+    values[0] = 5000.0f;
+    const Values legacy = realisticValues();
+    std::copy(legacy.begin() + 1, legacy.begin() + 31, values.begin() + 1);
+    values[31] = 1.0f; values[32] = 2.0f; values[33] = 18.0f; values[34] = 3.0f;
+    values[35] = -0.5f; values[36] = 1.2f; values[37] = 12.0f; values[38] = 7.0f;
+    values[47] = 0.1f; values[48] = -0.2f; values[49] = 35.0f; values[50] = 6.0f;
+    values[51] = 1.0f;
+    values[52] = 90.0f; values[53] = 0.2f; values[54] = 1.1f;
+    values[55] = -0.3f; values[56] = 1.6f;
+    values[57] = 1200.0f; values[58] = -2.0f; values[59] = 4.0f; values[60] = 178.0f;
+    values[61] = 1.0f; values[62] = 1.0f; values[63] = 3.0f;
+    return values;
 }
 }
 
@@ -81,13 +100,15 @@ private slots:
     void invalidSentinels();
     void csvRoundTrip();
     void rejectsWrongCsvColumnCount();
+    void parsesCarPlan3Packet();
+    void centerAnchoredMergeAt40550();
 };
 
 void TelemetryProtocolTests::parsesPacketWithoutTail()
 {
     TelemetryFrame frame;
     QString error;
-    QVERIFY2(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(), false), &frame, &error),
+    QVERIFY2(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(), TelemetryProtocol::LegacyChannelCount, false), &frame, &error),
              qPrintable(error));
     QCOMPARE(frame.channels[0], 123456.0f);
     QCOMPARE(frame.channels[69], 1.0f);
@@ -99,7 +120,7 @@ void TelemetryProtocolTests::parsesPacketWithTail()
 {
     TelemetryFrame frame;
     QString error;
-    QVERIFY2(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(), true), &frame, &error),
+    QVERIFY2(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(), TelemetryProtocol::LegacyChannelCount, true), &frame, &error),
              qPrintable(error));
     QCOMPARE(frame.timestampMs, 123456.0f);
 }
@@ -111,7 +132,7 @@ void TelemetryProtocolTests::rejectsOldPacketsAndBadTail()
     QVERIFY(!TelemetryProtocol::parseDatagram(QByteArray(172, '\0'), &frame, &error));
     QVERIFY(!TelemetryProtocol::parseDatagram(QByteArray(176, '\0'), &frame, &error));
 
-    QByteArray invalidTail = binaryFrame(realisticValues(), false);
+    QByteArray invalidTail = binaryFrame(realisticValues(), TelemetryProtocol::LegacyChannelCount, false);
     invalidTail.append(QByteArray::fromHex("01020304"));
     QVERIFY(!TelemetryProtocol::parseDatagram(invalidTail, &frame, &error));
     QVERIFY(error.contains(QStringLiteral("尾标")));
@@ -121,7 +142,7 @@ void TelemetryProtocolTests::mapsSemanticFields()
 {
     TelemetryFrame frame;
     QString error;
-    QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(), false), &frame, &error));
+    QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(), TelemetryProtocol::LegacyChannelCount, false), &frame, &error));
 
     QCOMPARE(frame.cameras[0].beacons[0].x, -31.5f);
     QCOMPARE(frame.cameras[1].beacons[1].area, 12.0f);
@@ -158,7 +179,7 @@ void TelemetryProtocolTests::selectedTargetValues()
     {
         TelemetryFrame frame;
         QString error;
-        QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(selected), false),
+        QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(realisticValues(selected), TelemetryProtocol::LegacyChannelCount, false),
                                                   &frame,
                                                   &error));
         QCOMPARE(frame.selectedTargetId, selected);
@@ -178,7 +199,7 @@ void TelemetryProtocolTests::invalidSentinels()
 
     TelemetryFrame frame;
     QString error;
-    QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(values, false), &frame, &error));
+    QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(values, TelemetryProtocol::LegacyChannelCount, false), &frame, &error));
     QVERIFY(!frame.cameras[0].beacons[0].valid);
     QVERIFY(!frame.centerBeacons[0].valid);
     QVERIFY(!frame.centerCarLamp.valid);
@@ -194,7 +215,7 @@ void TelemetryProtocolTests::csvRoundTrip()
     values[1] = std::numeric_limits<float>::quiet_NaN();
     TelemetryFrame original;
     QString error;
-    QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(values, false), &original, &error));
+    QVERIFY(TelemetryProtocol::parseDatagram(binaryFrame(values, TelemetryProtocol::LegacyChannelCount, false), &original, &error));
 
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -213,7 +234,7 @@ void TelemetryProtocolTests::csvRoundTrip()
     }
     QVERIFY(std::isnan(frames[0].channels[1]));
     QVERIFY(!frames[0].cameras[0].beacons[0].valid);
-    QCOMPARE(frames[0].selectedTargetId, 2);
+    QVERIFY(!frames[0].carPlan3Direct);
 }
 
 void TelemetryProtocolTests::rejectsWrongCsvColumnCount()
@@ -229,7 +250,59 @@ void TelemetryProtocolTests::rejectsWrongCsvColumnCount()
     QVector<TelemetryFrame> frames;
     QString error;
     QVERIFY(!TelemetryProtocol::loadCsv(path, &frames, &error));
-    QVERIFY(error.contains(QStringLiteral("应有 71 列")));
+    QVERIFY(error.contains(QStringLiteral("64列或71列")));
+}
+
+void TelemetryProtocolTests::parsesCarPlan3Packet()
+{
+    TelemetryFrame frame;
+    QString error;
+    const Values values = carPlan3Values();
+    QVERIFY2(TelemetryProtocol::parseDatagram(
+                 binaryFrame(values, TelemetryProtocol::CarPlan3ChannelCount, true),
+                 &frame, &error), qPrintable(error));
+    QCOMPARE(frame.channelCount, TelemetryProtocol::CarPlan3ChannelCount);
+    QVERIFY(frame.carPlan3Direct);
+    QVERIFY(frame.carPlan3Valid);
+    QCOMPARE(frame.globalBeacons[0].cameraMask, 3);
+    QCOMPARE(frame.globalBeacons[1].cameraMask, 7);
+    QCOMPARE(frame.globalCarLamp.cameraMask, 6);
+    QCOMPARE(frame.selectedTargetId, 1);
+}
+
+void TelemetryProtocolTests::centerAnchoredMergeAt40550()
+{
+    Values values{};
+    values.fill(-999.0f);
+    values[0] = 40550.0f;
+    const float raw[30] = {
+        -34.9425049f,16.927494f,18.0f,-87.0f,45.0f,11.0f,-28.5042725f,58.7020836f,-62.589035f,11.3632021f,
+        -38.834301f,-40.2640495f,18.0f,-81.4519882f,18.6661682f,9.0f,-29.9230728f,2.38461685f,-74.5100861f,17.5637608f,
+        70.0f,1.0f,5.0f,-999.0f,-999.0f,0.0f,22.8333359f,46.9814835f,-80.0256958f,15.6805573f
+    };
+    std::copy(std::begin(raw), std::end(raw), values.begin() + 1);
+    values[60] = -91.2687607f;
+    values[61] = 0.0f; values[62] = 2.07099819f;
+    values[63] = -1.49382651f; values[64] = 1.87842548f;
+    values[65] = 1179.75647f; values[66] = -4.54139614f;
+    values[67] = 24.1431255f; values[68] = -5.89954376f;
+
+    TelemetryFrame frame;
+    QString error;
+    QVERIFY2(TelemetryProtocol::parseDatagram(
+                 binaryFrame(values, TelemetryProtocol::LegacyChannelCount, false),
+                 &frame, &error), qPrintable(error));
+    CarPlan3Model model;
+    model.process(&frame);
+
+    QVector<int> masks;
+    for (const GlobalBeaconSample& beacon : frame.globalBeacons)
+    {
+        if (beacon.valid) masks.push_back(beacon.cameraMask);
+    }
+    QCOMPARE(masks.size(), 2);
+    QVERIFY(masks.contains(3));
+    QVERIFY(masks.contains(7));
 }
 
 QTEST_MAIN(TelemetryProtocolTests)

@@ -24,6 +24,24 @@ struct FusedBeaconSample
     bool valid = false;
 };
 
+struct GlobalBeaconSample
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float area = 0.0f;
+    int cameraMask = 0;
+    bool valid = false;
+};
+
+struct GlobalLampSample
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float angleDeg = 0.0f;
+    int cameraMask = 0;
+    bool valid = false;
+};
+
 struct CarLampSample
 {
     float cx = 0.0f;
@@ -42,12 +60,18 @@ struct CameraSample
 struct TelemetryFrame
 {
     std::array<float, 71> channels{};
+    int channelCount = 71;
     float timestampMs = 0.0f;
     std::array<CameraSample, 3> cameras;
     std::array<FusedBeaconSample, 3> centerBeacons;
     CarLampSample centerCarLamp;
     std::array<BeaconSample, 3> modelBeacons;
     CarLampSample modelCarLamp;
+    std::array<std::array<BeaconSample, 2>, 3> globalCandidates;
+    std::array<GlobalBeaconSample, 4> globalBeacons;
+    GlobalLampSample globalCarLamp;
+    bool carPlan3Valid = false;
+    bool carPlan3Direct = false;
     float carYawDeg = 0.0f;
     float carActualVelocityX = 0.0f;
     float carActualVelocityY = 0.0f;
@@ -64,14 +88,17 @@ struct TelemetryFrame
 class TelemetryProtocol
 {
 public:
-    static constexpr int ChannelCount = 71;
-    static constexpr int PayloadBytes = ChannelCount * static_cast<int>(sizeof(float));
+    static constexpr int LegacyChannelCount = 71;
+    static constexpr int CarPlan3ChannelCount = 64;
+    static constexpr int ChannelCount = LegacyChannelCount;
+    static constexpr int LegacyPayloadBytes = LegacyChannelCount * static_cast<int>(sizeof(float));
+    static constexpr int CarPlan3PayloadBytes = CarPlan3ChannelCount * static_cast<int>(sizeof(float));
     static constexpr int TailBytes = 4;
 
     static bool parseDatagram(const QByteArray& datagram,
                               TelemetryFrame* frame,
                               QString* errorMessage = nullptr);
-    static QString csvHeader();
+    static QString csvHeader(int channelCount = LegacyChannelCount);
     static QString csvRow(const TelemetryFrame& frame);
     static bool saveCsv(const QString& path,
                         const QVector<TelemetryFrame>& frames,
@@ -82,7 +109,8 @@ public:
     static double playbackTimestampMs(const TelemetryFrame& frame);
 
 private:
-    static bool makeFrame(const std::array<float, ChannelCount>& values,
+    static bool makeFrame(const std::array<float, LegacyChannelCount>& values,
+                          int channelCount,
                           TelemetryFrame* frame,
                           QString* errorMessage);
 };

@@ -17,7 +17,8 @@ public:
     enum class Mode
     {
         CenterMapped,
-        CameraModel
+        CameraModel,
+        CarPlan3Global
     };
 
     explicit CoordinateView(Mode mode, QWidget* parent = nullptr);
@@ -38,7 +39,8 @@ private:
     enum class HitType
     {
         Beacon,
-        CarLamp
+        CarLamp,
+        Candidate
     };
 
     struct HitTarget
@@ -47,6 +49,7 @@ private:
         QPointF anchor;
         HitType type = HitType::Beacon;
         int slot = -1;
+        int camera = -1;
         bool edgeIndicator = false;
     };
 
@@ -65,6 +68,12 @@ private:
                     float area,
                     bool selected);
     void drawLamp(QPainter* painter, const QRectF& canvas, const CarLampSample& lamp);
+    void drawGlobalCandidate(QPainter* painter,
+                             const QRectF& canvas,
+                             int camera,
+                             int slot,
+                             const BeaconSample& beacon);
+    void drawGlobalLamp(QPainter* painter, const QRectF& canvas);
     void drawVelocityArrow(QPainter* painter,
                            const QRectF& canvas,
                            const QPointF& origin,

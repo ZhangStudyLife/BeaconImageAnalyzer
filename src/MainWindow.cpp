@@ -40,7 +40,8 @@ MainWindow::MainWindow(QWidget* parent)
       m_recordingTimer(new QTimer(this)),
       m_uiTimer(new QTimer(this)),
       m_centerWindow(new CoordinateWindow(CoordinateView::Mode::CenterMapped, this)),
-      m_modelWindow(new CoordinateWindow(CoordinateView::Mode::CameraModel, this))
+      m_modelWindow(new CoordinateWindow(CoordinateView::Mode::CameraModel, this)),
+      m_globalWindow(new CoordinateWindow(CoordinateView::Mode::CarPlan3Global, this))
 {
     setWindowTitle(QStringLiteral("JustFloat 三摄接收与回放"));
     resize(1420, 900);
@@ -85,6 +86,11 @@ MainWindow::MainWindow(QWidget* parent)
         m_modelWindow->raise();
         m_modelWindow->activateWindow();
     });
+    connect(m_globalWindowButton, &QPushButton::clicked, this, [this]() {
+        m_globalWindow->show();
+        m_globalWindow->raise();
+        m_globalWindow->activateWindow();
+    });
     connect(m_importButton, &QPushButton::clicked, this, &MainWindow::importCsv);
     connect(m_playButton, &QPushButton::clicked, this, &MainWindow::togglePlayback);
     connect(m_previousButton, &QPushButton::clicked, this, [this]() { setReplayIndex(m_replayIndex - 1); });
@@ -117,6 +123,7 @@ void MainWindow::buildUi()
     m_recordButton = new QPushButton(QStringLiteral("开始记录"), this);
     m_centerWindowButton = new QPushButton(QStringLiteral("Center 坐标窗口"), this);
     m_modelWindowButton = new QPushButton(QStringLiteral("解耦坐标窗口"), this);
+    m_globalWindowButton = new QPushButton(QStringLiteral("CarPlan3 全局窗口"), this);
     controls->addWidget(m_modeCombo);
     controls->addWidget(m_importButton);
     controls->addWidget(new QLabel(QStringLiteral("本机 IP"), this));
@@ -127,6 +134,7 @@ void MainWindow::buildUi()
     controls->addWidget(m_recordButton);
     controls->addWidget(m_centerWindowButton);
     controls->addWidget(m_modelWindowButton);
+    controls->addWidget(m_globalWindowButton);
     controls->addStretch(1);
     root->addLayout(controls);
 
@@ -261,9 +269,11 @@ void MainWindow::startListening()
     m_errorCount = 0;
     m_lastSender.clear();
     m_hasPendingFrame = false;
+    m_liveCarPlan3.reset();
     m_listenButton->setText(QStringLiteral("停止监听"));
     m_centerWindow->setUdpState(true);
     m_modelWindow->setUdpState(true);
+    m_globalWindow->setUdpState(true);
     updateStatus(QStringLiteral("UDP 监听中：%1:%2")
                      .arg(m_addressCombo->currentText())
                      .arg(m_portSpin->value()));
@@ -281,6 +291,7 @@ void MainWindow::stopListening()
     m_listenButton->setText(QStringLiteral("开始监听"));
     m_centerWindow->setUdpState(false);
     m_modelWindow->setUdpState(false);
+    m_globalWindow->setUdpState(false);
     updateStatus(QStringLiteral("UDP 已停止"));
     updateControls();
 }
@@ -297,6 +308,7 @@ void MainWindow::readPendingDatagrams()
             ++m_errorCount;
             continue;
         }
+        m_liveCarPlan3.process(&frame);
         ++m_packetCount;
         m_lastSender = QStringLiteral("%1:%2")
                            .arg(datagram.senderAddress().toString())
@@ -319,6 +331,7 @@ void MainWindow::flushLiveFrame()
         showFrame(frame);
         m_centerWindow->setLiveFrame(frame, m_packetCount, m_lastSender);
         m_modelWindow->setLiveFrame(frame, m_packetCount, m_lastSender);
+        m_globalWindow->setLiveFrame(frame, m_packetCount, m_lastSender);
     }
     if (m_liveMode && m_udpSocket->state() == QAbstractSocket::BoundState)
     {
@@ -466,6 +479,9 @@ void MainWindow::setReplayIndex(int index)
     m_modelWindow->setReplayFrame(m_replayFrames[m_replayIndex],
                                   m_replayIndex,
                                   m_replayFrames.size());
+    m_globalWindow->setReplayFrame(m_replayFrames[m_replayIndex],
+                                   m_replayIndex,
+                                   m_replayFrames.size());
     updateControls();
 }
 

@@ -31,6 +31,7 @@ const QColor ActualVelocityColor(80, 220, 255);
 const QColor TargetVelocityColor(255, 170, 70);
 const QColor ProjectionCenterColor(110, 255, 160);
 constexpr qreal VelocityScale = 35.0;
+const QColor CameraColors[3] = {QColor(80, 180, 255), QColor(100, 235, 130), QColor(255, 215, 80)};
 
 QPointF cameraModelPoint(const QPointF& point, float rollDeg, float pitchDeg)
 {
@@ -49,7 +50,9 @@ CoordinateView::CoordinateView(Mode mode, QWidget* parent)
       m_mode(mode),
       m_defaultView(mode == Mode::CenterMapped
                         ? QRectF(-180.0, -120.0, 360.0, 240.0)
-                        : QRectF(-600.0, -250.0, 900.0, 650.0)),
+                        : (mode == Mode::CameraModel
+                               ? QRectF(-600.0, -250.0, 900.0, 650.0)
+                               : QRectF(-3.0, -3.0, 6.0, 6.0))),
       m_view(m_defaultView)
 {
     setMinimumSize(360, 270);
@@ -102,7 +105,31 @@ void CoordinateView::paintEvent(QPaintEvent* event)
         return;
     }
 
-    for (int slot = 0; slot < 3; ++slot)
+    if (m_mode == Mode::CarPlan3Global)
+    {
+        for (int camera = 0; camera < 3; ++camera)
+        {
+            for (int slot = 0; slot < 2; ++slot)
+            {
+                const BeaconSample& candidate = m_frame.globalCandidates[camera][slot];
+                if (candidate.valid)
+                {
+                    drawGlobalCandidate(&painter, canvas, camera, slot, candidate);
+                }
+            }
+        }
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            const GlobalBeaconSample& beacon = m_frame.globalBeacons[slot];
+            if (beacon.valid)
+            {
+                drawBeacon(&painter, canvas, slot, beacon.x, beacon.y, beacon.area,
+                           m_frame.selectedTargetId == slot);
+            }
+        }
+        drawGlobalLamp(&painter, canvas);
+    }
+    else for (int slot = 0; slot < 3; ++slot)
     {
         if (m_mode == Mode::CenterMapped)
         {
@@ -134,9 +161,12 @@ void CoordinateView::paintEvent(QPaintEvent* event)
         }
     }
 
-    drawLamp(&painter,
-             canvas,
-             m_mode == Mode::CenterMapped ? m_frame.centerCarLamp : m_frame.modelCarLamp);
+    if (m_mode != Mode::CarPlan3Global)
+    {
+        drawLamp(&painter,
+                 canvas,
+                 m_mode == Mode::CenterMapped ? m_frame.centerCarLamp : m_frame.modelCarLamp);
+    }
     drawProjectionCenter(&painter, canvas);
 
     if (m_frame.markerActive)
@@ -262,7 +292,7 @@ QPointF CoordinateView::worldToScreen(const QPointF& point, const QRectF& canvas
 {
     qreal nx = (point.x() - m_view.left()) / m_view.width();
     qreal ny = (point.y() - m_view.top()) / m_view.height();
-    if (m_mode == Mode::CameraModel)
+    if (m_mode != Mode::CenterMapped)
     {
         ny = 1.0 - ny;
     }
@@ -274,7 +304,7 @@ QPointF CoordinateView::screenToWorld(const QPointF& point, const QRectF& canvas
 {
     qreal nx = (point.x() - canvas.left()) / canvas.width();
     qreal ny = (point.y() - canvas.top()) / canvas.height();
-    if (m_mode == Mode::CameraModel)
+    if (m_mode != Mode::CenterMapped)
     {
         ny = 1.0 - ny;
     }
@@ -325,8 +355,10 @@ void CoordinateView::drawProjectionCenter(QPainter* painter, const QRectF& canva
     {
         return;
     }
-    QPointF point(ProjectionCenterXBias + ProjectionCenterXRollK * m_frame.aircraftRollDeg,
-                  ProjectionCenterYBias + ProjectionCenterYPitchK * m_frame.aircraftPitchDeg);
+    QPointF point = m_mode == Mode::CarPlan3Global
+                        ? QPointF(0.0, 0.0)
+                        : QPointF(ProjectionCenterXBias + ProjectionCenterXRollK * m_frame.aircraftRollDeg,
+                                  ProjectionCenterYBias + ProjectionCenterYPitchK * m_frame.aircraftPitchDeg);
     if (m_mode == Mode::CameraModel)
     {
         point = cameraModelPoint(point, m_frame.aircraftRollDeg, m_frame.aircraftPitchDeg);
@@ -361,9 +393,9 @@ void CoordinateView::drawBeacon(QPainter* painter,
 
     const qreal scale = std::min(canvas.width() / m_view.width(),
                                  canvas.height() / m_view.height());
-    const qreal radius = std::clamp(std::sqrt(std::max(0.0f, area) / Pi) * scale,
-                                    4.0,
-                                    30.0);
+    const qreal radius = m_mode == Mode::CarPlan3Global
+                             ? std::clamp(std::sqrt(std::max(0.0f, area) / Pi) * 0.8, 4.0, 18.0)
+                             : std::clamp(std::sqrt(std::max(0.0f, area) / Pi) * scale, 4.0, 30.0);
     painter->save();
     painter->setClipRect(canvas);
     painter->setPen(QPen(Qt::white, 1));
@@ -386,7 +418,76 @@ void CoordinateView::drawBeacon(QPainter* painter,
                             projected,
                             HitType::Beacon,
                             slot,
+                            -1,
                             false});
+}
+
+void CoordinateView::drawGlobalCandidate(QPainter* painter,
+                                         const QRectF& canvas,
+                                         int camera,
+                                         int slot,
+                                         const BeaconSample& beacon)
+{
+    const QPointF projected = worldToScreen(QPointF(beacon.x, beacon.y), canvas);
+    if (!isInsideCanvas(projected, canvas))
+    {
+        drawEdgeIndicator(painter, canvas, projected, CameraColors[camera], HitType::Candidate,
+                          camera * 2 + slot);
+        return;
+    }
+    painter->save();
+    painter->setClipRect(canvas);
+    painter->setPen(QPen(CameraColors[camera], 2));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawEllipse(projected, 5.0, 5.0);
+    painter->restore();
+    m_hitTargets.push_back({QRectF(projected - QPointF(HitRadius, HitRadius),
+                                   QSizeF(HitRadius * 2.0, HitRadius * 2.0)),
+                            projected, HitType::Candidate, slot, camera, false});
+}
+
+void CoordinateView::drawGlobalLamp(QPainter* painter, const QRectF& canvas)
+{
+    const GlobalLampSample& lamp = m_frame.globalCarLamp;
+    if (!lamp.valid)
+    {
+        return;
+    }
+    const QPointF center(lamp.x, lamp.y);
+    const QPointF projected = worldToScreen(center, canvas);
+    if (!isInsideCanvas(projected, canvas))
+    {
+        drawEdgeIndicator(painter, canvas, projected, LampColor, HitType::CarLamp, -1);
+        return;
+    }
+    const double radians = qDegreesToRadians(static_cast<double>(lamp.angleDeg));
+    double rightX = std::cos(radians);
+    double rightY = std::sin(radians);
+    if (std::cos(qDegreesToRadians(static_cast<double>(lamp.angleDeg - m_frame.carYawDeg - 90.0f))) < 0.0)
+    {
+        rightX = -rightX;
+        rightY = -rightY;
+    }
+    const QPointF right(rightX, rightY);
+    const QPointF forward(rightY, -rightX);
+    const QLineF axis(worldToScreen(center - right * 0.18, canvas),
+                      worldToScreen(center + right * 0.18, canvas));
+    painter->save();
+    painter->setClipRect(canvas);
+    painter->setPen(QPen(LampColor, 5, Qt::SolidLine, Qt::RoundCap));
+    painter->drawLine(axis);
+    painter->setBrush(LampColor);
+    painter->drawEllipse(projected, 6.0, 6.0);
+    drawVelocityArrow(painter, canvas, center,
+                      right * m_frame.carActualVelocityX + forward * m_frame.carActualVelocityY,
+                      ActualVelocityColor);
+    drawVelocityArrow(painter, canvas, center,
+                      right * m_frame.carTargetVelocityX + forward * m_frame.carTargetVelocityY,
+                      TargetVelocityColor);
+    painter->restore();
+    m_hitTargets.push_back({QRectF(axis.p1(), axis.p2()).normalized().adjusted(-HitRadius, -HitRadius,
+                                                                                HitRadius, HitRadius),
+                            projected, HitType::CarLamp, -1, -1, false});
 }
 
 void CoordinateView::drawLamp(QPainter* painter,
@@ -468,6 +569,7 @@ void CoordinateView::drawLamp(QPainter* painter,
                             projected,
                             HitType::CarLamp,
                             -1,
+                            -1,
                             false});
 }
 
@@ -486,7 +588,8 @@ void CoordinateView::drawVelocityArrow(QPainter* painter,
     {
         return;
     }
-    const QPointF endpointWorld = origin + vector * VelocityScale;
+    const QPointF endpointWorld = origin + vector *
+                                  (m_mode == Mode::CarPlan3Global ? 0.5 : VelocityScale);
     const QPointF start = worldToScreen(origin, canvas);
     const QPointF end = worldToScreen(endpointWorld, canvas);
     if (!isInsideCanvas(start, canvas) && !isInsideCanvas(end, canvas))
@@ -546,6 +649,7 @@ void CoordinateView::drawEdgeIndicator(QPainter* painter,
                             edge,
                             type,
                             slot,
+                            type == HitType::Candidate ? slot / 2 : -1,
                             true});
 }
 
@@ -553,7 +657,21 @@ QString CoordinateView::tooltipText(const HitTarget& target) const
 {
     const QString coordinateSystem = m_mode == Mode::CenterMapped
                                          ? QStringLiteral("Center mapped pixel")
-                                         : QStringLiteral("CameraModel");
+                                         : (m_mode == Mode::CameraModel
+                                                ? QStringLiteral("CameraModel")
+                                                : QStringLiteral("CarPlan3 global (m)"));
+    if (target.type == HitType::Candidate)
+    {
+        const int camera = target.edgeIndicator ? target.slot / 2 : target.camera;
+        const int slot = target.edgeIndicator ? target.slot % 2 : target.slot;
+        const BeaconSample& beacon = m_frame.globalCandidates[camera][slot];
+        return QStringLiteral("Type: projected candidate\nCamera: %1\nSlot: %2\nx: %3 m\ny: %4 m\narea: %5")
+            .arg(camera == 0 ? QStringLiteral("Front") : camera == 1 ? QStringLiteral("Center") : QStringLiteral("Back"))
+            .arg(slot)
+            .arg(beacon.x, 0, 'f', 3)
+            .arg(beacon.y, 0, 'f', 3)
+            .arg(beacon.area, 0, 'f', 2);
+    }
     if (target.type == HitType::Beacon)
     {
         const bool selected = m_frame.selectedTargetId == target.slot;
@@ -570,6 +688,16 @@ QString CoordinateView::tooltipText(const HitTarget& target) const
                 .arg(cameraMaskSource(beacon.cameraMask))
                 .arg(selected ? QStringLiteral("yes") : QStringLiteral("no"));
         }
+        if (m_mode == Mode::CarPlan3Global)
+        {
+            const GlobalBeaconSample& beacon = m_frame.globalBeacons[target.slot];
+            return QStringLiteral("Slot: %1\nCoordinate system: %2\nx: %3 m\ny: %4 m\narea: %5\ncamera_mask: %6\nsource: %7\nselected: %8")
+                .arg(target.slot).arg(coordinateSystem)
+                .arg(beacon.x, 0, 'f', 3).arg(beacon.y, 0, 'f', 3)
+                .arg(beacon.area, 0, 'f', 2).arg(beacon.cameraMask)
+                .arg(cameraMaskSource(beacon.cameraMask))
+                .arg(selected ? QStringLiteral("yes") : QStringLiteral("no"));
+        }
         const BeaconSample& beacon = m_frame.modelBeacons[target.slot];
         const int mask = m_frame.centerBeacons[target.slot].cameraMask;
         return QStringLiteral("Slot: %1\nCoordinate system: %2\nmodel x: %3\nmodel y: %4\narea: %5\nvalid: yes\ncamera_mask: %6\nsource: %7\nselected: %8")
@@ -583,6 +711,15 @@ QString CoordinateView::tooltipText(const HitTarget& target) const
             .arg(selected ? QStringLiteral("yes") : QStringLiteral("no"));
     }
 
+    if (m_mode == Mode::CarPlan3Global)
+    {
+        const GlobalLampSample& lamp = m_frame.globalCarLamp;
+        return QStringLiteral("Coordinate system: %1\nType: Car lamp\nx: %2 m\ny: %3 m\nangle: %4 deg\ncamera_mask: %5\nsource: %6\ncyan actual (right, forward): (%7, %8) m/s\norange target (right, forward): (%9, %10) m/s")
+            .arg(coordinateSystem).arg(lamp.x, 0, 'f', 3).arg(lamp.y, 0, 'f', 3)
+            .arg(lamp.angleDeg, 0, 'f', 2).arg(lamp.cameraMask).arg(cameraMaskSource(lamp.cameraMask))
+            .arg(m_frame.carActualVelocityX, 0, 'f', 3).arg(m_frame.carActualVelocityY, 0, 'f', 3)
+            .arg(m_frame.carTargetVelocityX, 0, 'f', 3).arg(m_frame.carTargetVelocityY, 0, 'f', 3);
+    }
     const CarLampSample& lamp = m_mode == Mode::CenterMapped
                                     ? m_frame.centerCarLamp
                                     : m_frame.modelCarLamp;

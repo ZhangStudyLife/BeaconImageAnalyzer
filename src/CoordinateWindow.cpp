@@ -14,7 +14,9 @@ CoordinateWindow::CoordinateWindow(CoordinateView::Mode mode, QWidget* parent)
 {
     const bool centerMode = mode == CoordinateView::Mode::CenterMapped;
     setWindowTitle(centerMode ? QStringLiteral("Center 融合坐标")
-                              : QStringLiteral("CameraModel 相机解耦坐标"));
+                              : (mode == CoordinateView::Mode::CameraModel
+                                     ? QStringLiteral("CameraModel 相机解耦坐标")
+                                     : QStringLiteral("CarPlan3 全局坐标")));
     resize(900, 680);
     setMinimumSize(480, 360);
 
@@ -107,8 +109,13 @@ void CoordinateWindow::updateStatus()
                                : QStringLiteral("UDP 包 %1 | %2")
                                      .arg(m_packetCount)
                                      .arg(m_sender);
-    m_statusLabel->setText(QStringLiteral("%1 | 时间戳 %2 ms | selected_target_id %3")
+    const QString protocol = m_mode == CoordinateView::Mode::CarPlan3Global
+                                 ? (m_frame.carPlan3Direct ? QStringLiteral("固件直传")
+                                                           : QStringLiteral("旧日志重算"))
+                                 : QString();
+    m_statusLabel->setText(QStringLiteral("%1 | 时间戳 %2 ms | selected_target_id %3%4")
                                .arg(source)
                                .arg(m_frame.timestampMs, 0, 'f', 1)
-                               .arg(m_frame.selectedTargetId));
+                               .arg(m_frame.selectedTargetId)
+                               .arg(protocol.isEmpty() ? QString() : QStringLiteral(" | %1").arg(protocol)));
 }

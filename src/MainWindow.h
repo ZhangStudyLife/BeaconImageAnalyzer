@@ -2,6 +2,7 @@
 #define MAIN_WINDOW_H
 
 #include "TelemetryProtocol.h"
+#include "CarPlan3Model.h"
 
 #include <QElapsedTimer>
 #include <QMainWindow>
@@ -65,6 +66,7 @@ private:
     QPushButton* m_recordButton = nullptr;
     QPushButton* m_centerWindowButton = nullptr;
     QPushButton* m_modelWindowButton = nullptr;
+    QPushButton* m_globalWindowButton = nullptr;
     QPushButton* m_importButton = nullptr;
     std::array<CameraView*, 3> m_cameraViews{};
     QPushButton* m_playButton = nullptr;
@@ -79,6 +81,8 @@ private:
     QLabel* m_statusLabel = nullptr;
     CoordinateWindow* m_centerWindow = nullptr;
     CoordinateWindow* m_modelWindow = nullptr;
+    CoordinateWindow* m_globalWindow = nullptr;
+    CarPlan3Model m_liveCarPlan3;
 
     QVector<TelemetryFrame> m_replayFrames;
     QVector<TelemetryFrame> m_recordedFrames;
