@@ -14,6 +14,7 @@ class CoordinateWindow;
 class QCloseEvent;
 class QComboBox;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QSlider;
 class QSpinBox;
@@ -45,6 +46,7 @@ private:
     void stopAndSaveRecording();
     void showFrame(const TelemetryFrame& frame);
     void setReplayIndex(int index);
+    void jumpToTimestamp();
     void togglePlayback();
     void advancePlayback();
     void scheduleNextFrame();
@@ -71,6 +73,7 @@ private:
     QSpinBox* m_frameSpin = nullptr;
     QSlider* m_timeline = nullptr;
     QComboBox* m_speedCombo = nullptr;
+    QLineEdit* m_timestampInput = nullptr;
     QLabel* m_flightInfoLabel = nullptr;
     QLabel* m_motionInfoLabel = nullptr;
     QLabel* m_statusLabel = nullptr;

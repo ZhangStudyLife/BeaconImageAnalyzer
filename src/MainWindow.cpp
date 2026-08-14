@@ -11,6 +11,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QNetworkDatagram>
 #include <QNetworkInterface>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -89,6 +91,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_nextButton, &QPushButton::clicked, this, [this]() { setReplayIndex(m_replayIndex + 1); });
     connect(m_frameSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::setReplayIndex);
     connect(m_timeline, &QSlider::valueChanged, this, &MainWindow::setReplayIndex);
+    connect(m_timestampInput, &QLineEdit::returnPressed, this, &MainWindow::jumpToTimestamp);
     updateControls();
     updateStatus(QStringLiteral("就绪，等待 UDP 或导入 CSV"));
 }
@@ -167,6 +170,15 @@ void MainWindow::buildUi()
     playback->addWidget(m_speedCombo);
     root->addLayout(playback);
 
+    auto* timestampJump = new QHBoxLayout();
+    m_timestampInput = new QLineEdit(this);
+    m_timestampInput->setPlaceholderText(QStringLiteral("123456.0"));
+    m_timestampInput->setMaximumWidth(240);
+    timestampJump->addWidget(new QLabel(QStringLiteral("目标时间戳 (ms)"), this));
+    timestampJump->addWidget(m_timestampInput);
+    timestampJump->addStretch(1);
+    root->addLayout(timestampJump);
+
     auto* infoGroup = new QGroupBox(QStringLiteral("状态"), this);
     auto* infoLayout = new QVBoxLayout(infoGroup);
     m_flightInfoLabel = new QLabel(QStringLiteral("时间戳 -- | 高度 -- | Roll -- Pitch -- Yaw --"), infoGroup);
@@ -183,7 +195,7 @@ void MainWindow::buildUi()
         "QMainWindow{background:#1b1d1f;color:#e8edf0;}"
         "QGroupBox{border:1px solid #596168;border-radius:6px;margin-top:8px;padding-top:8px;}"
         "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;}"
-        "QPushButton,QComboBox,QSpinBox{min-height:28px;background:#292d30;border:1px solid #454b50;border-radius:4px;padding:2px 8px;}"
+        "QPushButton,QComboBox,QSpinBox,QLineEdit{min-height:28px;background:#292d30;border:1px solid #454b50;border-radius:4px;padding:2px 8px;}"
         "QPushButton:hover{background:#343a3f;}"
         "QLabel{color:#dce2e6;}"
     ));
@@ -457,6 +469,48 @@ void MainWindow::setReplayIndex(int index)
     updateControls();
 }
 
+void MainWindow::jumpToTimestamp()
+{
+    bool ok = false;
+    const double targetTimestamp = m_timestampInput->text().trimmed().toDouble(&ok);
+    if (!ok || !std::isfinite(targetTimestamp))
+    {
+        updateStatus(QStringLiteral("请输入有效的目标时间戳"));
+        return;
+    }
+
+    int nearestIndex = -1;
+    double nearestDistance = std::numeric_limits<double>::infinity();
+    for (int index = 0; index < m_replayFrames.size(); ++index)
+    {
+        const double timestamp = TelemetryProtocol::playbackTimestampMs(m_replayFrames[index]);
+        if (!std::isfinite(timestamp))
+        {
+            continue;
+        }
+        const double distance = std::abs(timestamp - targetTimestamp);
+        if (distance < nearestDistance)
+        {
+            nearestDistance = distance;
+            nearestIndex = index;
+        }
+    }
+    if (nearestIndex < 0)
+    {
+        updateStatus(QStringLiteral("CSV 中没有有效时间戳"));
+        return;
+    }
+
+    setReplayIndex(nearestIndex);
+    if (m_playing)
+    {
+        scheduleNextFrame();
+    }
+    updateStatus(QStringLiteral("已跳转到时间戳 %1 ms（第 %2 帧）")
+                     .arg(m_replayFrames[nearestIndex].timestampMs, 0, 'g', 9)
+                     .arg(nearestIndex + 1));
+}
+
 void MainWindow::togglePlayback()
 {
     if (m_liveMode || m_replayFrames.isEmpty())
@@ -532,6 +586,7 @@ void MainWindow::updateControls()
     m_nextButton->setEnabled(!m_liveMode && hasReplay);
     m_frameSpin->setEnabled(!m_liveMode && hasReplay);
     m_timeline->setEnabled(!m_liveMode && hasReplay);
+    m_timestampInput->setEnabled(!m_liveMode && hasReplay);
 }
 
 void MainWindow::updateStatus(const QString& message)
