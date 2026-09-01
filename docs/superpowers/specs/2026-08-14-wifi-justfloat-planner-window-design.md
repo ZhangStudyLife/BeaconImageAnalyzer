@@ -22,7 +22,7 @@ CSV replay also supplies parsed `TelemetryFrame` objects to the same display pat
 
 ## Planner Window
 
-`PlannerDebugWindow` is a separate resizable top-level QWidget. Starting UDP listening automatically shows it. A `è§„åˆ’çª—å£` button reopens it. Closing it hides only that window; UDP and recording continue. Stopping UDP leaves the window available but changes its state to `UDP å·²åœæ­¢` and clears the live presentation. Destroying `MainWindow` closes the planner window.
+`PlannerDebugWindow` is a separate resizable top-level QWidget. Starting UDP listening automatically shows it. A `¹æ»®´°¿Ú` button reopens it. Closing it hides only that window; UDP and recording continue. Stopping UDP leaves the window available but changes its state to `UDP ÒÑÍ£Ö¹` and clears the live presentation. Destroying `MainWindow` closes the planner window.
 
 The layout contains Front, Center, and Back raw camera views, one Center-mapped coordinate view, one CameraModel coordinate view, and a compact state panel.
 
